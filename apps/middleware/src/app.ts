@@ -1,78 +1,43 @@
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import { rateLimit } from 'express-rate-limit';
-import { authRouter } from './routes/auth.routes';
-import { healthRouter } from './routes/health.routes';
-import { errorHandler } from './middleware/error.middleware';
+import rateLimit from 'express-rate-limit';
 import { requestLogger } from './middleware/request-logger.middleware';
-import { notFoundHandler } from './middleware/not-found.middleware';
-import type { ValidatedEnv } from './config/env';
+import { errorMiddleware } from './middleware/error.middleware';
+import { notFoundMiddleware } from './middleware/not-found.middleware';
+import authRoutes from './routes/auth.routes';
+import githubRoutes from './routes/github.routes';
+import projectsRoutes from './routes/projects.routes';
+import healthRoutes from './routes/health.routes';
 
-export function createApp(env: ValidatedEnv): Application {
-  const app = express();
+const app = express();
 
-  // ── Security headers
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'https:'],
-        connectSrc: ["'self'"],
-        frameSrc: ["'none'"],
-        objectSrc: ["'none'"],
-      },
-    },
-    crossOriginEmbedderPolicy: true,
-    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
-  }));
+app.set('trust proxy', 1);
 
-  // ── CORS
-  const allowedOrigins = env.CORS_ORIGINS.split(',').map(o => o.trim());
-  app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS policy: origin ${origin} not allowed`));
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    exposedHeaders: ['X-Request-Id'],
-  }));
+app.use(helmet());
+app.use(cors({
+  origin: (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(','),
+  credentials: true,
+}));
+app.use(express.json());
+app.use(cookieParser(process.env.COOKIE_SECRET));
+app.use(requestLogger);
 
-  // ── Body parsing
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-  app.use(cookieParser(env.COOKIE_SECRET));
+const globalLimiter = rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 900000),
+  max: Number(process.env.RATE_LIMIT_MAX ?? 100),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
 
-  // ── Global rate limiting
-  app.use(rateLimit({
-    windowMs: env.RATE_LIMIT_WINDOW_MS,
-    max: env.RATE_LIMIT_MAX,
-    standardHeaders: 'draft-7',
-    legacyHeaders: false,
-    message: { success: false, error: 'Too many requests, please try again later.' },
-    skip: (req) => req.path === '/health',
-  }));
+app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/auth/github', githubRoutes);
+app.use('/api/projects', projectsRoutes);
 
-  // ── Request logging
-  app.use(requestLogger);
+app.use(notFoundMiddleware);
+app.use(errorMiddleware);
 
-  // ── Routes
-  app.use('/health', healthRouter);
-  app.use('/api/auth', authRouter);
-
-  // ── 404 handler
-  app.use(notFoundHandler);
-
-  // ── Global error handler (must be last)
-  app.use(errorHandler);
-
-  return app;
-}
+export default app;

@@ -1,57 +1,51 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
-class ApiClient {
-  private baseUrl: string;
-
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
-  }
-
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new ApiError(data.error || 'Request failed', res.status, data.code, data.details);
-    }
-
-    return data;
-  }
-
-  async get<T>(path: string, token?: string): Promise<T> {
-    return this.request<T>(path, {
-      method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-  }
-
-  async post<T>(path: string, body: unknown, token?: string): Promise<T> {
-    return this.request<T>(path, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-  }
-}
+const BASE = process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public code?: string,
-    public details?: Array<{ field: string; message: string }>
+    public details: Array<{ field: string; message: string }> = [],
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-export const apiClient = new ApiClient(API_URL);
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { message?: string; errors?: Array<{ field: string; message: string }> };
+    throw new ApiError(body.message ?? 'Request failed', res.status, body.errors ?? []);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>(path, { method: 'GET' }),
+  post: <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+};
+
+export type Project = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description?: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectRepo = {
+  id: string;
+  projectId: string;
+  repoUrl: string;
+  repoName: string;
+  branch: string;
+  createdAt: string;
+};

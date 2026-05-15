@@ -1,63 +1,97 @@
 'use client';
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/auth.context';
-import { Button } from '@/components/ui/button';
+import { api, type Project } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  FolderKanban, Ticket, PlayCircle,
-  ArrowRight, BrainCircuit, Plus
-} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { FolderGit2, GitBranch, Zap, ArrowRight, Loader2 } from 'lucide-react';
+import Link from 'next/link';
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get<{ data: Project[] }>('/api/projects')
+      .then(r => setProjects(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const activeCount = projects.filter(p => p.status === 'active').length;
 
   return (
-    <div className="p-8 animate-fade-in">
-      {/* Header */}
-      <div className="mb-10">
-        <h1 className="text-3xl font-bold mb-1">
-          Good morning, {user?.name?.split(' ')[0]} 👋
-        </h1>
-        <p className="text-muted-foreground">Here&apos;s what&apos;s happening in your workspace.</p>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold">Welcome back, {user?.name?.split(' ')[0]} 👋</h1>
+        <p className="text-muted-foreground mt-1">Here's what's happening across your workspace.</p>
       </div>
 
-      {/* Empty state — first time */}
-      <div className="rounded-xl border border-border/60 border-dashed bg-card/30 p-12 flex flex-col items-center justify-center text-center mb-10">
-        <div className="h-14 w-14 rounded-full bg-aria-950 border border-aria-800 flex items-center justify-center mb-5">
-          <BrainCircuit className="h-7 w-7 text-aria-400" />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Projects</CardTitle>
+            <FolderGit2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+              <>
+                <p className="text-3xl font-bold">{projects.length}</p>
+                <p className="text-xs text-muted-foreground mt-1">{activeCount} active</p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Repositories</CardTitle>
+            <GitBranch className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">—</p>
+            <p className="text-xs text-muted-foreground mt-1">Connect repos to track</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Analysis Jobs</CardTitle>
+            <Zap className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">—</p>
+            <p className="text-xs text-muted-foreground mt-1">Available in Sprint 3</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Recent Projects</h2>
+          <Link href="/projects"><Button variant="ghost" size="sm">View all <ArrowRight className="h-4 w-4 ml-1" /></Button></Link>
         </div>
-        <h2 className="text-xl font-semibold mb-2">Set up your first project</h2>
-        <p className="text-muted-foreground text-sm max-w-md mb-6">
-          Connect a GitHub repository, let ARIA analyse your codebase, and build your AI engineering team.
-          The whole process takes under 5 minutes.
-        </p>
-        <Link href="/projects">
-          <Button variant="aria" className="gap-2">
-            <Plus className="h-4 w-4" /> Create Project
-          </Button>
-        </Link>
-      </div>
-
-      {/* Stats cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-        {[
-          { icon: FolderKanban, label: 'Projects', value: '0', href: '/projects', cta: 'Create project' },
-          { icon: Ticket, label: 'Open Tickets', value: '0', href: '/tickets', cta: 'View tickets' },
-          { icon: PlayCircle, label: 'Active Sessions', value: '0', href: '/sessions', cta: 'Start session' },
-        ].map(({ icon: Icon, label, value, href, cta }) => (
-          <Card key={label} className="border-border/60 bg-card/50 hover:border-aria-800/60 transition-colors group">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
-              <Icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold mb-3">{value}</div>
-              <Link href={href} className="text-xs text-aria-400 hover:text-aria-300 flex items-center gap-1 group-hover:gap-2 transition-all">
-                {cta} <ArrowRight className="h-3 w-3" />
+        {loading ? (
+          <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : projects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 gap-3">
+            <FolderGit2 className="h-10 w-10 text-muted-foreground/40" />
+            <p className="text-muted-foreground text-sm">No projects yet.</p>
+            <Link href="/projects"><Button variant="aria" size="sm"><FolderGit2 className="h-4 w-4 mr-2" />Create First Project</Button></Link>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {projects.slice(0, 6).map(p => (
+              <Link key={p.id} href={`/projects/${p.id}`}>
+                <Card className="hover:border-aria-500/50 transition-colors cursor-pointer">
+                  <CardHeader className="pb-2"><CardTitle className="text-sm">{p.name}</CardTitle></CardHeader>
+                  <CardContent><p className="text-xs text-muted-foreground line-clamp-2">{p.description ?? 'No description'}</p></CardContent>
+                </Card>
               </Link>
-            </CardContent>
-          </Card>
-        ))}
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
