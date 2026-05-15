@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import type { Project, ProjectRepo, AnalysisJob } from '@aria/shared';
 import {
   Github, Loader2, Plus, ArrowLeft, GitBranch,
-  Zap, CheckCircle2, XCircle, Clock, ExternalLink,
+  Zap, CheckCircle2, XCircle, Clock, ExternalLink, AlertCircle,
 } from 'lucide-react';
 
 type ProjectWithRepos = Project & { repos: ProjectRepo[] };
@@ -90,17 +90,17 @@ export default function ProjectDetailPage() {
   const { id }  = useParams<{ id: string }>();
   const router  = useRouter();
 
-  const [project,     setProject]     = useState<ProjectWithRepos | null>(null);
-  const [jobs,        setJobs]        = useState<AnalysisJob[]>([]);
-  const [loadingPage, setLoadingPage] = useState(true);
-  const [showConnect, setShowConnect] = useState(false);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [project,      setProject]      = useState<ProjectWithRepos | null>(null);
+  const [jobs,         setJobs]         = useState<AnalysisJob[]>([]);
+  const [loadingPage,  setLoadingPage]  = useState(true);
+  const [showConnect,  setShowConnect]  = useState(false);
+  const [analyzingId,  setAnalyzingId]  = useState<string | null>(null);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       const [projectRes, jobsRes] = await Promise.all([
         api<{ project: ProjectWithRepos }>(`/projects/${id}`),
-        // GET /analysis/jobs → { jobs: AnalysisJob[] }
         api<{ jobs: AnalysisJob[] }>(`/analysis/jobs`),
       ]);
       setProject(projectRes.project);
@@ -121,13 +121,14 @@ export default function ProjectDetailPage() {
 
   const triggerAnalysis = async (repoId: string) => {
     setAnalyzingId(repoId);
+    setAnalyzeError(null);
     try {
-      // POST → flat AnalysisJob (not wrapped)
       const d = await api<AnalysisJob>(`/projects/${id}/repos/${repoId}/analyze`, { method: 'POST' });
       setJobs(prev => [d, ...prev]);
       router.push(`/projects/${id}/jobs/${d.jobId}`);
-    } catch {
-      // no-op — error visible on server side; button re-enables via finally
+    } catch (e: unknown) {
+      // Show a visible inline error — user needs to know the trigger failed
+      setAnalyzeError(e instanceof ApiError ? e.message : 'Failed to trigger analysis. Please try again.');
     } finally {
       setAnalyzingId(null);
     }
@@ -163,6 +164,14 @@ export default function ProjectDetailPage() {
           <Plus className="h-4 w-4 mr-2" />Connect Repo
         </Button>
       </div>
+
+      {/* Inline error for failed analysis trigger */}
+      {analyzeError && (
+        <div role="alert" className="flex items-center gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {analyzeError}
+        </div>
+      )}
 
       {/* Repositories */}
       <section>

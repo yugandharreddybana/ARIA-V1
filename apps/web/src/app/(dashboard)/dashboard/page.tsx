@@ -15,10 +15,10 @@ import type { Project, AnalysisJob } from '@aria/shared';
 type ProjectWithRepos = Project & { repos: { id: string }[] };
 
 const JOB_STATUS_CFG = {
-  queued:  { label: 'Queued',   color: 'text-blue-400',    bg: 'bg-blue-500/10',    Icon: Clock         },
-  running: { label: 'Running',  color: 'text-amber-400',   bg: 'bg-amber-500/10',   Icon: Loader2       },
-  done:    { label: 'Complete', color: 'text-emerald-400', bg: 'bg-emerald-500/10', Icon: CheckCircle2  },
-  failed:  { label: 'Failed',   color: 'text-destructive', bg: 'bg-destructive/10', Icon: XCircle       },
+  queued:  { label: 'Queued',   color: 'text-blue-400',    bg: 'bg-blue-500/10',    Icon: Clock        },
+  running: { label: 'Running',  color: 'text-amber-400',   bg: 'bg-amber-500/10',   Icon: Loader2      },
+  done:    { label: 'Complete', color: 'text-emerald-400', bg: 'bg-emerald-500/10', Icon: CheckCircle2 },
+  failed:  { label: 'Failed',   color: 'text-destructive', bg: 'bg-destructive/10', Icon: XCircle      },
 } as const;
 
 function StatCard({
@@ -52,14 +52,23 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
+        // Promise.allSettled never throws — check each result individually
         const [pRes, jRes] = await Promise.allSettled([
           api<{ projects: ProjectWithRepos[] }>('/projects'),
           api<{ jobs: AnalysisJob[] }>('/analysis/jobs'),
         ]);
-        if (pRes.status === 'fulfilled') setProjects(pRes.value.projects);
-        if (jRes.status === 'fulfilled') setJobs(jRes.value.jobs);
-      } catch {
-        setError('Failed to load dashboard data');
+
+        if (pRes.status === 'fulfilled') {
+          setProjects(pRes.value.projects);
+        } else {
+          // Projects failing is critical — show error
+          setError('Failed to load projects. Please refresh.');
+        }
+
+        if (jRes.status === 'fulfilled') {
+          setJobs(jRes.value.jobs);
+        }
+        // Jobs failing is non-critical — dashboard still usable without activity feed
       } finally {
         setLoading(false);
       }
@@ -80,17 +89,16 @@ export default function DashboardPage() {
     </div>
   );
 
-  // Derived stats
   const repoCount     = projects.reduce((s, p) => s + (p.repos?.length ?? 0), 0);
   const runningJobs   = jobs.filter(j => j.status === 'running').length;
   const completedJobs = jobs.filter(j => j.status === 'done').length;
-  const recentJobs    = [...jobs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
+  const recentJobs    = [...jobs]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 8);
 
-  // Greeting
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  // ── Full empty state — brand new workspace ───────────────────────────
   if (projects.length === 0) {
     return (
       <div className="p-6 max-w-2xl mx-auto">
@@ -115,7 +123,6 @@ export default function DashboardPage() {
               </Button>
             </Link>
           </div>
-          {/* Steps */}
           <div className="grid grid-cols-3 gap-4 mt-4 w-full max-w-lg text-left">
             {[
               { step: '1', title: 'Create a project', desc: 'Group your repos into a project workspace' },
@@ -136,34 +143,18 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">{greeting}, {user?.name?.split(' ')[0]} 👋</h1>
         <p className="text-sm text-muted-foreground mt-1">Here&apos;s your workspace at a glance</p>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={FolderOpen} label="Projects" value={projects.length}
-          sub="in workspace" href="/projects" iconColor="text-aria-400"
-        />
-        <StatCard
-          icon={Github} label="Repos" value={repoCount}
-          sub="connected" iconColor="text-slate-400"
-        />
-        <StatCard
-          icon={Activity} label="Running Jobs" value={runningJobs}
-          sub={runningJobs > 0 ? 'analysis in progress' : 'all quiet'}
-          iconColor={runningJobs > 0 ? 'text-amber-400' : 'text-muted-foreground'}
-        />
-        <StatCard
-          icon={CheckCircle2} label="Completed" value={completedJobs}
-          sub="analyses done" iconColor="text-emerald-400"
-        />
+        <StatCard icon={FolderOpen}   label="Projects"     value={projects.length} sub="in workspace"                       href="/projects" iconColor="text-aria-400" />
+        <StatCard icon={Github}       label="Repos"        value={repoCount}       sub="connected"                                         iconColor="text-slate-400" />
+        <StatCard icon={Activity}     label="Running Jobs" value={runningJobs}     sub={runningJobs > 0 ? 'analysis in progress' : 'all quiet'} iconColor={runningJobs > 0 ? 'text-amber-400' : 'text-muted-foreground'} />
+        <StatCard icon={CheckCircle2} label="Completed"    value={completedJobs}   sub="analyses done"                                      iconColor="text-emerald-400" />
       </div>
 
-      {/* Recent projects strip */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-semibold">Recent Projects</h2>
@@ -192,7 +183,6 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* Recent activity feed */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-semibold">Recent Analysis Jobs</h2>

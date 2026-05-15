@@ -25,7 +25,6 @@ import {
   RefreshCw, Zap,
 } from 'lucide-react';
 
-// ── Node type colour + icon map
 const NODE_STYLES: Record<string, { bg: string; border: string; text: string }> = {
   file:       { bg: '#1e293b', border: '#3b82f6', text: '#93c5fd' },
   module:     { bg: '#1a2e1a', border: '#22c55e', text: '#86efac' },
@@ -37,7 +36,6 @@ const NODE_STYLES: Record<string, { bg: string; border: string; text: string }> 
   interface:  { bg: '#2e1e1a', border: '#f97316', text: '#fdba74' },
 };
 
-// Code2 replaces the non-existent 'Function' icon from lucide-react
 const NODE_ICONS: Record<string, React.ElementType> = {
   file: FileCode2, module: Box, service: Server, endpoint: Globe,
   db_table: Database, function: Code2, class: LayoutTemplate, interface: Braces,
@@ -57,27 +55,27 @@ function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
       position: { x: (i % cols) * GAP_X, y: Math.floor(i / cols) * GAP_Y },
       data: { label: n.name, raw: n },
       style: {
-        background:  style.bg,
-        border:      `1.5px solid ${style.border}`,
-        color:       style.text,
+        background:   style.bg,
+        border:       `1.5px solid ${style.border}`,
+        color:        style.text,
         borderRadius: 8,
-        padding:     '6px 12px',
-        fontSize:    11,
-        fontFamily:  'monospace',
-        minWidth:    120,
-        maxWidth:    180,
-        cursor:      'pointer',
+        padding:      '6px 12px',
+        fontSize:     11,
+        fontFamily:   'monospace',
+        minWidth:     120,
+        maxWidth:     180,
+        cursor:       'pointer',
       },
     };
   });
 
   const edges: Edge[] = graph.edges.map(e => ({
-    id: e.id,
-    source: e.sourceNodeId,
-    target: e.targetNodeId,
-    label:  e.label ?? e.edgeType,
+    id:       e.id,
+    source:   e.sourceNodeId,
+    target:   e.targetNodeId,
+    label:    e.label ?? e.edgeType,
     animated: e.edgeType === 'calls' || e.edgeType === 'triggers',
-    style: { stroke: '#475569', strokeWidth: 1.2 },
+    style:    { stroke: '#475569', strokeWidth: 1.2 },
     labelStyle: { fill: '#64748b', fontSize: 9 },
   }));
 
@@ -180,8 +178,9 @@ export default function GraphPage() {
   const isEmpty = !loading && (!graph || graph.meta.status === 'empty' || graph.nodes.length === 0);
 
   return (
-    // flex-1 + min-h-0 ensures React Flow has a real measured height inside the dashboard layout
-    <div className="flex flex-col flex-1 min-h-0" style={{ height: 'calc(100vh - 64px)' }}>
+    // h-full fills the <main> which is already min-h-screen — no manual offset needed
+    // The sidebar layout has no top navbar; subtracting 64px was wrong and cut the canvas short
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border/50 bg-card/30 shrink-0">
         <div className="flex items-center gap-3">
@@ -212,7 +211,7 @@ export default function GraphPage() {
         </div>
       </div>
 
-      {/* Canvas body */}
+      {/* Canvas body — flex-1 min-h-0 gives React Flow a real measured height */}
       <div className="flex-1 relative min-h-0">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/60">
