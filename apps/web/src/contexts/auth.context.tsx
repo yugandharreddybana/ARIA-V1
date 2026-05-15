@@ -6,6 +6,7 @@ import type { PublicUser, AuthResponse } from '@aria/shared';
 interface AuthContextValue {
   user: PublicUser | null;
   isLoading: boolean;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -23,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadUser = useCallback(async () => {
-    const token = localStorage.getItem('aria_token');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('aria_token') : null;
     if (!token) { setIsLoading(false); return; }
     try {
       const data = await api<{ user: PublicUser }>('/auth/me');
@@ -56,7 +57,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, setToken }}>
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
+      isAuthenticated: !!user,
+      login,
+      signup,
+      logout,
+      setToken,
+    }}>
       {children}
     </AuthContext.Provider>
   );

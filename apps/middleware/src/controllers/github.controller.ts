@@ -39,7 +39,13 @@ export async function githubCallback(req: Request, res: Response) {
   try {
     const { accessToken, refreshToken } = await handleGithubCallback(code);
     const isProduction = env.NODE_ENV === 'production';
-    res.cookie('aria_refresh', refreshToken, { httpOnly: true, secure: isProduction, sameSite: 'lax', path: '/', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('aria_refresh', refreshToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
     return res.redirect(`${webBase}/auth/callback?token=${encodeURIComponent(accessToken)}`);
   } catch {
     return res.redirect(`${webBase}/login?error=github_failed`);

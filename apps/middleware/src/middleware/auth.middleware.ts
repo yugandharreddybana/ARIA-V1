@@ -1,7 +1,11 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../config/jwt';
 import { AppError } from './error.middleware';
 import type { AuthTokenPayload } from '@aria/shared';
+
+export interface AriaRequest extends Request {
+  user?: AuthTokenPayload;
+}
 
 declare global {
   namespace Express {
@@ -11,18 +15,16 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+export function requireAuth(req: AriaRequest, res: Response, next: NextFunction): void {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
     }
-
     const token = authHeader.split(' ')[1];
     if (!token) {
       throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
     }
-
     const payload = verifyAccessToken(token);
     req.user = payload;
     next();

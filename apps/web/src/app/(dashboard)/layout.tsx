@@ -1,6 +1,6 @@
 'use client';
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/auth.context';
 import {
@@ -25,6 +25,7 @@ const NAV_ITEMS = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -44,31 +45,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Sidebar */}
       <aside className="w-60 border-r border-border/50 flex flex-col bg-card/30 fixed inset-y-0 left-0 z-40">
-        {/* Logo */}
         <div className="flex items-center gap-2.5 h-16 px-5 border-b border-border/50">
           <BrainCircuit className="h-5 w-5 text-aria-500" />
           <span className="font-bold tracking-tight">ARIA</span>
           <span className="text-xs text-muted-foreground ml-auto">v0.1</span>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(({ href, icon: Icon, label }) => (
-            <Link key={href} href={href}
-              className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                'text-muted-foreground hover:text-foreground hover:bg-accent',
-              )}
-            >
-              <Icon className="h-4 w-4 flex-shrink-0" />
-              {label}
-            </Link>
-          ))}
+          {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
+            const isActive = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
+            return (
+              <Link key={href} href={href}
+                className={cn(
+                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-aria-900/60 text-aria-300'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                )}
+              >
+                <Icon className="h-4 w-4 flex-shrink-0" />
+                {label}
+              </Link>
+            );
+          })}
         </nav>
 
-        {/* User */}
         <div className="border-t border-border/50 p-3">
           <div className="flex items-center gap-3 px-2 py-2 rounded-md">
             <div className="h-7 w-7 rounded-full bg-aria-800 flex items-center justify-center text-xs font-bold text-aria-200 flex-shrink-0">
@@ -85,7 +87,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main */}
       <main className="flex-1 ml-60 min-h-screen">
         {children}
       </main>
