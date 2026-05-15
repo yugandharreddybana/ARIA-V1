@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Project } from '@aria/shared';
-import { Plus, FolderOpen, Loader2, Github } from 'lucide-react';
+import { Plus, FolderOpen, Loader2, Github, AlertCircle } from 'lucide-react';
 
 function CreateModal({ onCreated, onClose }: { onCreated: (p: Project) => void; onClose: () => void }) {
   const [name, setName] = useState('');
@@ -20,26 +20,39 @@ function CreateModal({ onCreated, onClose }: { onCreated: (p: Project) => void; 
     if (!name.trim()) { setErr('Name is required'); return; }
     setLoading(true);
     try {
-      const d = await api<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify({ name: name.trim(), description: desc.trim() || undefined }) });
+      const d = await api<{ project: Project }>('/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), description: desc.trim() || undefined }),
+      });
       onCreated(d.project);
-    } catch (e: unknown) { setErr(e instanceof Error ? e.message : 'Failed'); }
-    finally { setLoading(false); }
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to create project');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <Card className="w-full max-w-md">
-        <CardHeader><CardTitle>New Project</CardTitle><CardDescription>Create a workspace for your AI team</CardDescription></CardHeader>
+        <CardHeader>
+          <CardTitle>New Project</CardTitle>
+          <CardDescription>Create a workspace for your AI team</CardDescription>
+        </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="space-y-4">
             {err && <p className="text-sm text-destructive">{err}</p>}
             <div className="space-y-1.5">
               <Label htmlFor="pname">Name</Label>
-              <Input id="pname" value={name} onChange={e => setName(e.target.value)} placeholder="My Platform" autoFocus />
+              <Input id="pname" value={name} onChange={e => setName(e.target.value)}
+                placeholder="My Platform" autoFocus />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pdesc">Description <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Input id="pdesc" value={desc} onChange={e => setDesc(e.target.value)} placeholder="What is this project?" />
+              <Label htmlFor="pdesc">
+                Description <span className="text-muted-foreground text-xs">(optional)</span>
+              </Label>
+              <Input id="pdesc" value={desc} onChange={e => setDesc(e.target.value)}
+                placeholder="What is this project?" />
             </div>
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -55,24 +68,43 @@ function CreateModal({ onCreated, onClose }: { onCreated: (p: Project) => void; 
 }
 
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [projects,   setProjects]   = useState<Project[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
-    api<{ projects: Project[] }>('/projects').then(d => setProjects(d.projects)).finally(() => setLoading(false));
+    api<{ projects: Project[] }>('/projects')
+      .then(d => setProjects(d.projects))
+      .catch(() => setError('Failed to load projects. Please refresh the page.'))
+      .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex items-center gap-2 text-destructive p-6">
+      <AlertCircle className="h-5 w-5 shrink-0" />
+      <span className="text-sm">{error}</span>
+    </div>
+  );
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Projects</h1>
-          <p className="text-sm text-muted-foreground mt-1">Each project maps to one or more GitHub repositories</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Each project maps to one or more GitHub repositories
+          </p>
         </div>
-        <Button variant="aria" onClick={() => setShowCreate(true)}><Plus className="h-4 w-4 mr-2" />New Project</Button>
+        <Button variant="aria" onClick={() => setShowCreate(true)}>
+          <Plus className="h-4 w-4 mr-2" />New Project
+        </Button>
       </div>
 
       {projects.length === 0 ? (
@@ -80,7 +112,9 @@ export default function ProjectsPage() {
           <FolderOpen className="h-12 w-12 opacity-30" />
           <p className="font-medium">No projects yet</p>
           <p className="text-sm">Create your first project to get started</p>
-          <Button variant="aria" className="mt-2" onClick={() => setShowCreate(true)}><Plus className="h-4 w-4 mr-2" />Create Project</Button>
+          <Button variant="aria" className="mt-2" onClick={() => setShowCreate(true)}>
+            <Plus className="h-4 w-4 mr-2" />Create Project
+          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -90,9 +124,17 @@ export default function ProjectsPage() {
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <CardTitle className="text-base">{p.name}</CardTitle>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${p.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground'}`}>{p.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      p.status === 'active'
+                        ? 'bg-emerald-500/10 text-emerald-500'
+                        : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {p.status}
+                    </span>
                   </div>
-                  {p.description && <CardDescription className="line-clamp-2">{p.description}</CardDescription>}
+                  {p.description && (
+                    <CardDescription className="line-clamp-2">{p.description}</CardDescription>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -105,7 +147,13 @@ export default function ProjectsPage() {
           ))}
         </div>
       )}
-      {showCreate && <CreateModal onCreated={p => { setProjects(prev => [p, ...prev]); setShowCreate(false); }} onClose={() => setShowCreate(false)} />}
+
+      {showCreate && (
+        <CreateModal
+          onCreated={p => { setProjects(prev => [p, ...prev]); setShowCreate(false); }}
+          onClose={() => setShowCreate(false)}
+        />
+      )}
     </div>
   );
 }
