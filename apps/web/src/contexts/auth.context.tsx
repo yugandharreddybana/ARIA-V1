@@ -20,17 +20,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const setToken = useCallback((token: string) => {
-    localStorage.setItem('aria_token', token);
+    if (typeof window !== 'undefined') localStorage.setItem('aria_token', token);
   }, []);
 
   const loadUser = useCallback(async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('aria_token') : null;
     if (!token) { setIsLoading(false); return; }
     try {
+      // GET /auth/me returns { user: PublicUser }
       const data = await api<{ user: PublicUser }>('/auth/me');
       setUser(data.user);
     } catch {
-      localStorage.removeItem('aria_token');
+      if (typeof window !== 'undefined') localStorage.removeItem('aria_token');
     } finally {
       setIsLoading(false);
     }
@@ -39,20 +40,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => { loadUser(); }, [loadUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const data = await api<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    // POST /auth/login returns { user, accessToken } (AuthResponse shape)
+    const data = await api<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
     setToken(data.accessToken);
     setUser(data.user);
   }, [setToken]);
 
   const signup = useCallback(async (name: string, email: string, password: string) => {
-    const data = await api<AuthResponse>('/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+    // POST /auth/signup returns { user, accessToken } (AuthResponse shape)
+    const data = await api<AuthResponse>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    });
     setToken(data.accessToken);
     setUser(data.user);
   }, [setToken]);
 
   const logout = useCallback(async () => {
     try { await api('/auth/logout', { method: 'POST' }); } catch { /* noop */ }
-    localStorage.removeItem('aria_token');
+    if (typeof window !== 'undefined') localStorage.removeItem('aria_token');
     setUser(null);
   }, []);
 

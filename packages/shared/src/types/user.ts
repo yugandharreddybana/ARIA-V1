@@ -1,13 +1,10 @@
 export interface PublicUser {
   id: string;
+  workspaceId: string;
   name: string;
   email: string;
-  workspaceId: string;
-  createdAt: string;
-}
-
-export interface User extends PublicUser {
-  passwordHash: string;
+  avatarUrl?: string;
+  githubLogin?: string;
   isActive: boolean;
-  updatedAt: string;
+  createdAt: string;
 }
