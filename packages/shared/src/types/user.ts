@@ -3,8 +3,8 @@ export interface PublicUser {
   workspaceId: string;
   name: string;
   email: string;
-  avatarUrl?: string;
-  githubLogin?: string;
+  avatarUrl?: string | null;
+  githubLogin?: string | null;
   isActive: boolean;
   createdAt: string;
 }
