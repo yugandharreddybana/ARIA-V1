@@ -1,37 +1,30 @@
-import { RiskClass, SkillStatus, IdleMode } from '../constants/enums';
+export type SkillStatus = 'idle' | 'active' | 'thinking' | 'blocked' | 'offline';
+export type IdleMode = 'sleep' | 'monitor' | 'research';
 
 export interface Skill {
   id: string;
-  projectId: string;
-  slug: string;
-  realName: string;
-  roleTitle: string;
   teamId: string;
-  riskClass: RiskClass;
+  name: string;
+  role: string;
   status: SkillStatus;
-  idleMode: IdleMode;
-  ownedDomains: string[];
-  ownedRepoPaths: string[];
-  triggerKeywords: string[];
-  description: string;
-  skillMdPath: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  systemPrompt?: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Team {
   id: string;
   projectId: string;
-  name: string;         // e.g. "Product Team", "Platform Team"
-  leadSkillId: string | null;
-  scrumMasterSkillId: string | null;
-  createdAt: Date;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TeamMember {
   id: string;
   teamId: string;
   skillId: string;
-  role: 'lead' | 'member' | 'scrum_master' | 'observer';
-  createdAt: Date;
+  joinedAt: string;
 }

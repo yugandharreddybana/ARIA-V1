@@ -1,27 +1,4 @@
-// Auth-related shared types
-
-export interface AuthTokenPayload {
-  sub: string;        // user id
-  email: string;
-  name: string;
-  workspaceId: string;
-  iat: number;
-  exp: number;
-  jti: string;        // JWT ID for revocation
-}
-
-export interface AuthResponse {
-  user: PublicUser;
-  accessToken: string;
-}
-
-export interface PublicUser {
-  id: string;
-  name: string;
-  email: string;
-  workspaceId: string;
-  createdAt: string;
-}
+import type { PublicUser } from './user';
 
 export interface SignupRequest {
   name: string;
@@ -32,4 +9,19 @@ export interface SignupRequest {
 export interface LoginRequest {
   email: string;
   password: string;
+}
+
+export interface AuthTokenPayload {
+  sub: string;         // userId
+  email: string;
+  name: string;
+  workspaceId: string;
+  jti: string;
+  iat: number;
+  exp: number;
+}
+
+export interface AuthResponse {
+  user: PublicUser;
+  accessToken: string;
 }

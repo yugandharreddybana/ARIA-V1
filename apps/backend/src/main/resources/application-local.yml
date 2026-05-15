@@ -1,0 +1,11 @@
+# Local development overrides — do NOT commit real credentials
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/aria_dev}
+  jpa:
+    show-sql: true
+
+logging:
+  level:
+    com.aria: DEBUG
+    org.springframework.security: DEBUG

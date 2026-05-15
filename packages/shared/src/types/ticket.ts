@@ -1,54 +1,36 @@
-import { TicketType, TicketStatus, RiskClass, EvidenceType } from '../constants/enums';
+export type RiskClass = 'A' | 'B' | 'C' | 'D';
+export type TicketStatus = 'open' | 'in_progress' | 'review' | 'done' | 'blocked' | 'cancelled';
+export type TicketType = 'feature' | 'bug' | 'tech_debt' | 'security' | 'devops';
+export type EvidenceType = 'screenshot' | 'log' | 'repro_steps' | 'test_output' | 'note';
 
 export interface Ticket {
   id: string;
   projectId: string;
-  sessionId: string | null;
-  type: TicketType;
-  status: TicketStatus;
+  sessionId?: string;
   title: string;
-  description: string;
-  promptBlock: PromptBlock | null;     // Scrum Master Prompt Master output
+  description?: string;
+  status: TicketStatus;
   riskClass: RiskClass;
-  affectedDomains: string[];
-  assignedSkillId: string | null;
-  assignedHumanId: string | null;
-  jiraIssueKey: string | null;         // optional Jira mirror
-  createdBySkillId: string | null;
-  humanApproved: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface PromptBlock {
-  objective: string;
-  context: string[];          // file paths / domain names
-  constraints: string[];
-  doNotDos: string[];
-  acceptanceCriteria: string[];
+  ticketType: TicketType;
+  assignedTo?: string;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TicketEvidence {
   id: string;
   ticketId: string;
-  evidenceType: EvidenceType;
-  screenshots: string[];      // file paths or URLs
-  videoPath: string | null;
-  logs: string;
-  reproSteps: string[];
-  environment: EvidenceEnvironment;
-  codeDiff: string | null;    // for fix evidence
-  testOutput: string | null;  // for fix evidence
-  commitHash: string | null;
-  createdBySkillId: string | null;
-  createdAt: Date;
+  type: EvidenceType;
+  content: string;
+  createdAt: string;
 }
 
-export interface EvidenceEnvironment {
-  browser: string | null;
-  device: string | null;
-  url: string | null;
-  appVersion: string | null;
-  branch: string | null;
-  environment: string;
+export interface CreateTicketRequest {
+  projectId: string;
+  title: string;
+  description?: string;
+  riskClass?: RiskClass;
+  ticketType?: TicketType;
+  priority?: number;
 }

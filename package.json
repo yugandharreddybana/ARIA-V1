@@ -2,26 +2,21 @@
   "name": "aria-v1",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.1.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "build": "turbo run build",
-    "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "test": "turbo run test",
-    "clean": "turbo run clean"
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "clean": "turbo clean",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
   },
   "devDependencies": {
-    "turbo": "^2.0.0",
-    "typescript": "^5.4.5",
-    "prettier": "^3.2.5",
-    "eslint": "^8.57.0"
-  },
-  "engines": {
-    "node": ">=20.0.0",
-    "pnpm": ">=9.0.0"
-  },
-  "packageManager": "pnpm@9.0.0"
+    "turbo": "^2.0.4",
+    "prettier": "^3.3.0"
+  }
 }

@@ -10,25 +10,29 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { ApiError } from '@/lib/api';
 import { Eye, EyeOff, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
+const PASSWORD_RULES = [
+  { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
+  { label: 'Uppercase letter', test: (p: string) => /[A-Z]/.test(p) },
+  { label: 'Lowercase letter', test: (p: string) => /[a-z]/.test(p) },
+  { label: 'Number', test: (p: string) => /[0-9]/.test(p) },
+  { label: 'Special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
+
 function PasswordStrength({ password }: { password: string }) {
-  const checks = [
-    { label: 'At least 8 characters', pass: password.length >= 8 },
-    { label: 'Uppercase letter', pass: /[A-Z]/.test(password) },
-    { label: 'Lowercase letter', pass: /[a-z]/.test(password) },
-    { label: 'Number', pass: /[0-9]/.test(password) },
-    { label: 'Special character', pass: /[^A-Za-z0-9]/.test(password) },
-  ];
   if (!password) return null;
   return (
-    <div className="mt-2 space-y-1">
-      {checks.map(({ label, pass }) => (
-        <div key={label} className="flex items-center gap-2 text-xs">
-          {pass
-            ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            : <XCircle className="h-3.5 w-3.5 text-muted-foreground" />}
-          <span className={pass ? 'text-emerald-500' : 'text-muted-foreground'}>{label}</span>
-        </div>
-      ))}
+    <div className="mt-2 space-y-1" aria-label="Password requirements">
+      {PASSWORD_RULES.map(({ label, test }) => {
+        const pass = test(password);
+        return (
+          <div key={label} className="flex items-center gap-2 text-xs">
+            {pass
+              ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+              : <XCircle className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
+            <span className={pass ? 'text-emerald-500' : 'text-muted-foreground'}>{label}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -43,17 +47,24 @@ export default function SignupPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    setFieldErrors(prev => ({ ...prev, [e.target.name]: '' }));
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+    setFieldErrors(prev => ({ ...prev, [name]: '' }));
     setError(null);
   };
 
-  const validate = () => {
+  const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (!form.name.trim() || form.name.length < 2) errs.name = 'Name must be at least 2 characters';
-    if (!form.email.includes('@')) errs.email = 'Please enter a valid email';
-    if (form.password.length < 8) errs.password = 'Password must be at least 8 characters';
-    if (form.password !== form.confirmPassword) errs.confirmPassword = 'Passwords do not match';
+    if (!form.name.trim() || form.name.trim().length < 2)
+      errs.name = 'Name must be at least 2 characters';
+    if (!form.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email))
+      errs.email = 'Please enter a valid email address';
+    if (form.password.length < 8)
+      errs.password = 'Password must be at least 8 characters';
+    else if (!PASSWORD_RULES.every(r => r.test(form.password)))
+      errs.password = 'Password does not meet all requirements';
+    if (form.password !== form.confirmPassword)
+      errs.confirmPassword = 'Passwords do not match';
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -64,11 +75,11 @@ export default function SignupPage() {
     setIsLoading(true);
     setError(null);
     try {
-      await signup(form.name, form.email, form.password);
+      await signup(form.name.trim(), form.email.trim(), form.password);
       router.push('/dashboard');
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.details) {
+        if (err.details && err.details.length > 0) {
           const fieldErrs: Record<string, string> = {};
           err.details.forEach(d => { fieldErrs[d.field] = d.message; });
           setFieldErrors(fieldErrs);
@@ -90,20 +101,33 @@ export default function SignupPage() {
         <CardDescription>Set up ARIA for your engineering team</CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           {error && (
-            <div className="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
+            <div role="alert" className="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
               {error}
             </div>
           )}
           <div className="space-y-1.5">
             <Label htmlFor="name">Full name</Label>
-            <Input id="name" name="name" placeholder="Ada Lovelace" value={form.name} onChange={handleChange} autoComplete="name" />
+            <Input
+              id="name" name="name"
+              placeholder="Ada Lovelace"
+              value={form.name}
+              onChange={handleChange}
+              autoComplete="name"
+              autoFocus
+            />
             {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="email">Email address</Label>
-            <Input id="email" name="email" type="email" placeholder="ada@company.com" value={form.email} onChange={handleChange} autoComplete="email" />
+            <Input
+              id="email" name="email" type="email"
+              placeholder="ada@company.com"
+              value={form.email}
+              onChange={handleChange}
+              autoComplete="email"
+            />
             {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
           </div>
           <div className="space-y-1.5">
@@ -113,12 +137,17 @@ export default function SignupPage() {
                 id="password" name="password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="Create a strong password"
-                value={form.password} onChange={handleChange}
+                value={form.password}
+                onChange={handleChange}
                 autoComplete="new-password"
                 className="pr-10"
               />
-              <button type="button" onClick={() => setShowPassword(p => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+              <button
+                type="button"
+                onClick={() => setShowPassword(p => !p)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
@@ -131,20 +160,32 @@ export default function SignupPage() {
               id="confirmPassword" name="confirmPassword"
               type={showPassword ? 'text' : 'password'}
               placeholder="Repeat your password"
-              value={form.confirmPassword} onChange={handleChange}
+              value={form.confirmPassword}
+              onChange={handleChange}
               autoComplete="new-password"
             />
             {fieldErrors.confirmPassword && <p className="text-xs text-destructive">{fieldErrors.confirmPassword}</p>}
           </div>
-          <Button type="submit" variant="aria" className="w-full" size="lg" disabled={isLoading}>
-            {isLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating workspace...</> : 'Create Workspace'}
+          <Button
+            type="submit"
+            variant="aria"
+            className="w-full"
+            size="lg"
+            disabled={isLoading}
+          >
+            {isLoading
+              ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating workspace...</>
+              : 'Create Workspace'
+            }
           </Button>
         </form>
       </CardContent>
       <CardFooter className="justify-center">
         <p className="text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link href="/login" className="text-aria-400 hover:text-aria-300 font-medium transition-colors">Sign in</Link>
+          <Link href="/login" className="text-aria-400 hover:text-aria-300 font-medium transition-colors">
+            Sign in
+          </Link>
         </p>
       </CardFooter>
     </Card>

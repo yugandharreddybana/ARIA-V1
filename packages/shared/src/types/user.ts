@@ -1,10 +1,13 @@
-export interface User {
+export interface PublicUser {
   id: string;
   name: string;
   email: string;
-  passwordHash: string;
   workspaceId: string;
+  createdAt: string;
+}
+
+export interface User extends PublicUser {
+  passwordHash: string;
   isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  updatedAt: string;
 }
