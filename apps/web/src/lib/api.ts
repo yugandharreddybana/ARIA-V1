@@ -1,51 +1,31 @@
-const BASE = process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
+const BASE_URL = process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public details: Array<{ field: string; message: string }> = [],
+    public details: { field: string; message: string }[] = []
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
+export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('aria_token') : null;
+  const res = await fetch(`${BASE_URL}/api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options?.headers ?? {}),
+    },
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { message?: string; errors?: Array<{ field: string; message: string }> };
-    throw new ApiError(body.message ?? 'Request failed', res.status, body.errors ?? []);
+    const body = await res.json().catch(() => ({ message: 'Request failed' }));
+    throw new ApiError(body.message ?? 'Request failed', res.status, body.details ?? []);
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  return res.json();
 }
-
-export const api = {
-  get: <T>(path: string) => request<T>(path, { method: 'GET' }),
-  post: <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
-};
-
-export type Project = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  description?: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ProjectRepo = {
-  id: string;
-  projectId: string;
-  repoUrl: string;
-  repoName: string;
-  branch: string;
-  createdAt: string;
-};

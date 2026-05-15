@@ -10,6 +10,8 @@ import { notFound } from './middleware/not-found.middleware';
 import authRoutes from './routes/auth.routes';
 import githubRoutes from './routes/github.routes';
 import projectsRoutes from './routes/projects.routes';
+import analysisRoutes from './routes/analysis.routes';
+import graphRoutes from './routes/graph.routes';
 import healthRoutes from './routes/health.routes';
 
 const env = validateEnv();
@@ -26,6 +28,9 @@ app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/auth/github', githubRoutes);
 app.use('/api/projects', projectsRoutes);
+app.use('/api/analysis/jobs', analysisRoutes);
+app.use('/api/graph', graphRoutes);
+
 app.use(notFound);
 app.use(errorHandler);
 
