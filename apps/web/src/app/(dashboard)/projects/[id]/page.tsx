@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import type { Project, ProjectRepo, AnalysisJob } from '@aria/shared';
 import {
   Github, Loader2, Plus, ArrowLeft, GitBranch,
-  Zap, CheckCircle2, XCircle, Clock, ExternalLink
+  Zap, CheckCircle2, XCircle, Clock, ExternalLink,
 } from 'lucide-react';
 
 type ProjectWithRepos = Project & { repos: ProjectRepo[] };
@@ -26,11 +26,15 @@ const STATUS_ICON: Record<string, React.ElementType> = {
   queued: Clock, running: Loader2, done: CheckCircle2, failed: XCircle,
 };
 
-function ConnectRepoModal({ projectId, onConnected, onClose }: { projectId: string; onConnected: (r: ProjectRepo) => void; onClose: () => void }) {
+function ConnectRepoModal({ projectId, onConnected, onClose }: {
+  projectId: string;
+  onConnected: (r: ProjectRepo) => void;
+  onClose: () => void;
+}) {
   const [repoUrl, setRepoUrl] = useState('');
-  const [branch, setBranch]   = useState('main');
+  const [branch,  setBranch]  = useState('main');
   const [loading, setLoading] = useState(false);
-  const [err, setErr]         = useState('');
+  const [err,     setErr]     = useState('');
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +46,11 @@ function ConnectRepoModal({ projectId, onConnected, onClose }: { projectId: stri
         body: JSON.stringify({ repoUrl: repoUrl.trim(), branch: branch.trim() || 'main' }),
       });
       onConnected(d.repo);
-    } catch (e: unknown) { setErr(e instanceof ApiError ? e.message : 'Failed to connect repo'); }
-    finally { setLoading(false); }
+    } catch (e: unknown) {
+      setErr(e instanceof ApiError ? e.message : 'Failed to connect repo');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,11 +65,13 @@ function ConnectRepoModal({ projectId, onConnected, onClose }: { projectId: stri
             {err && <p className="text-sm text-destructive">{err}</p>}
             <div className="space-y-1.5">
               <Label htmlFor="repoUrl">GitHub Repository URL</Label>
-              <Input id="repoUrl" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" autoFocus />
+              <Input id="repoUrl" value={repoUrl} onChange={e => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/org/repo" autoFocus />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="branch">Branch</Label>
-              <Input id="branch" value={branch} onChange={e => setBranch(e.target.value)} placeholder="main" />
+              <Input id="branch" value={branch} onChange={e => setBranch(e.target.value)}
+                placeholder="main" />
             </div>
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -78,7 +87,7 @@ function ConnectRepoModal({ projectId, onConnected, onClose }: { projectId: stri
 }
 
 export default function ProjectDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id }  = useParams<{ id: string }>();
   const router  = useRouter();
 
   const [project,     setProject]     = useState<ProjectWithRepos | null>(null);
@@ -87,15 +96,14 @@ export default function ProjectDetailPage() {
   const [showConnect, setShowConnect] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
-  // Fetch project + job list
   const loadData = useCallback(async () => {
     try {
       const [projectRes, jobsRes] = await Promise.all([
         api<{ project: ProjectWithRepos }>(`/projects/${id}`),
+        // GET /analysis/jobs → { jobs: AnalysisJob[] }
         api<{ jobs: AnalysisJob[] }>(`/analysis/jobs`),
       ]);
       setProject(projectRes.project);
-      // Filter to jobs belonging to this project
       setJobs(jobsRes.jobs.filter(j => j.projectId === id));
     } catch {
       router.push('/projects');
@@ -114,20 +122,26 @@ export default function ProjectDetailPage() {
   const triggerAnalysis = async (repoId: string) => {
     setAnalyzingId(repoId);
     try {
+      // POST → flat AnalysisJob (not wrapped)
       const d = await api<AnalysisJob>(`/projects/${id}/repos/${repoId}/analyze`, { method: 'POST' });
       setJobs(prev => [d, ...prev]);
       router.push(`/projects/${id}/jobs/${d.jobId}`);
     } catch {
+      // no-op — error visible on server side; button re-enables via finally
+    } finally {
       setAnalyzingId(null);
     }
   };
 
-  if (loadingPage) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loadingPage) return (
+    <div className="flex items-center justify-center h-64">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
   if (!project) return null;
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
-      {/* Back nav */}
       <button
         onClick={() => router.push('/projects')}
         className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -135,7 +149,6 @@ export default function ProjectDetailPage() {
         <ArrowLeft className="h-4 w-4" /> Back to Projects
       </button>
 
-      {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold">{project.name}</h1>
@@ -151,7 +164,7 @@ export default function ProjectDetailPage() {
         </Button>
       </div>
 
-      {/* ── Repositories section ── */}
+      {/* Repositories */}
       <section>
         <h2 className="text-lg font-semibold mb-3">Connected Repositories</h2>
         {project.repos.length === 0 ? (
@@ -175,7 +188,8 @@ export default function ProjectDetailPage() {
                         <GitBranch className="h-3 w-3" />
                         <span>{repo.branch}</span>
                         <span className="mx-1">&middot;</span>
-                        <a href={repo.repoUrl} target="_blank" rel="noreferrer" className="hover:text-foreground truncate max-w-xs">
+                        <a href={repo.repoUrl} target="_blank" rel="noreferrer"
+                          className="hover:text-foreground truncate max-w-xs">
                           {repo.repoUrl}
                         </a>
                       </div>
@@ -197,7 +211,7 @@ export default function ProjectDetailPage() {
         )}
       </section>
 
-      {/* ── Analysis Jobs section (S3-2) ── */}
+      {/* Analysis Jobs */}
       <section>
         <h2 className="text-lg font-semibold mb-3">Analysis Jobs</h2>
         {jobs.length === 0 ? (
@@ -209,7 +223,7 @@ export default function ProjectDetailPage() {
         ) : (
           <div className="space-y-2">
             {jobs.map(job => {
-              const cfg = STATUS_CONFIG[job.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.queued;
+              const cfg  = STATUS_CONFIG[job.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.queued;
               const Icon = STATUS_ICON[job.status] ?? Clock;
               return (
                 <Link key={job.jobId} href={`/projects/${id}/jobs/${job.jobId}`}>

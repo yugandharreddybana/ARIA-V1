@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   Controls,
   MiniMap,
@@ -20,11 +21,11 @@ import type { ConceptGraph, ConceptNode } from '@aria/shared';
 import {
   ArrowLeft, Loader2, BrainCircuit, X,
   FileCode2, Box, Server, Globe, Database,
-  Function as FunctionIcon, LayoutTemplate, Braces,
+  Code2, LayoutTemplate, Braces,
   RefreshCw, Zap,
 } from 'lucide-react';
 
-// ── Node type colour + icon map ───────────────────────────────────────────────
+// ── Node type colour + icon map
 const NODE_STYLES: Record<string, { bg: string; border: string; text: string }> = {
   file:       { bg: '#1e293b', border: '#3b82f6', text: '#93c5fd' },
   module:     { bg: '#1a2e1a', border: '#22c55e', text: '#86efac' },
@@ -36,18 +37,18 @@ const NODE_STYLES: Record<string, { bg: string; border: string; text: string }> 
   interface:  { bg: '#2e1e1a', border: '#f97316', text: '#fdba74' },
 };
 
+// Code2 replaces the non-existent 'Function' icon from lucide-react
 const NODE_ICONS: Record<string, React.ElementType> = {
   file: FileCode2, module: Box, service: Server, endpoint: Globe,
-  db_table: Database, function: FunctionIcon, class: LayoutTemplate, interface: Braces,
+  db_table: Database, function: Code2, class: LayoutTemplate, interface: Braces,
 };
 
 const DEFAULT_STYLE = { bg: '#1e1e2e', border: '#6b7280', text: '#9ca3af' };
 
-// ── Build React Flow nodes and edges from ConceptGraph ────────────────────────
 function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
-  // Layered layout: space nodes in a grid
-  const cols = Math.max(1, Math.ceil(Math.sqrt(graph.nodes.length)));
-  const GAP_X = 200, GAP_Y = 120;
+  const cols  = Math.max(1, Math.ceil(Math.sqrt(graph.nodes.length)));
+  const GAP_X = 200;
+  const GAP_Y = 120;
 
   const nodes: Node[] = graph.nodes.map((n, i) => {
     const style = NODE_STYLES[n.nodeType] ?? DEFAULT_STYLE;
@@ -56,16 +57,16 @@ function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
       position: { x: (i % cols) * GAP_X, y: Math.floor(i / cols) * GAP_Y },
       data: { label: n.name, raw: n },
       style: {
-        background: style.bg,
-        border: `1.5px solid ${style.border}`,
-        color: style.text,
+        background:  style.bg,
+        border:      `1.5px solid ${style.border}`,
+        color:       style.text,
         borderRadius: 8,
-        padding: '6px 12px',
-        fontSize: 11,
-        fontFamily: 'monospace',
-        minWidth: 120,
-        maxWidth: 180,
-        cursor: 'pointer',
+        padding:     '6px 12px',
+        fontSize:    11,
+        fontFamily:  'monospace',
+        minWidth:    120,
+        maxWidth:    180,
+        cursor:      'pointer',
       },
     };
   });
@@ -74,7 +75,7 @@ function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
     id: e.id,
     source: e.sourceNodeId,
     target: e.targetNodeId,
-    label: e.label ?? e.edgeType,
+    label:  e.label ?? e.edgeType,
     animated: e.edgeType === 'calls' || e.edgeType === 'triggers',
     style: { stroke: '#475569', strokeWidth: 1.2 },
     labelStyle: { fill: '#64748b', fontSize: 9 },
@@ -83,10 +84,9 @@ function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
-// ── Node detail side panel ────────────────────────────────────────────────────
 function NodePanel({ node, onClose }: { node: ConceptNode; onClose: () => void }) {
-  const style  = NODE_STYLES[node.nodeType] ?? DEFAULT_STYLE;
-  const Icon   = NODE_ICONS[node.nodeType] ?? BrainCircuit;
+  const style = NODE_STYLES[node.nodeType] ?? DEFAULT_STYLE;
+  const Icon  = NODE_ICONS[node.nodeType]  ?? BrainCircuit;
   return (
     <div className="absolute top-4 right-4 z-10 w-72 animate-in slide-in-from-right-4 duration-200">
       <Card className="border shadow-xl bg-card">
@@ -104,10 +104,10 @@ function NodePanel({ node, onClose }: { node: ConceptNode; onClose: () => void }
           </div>
         </CardHeader>
         <CardContent className="space-y-2.5 text-xs">
-          <Row label="Type"     value={node.nodeType} />
-          {node.filePath  && <Row label="File"     value={node.filePath} mono />}
-          {node.summary   && <Row label="Summary"  value={node.summary} />}
-          {node.metadata  && (
+          <Row label="Type"    value={node.nodeType} />
+          {node.filePath && <Row label="File"    value={node.filePath} mono />}
+          {node.summary  && <Row label="Summary" value={node.summary}  />}
+          {node.metadata && (
             <div>
               <span className="text-muted-foreground block mb-1">Metadata</span>
               <pre className="text-xs bg-muted/40 p-2 rounded overflow-auto max-h-28 font-mono">
@@ -131,7 +131,6 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
 export default function GraphPage() {
   const { id: projectId } = useParams<{ id: string }>();
   const router = useRouter();
@@ -178,11 +177,11 @@ export default function GraphPage() {
     }
   };
 
-  // ── Empty state ──────────────────────────────────────────────────────────────
   const isEmpty = !loading && (!graph || graph.meta.status === 'empty' || graph.nodes.length === 0);
 
   return (
-    <div className="flex flex-col h-screen">
+    // flex-1 + min-h-0 ensures React Flow has a real measured height inside the dashboard layout
+    <div className="flex flex-col flex-1 min-h-0" style={{ height: 'calc(100vh - 64px)' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border/50 bg-card/30 shrink-0">
         <div className="flex items-center gap-3">
@@ -213,8 +212,8 @@ export default function GraphPage() {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 relative">
+      {/* Canvas body */}
+      <div className="flex-1 relative min-h-0">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/60">
             <Loader2 className="h-6 w-6 animate-spin text-aria-400" />
@@ -263,10 +262,7 @@ export default function GraphPage() {
           </ReactFlow>
         )}
 
-        {/* Node detail panel */}
-        {selected && (
-          <NodePanel node={selected} onClose={() => setSelected(null)} />
-        )}
+        {selected && <NodePanel node={selected} onClose={() => setSelected(null)} />}
       </div>
     </div>
   );
