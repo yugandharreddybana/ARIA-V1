@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/aria_test}
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+aria:
+  jwt:
+    public-key: dGVzdA==
+  backend:
+    middleware-url: http://localhost:3001
+  ollama:
+    base-url: http://localhost:11434
+    default-model: llama3
+
+logging:
+  level:
+    root: WARN
