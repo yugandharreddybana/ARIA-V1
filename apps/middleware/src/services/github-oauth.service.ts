@@ -1,13 +1,18 @@
+import crypto from 'crypto';
 import { db } from '@aria/db';
-import { users, workspaces } from '@aria/db';
+import { users, workspaces, refreshTokens } from '@aria/db';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { GITHUB_TOKEN_URL, GITHUB_USER_URL, GITHUB_EMAILS_URL, getGithubOAuthConfig } from '../config/github';
 import { signAccessToken, signRefreshToken } from '../config/jwt';
 import { AppError } from '../middleware/error.middleware';
 
-interface GithubUser { id: number; login: string; name: string | null; email: string | null; }
+interface GithubUser { id: number; login: string; name: string | null; email: string | null; avatarUrl?: string | null; }
 interface GithubEmail { email: string; primary: boolean; verified: boolean; }
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
 
 async function exchangeCode(code: string): Promise<string> {
   const { clientId, clientSecret, callbackUrl } = getGithubOAuthConfig();
@@ -58,10 +63,32 @@ export async function handleGithubCallback(code: string) {
     existing = u;
   } else if (!existing.githubId) {
     // Link GitHub to existing email account
-    await db.update(users).set({ githubId: String(ghUser.id), githubLogin: ghUser.login }).where(eq(users.id, existing.id));
+    const [updated] = await db.update(users)
+      .set({ githubId: String(ghUser.id), githubLogin: ghUser.login })
+      .where(eq(users.id, existing.id))
+      .returning();
+    existing = updated;
   }
 
-  const payload = { sub: existing.id, email: existing.email, name: existing.name, workspaceId: existing.workspaceId, jti: randomUUID() };
-  const [accessToken, refreshToken] = await Promise.all([signAccessToken(payload), signRefreshToken(payload)]);
+  // Issue access token
+  const accessToken = signAccessToken({
+    sub: existing.id,
+    email: existing.email,
+    name: existing.name,
+    workspaceId: existing.workspaceId,
+  });
+
+  // Issue refresh token AND persist to DB — without this, silent refresh fails for OAuth users
+  const { token: refreshToken, jti } = signRefreshToken(existing.id);
+  const tokenHash = hashToken(refreshToken);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  await db.insert(refreshTokens).values({
+    userId: existing.id,
+    tokenHash,
+    jti,
+    expiresAt,
+  });
+
   return { user: existing, accessToken, refreshToken };
 }
