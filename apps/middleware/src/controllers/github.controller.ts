@@ -1,31 +1,47 @@
-import type { Request, Response, NextFunction } from 'express';
-import { generateOAuthState, validateOAuthState, buildGitHubAuthorizeUrl, handleGitHubCallback } from '../services/github-oauth.service';
-import { jwtService } from '../config/jwt';
-import { AppError } from '../middleware/error.middleware';
+import type { Request, Response } from 'express';
+import { randomBytes } from 'crypto';
+import { GITHUB_AUTHORIZE_URL, getGithubOAuthConfig } from '../config/github';
+import { handleGithubCallback } from '../services/github-oauth.service';
+import { validateEnv } from '../config/env';
 
-const WEB_URL = process.env.NEXT_PUBLIC_WEB_URL ?? 'http://localhost:3000';
+const stateStore = new Map<string, number>();
+const STATE_TTL = 10 * 60 * 1000;
 
-export async function githubStart(_req: Request, res: Response): Promise<void> {
-  const state = generateOAuthState();
-  res.cookie('gh_oauth_state', state, { httpOnly: true, sameSite: 'lax', maxAge: 10 * 60 * 1000 });
-  res.redirect(buildGitHubAuthorizeUrl(state));
+function purge() {
+  const now = Date.now();
+  for (const [k, ts] of stateStore) if (now - ts > STATE_TTL) stateStore.delete(k);
 }
 
-export async function githubCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function githubStart(req: Request, res: Response) {
+  purge();
+  const state = randomBytes(16).toString('hex');
+  stateStore.set(state, Date.now());
+  const { clientId, callbackUrl, scope } = getGithubOAuthConfig();
+  const url = new URL(GITHUB_AUTHORIZE_URL);
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', callbackUrl);
+  url.searchParams.set('scope', scope);
+  url.searchParams.set('state', state);
+  res.redirect(url.toString());
+}
+
+export async function githubCallback(req: Request, res: Response) {
+  const { code, state, error } = req.query as Record<string, string>;
+  const env = validateEnv();
+  const webBase = env.CORS_ORIGINS.split(',')[0].trim();
+
+  if (error) return res.redirect(`${webBase}/login?error=github_denied`);
+
+  const ts = stateStore.get(state);
+  if (!ts || Date.now() - ts > STATE_TTL) return res.redirect(`${webBase}/login?error=invalid_state`);
+  stateStore.delete(state);
+
   try {
-    const { code, state } = req.query as { code?: string; state?: string };
-    const cookieState = (req.cookies as Record<string, string>)['gh_oauth_state'];
-    res.clearCookie('gh_oauth_state');
-
-    if (!code || !state || state !== cookieState || !validateOAuthState(state)) {
-      throw new AppError('Invalid OAuth state', 400);
-    }
-
-    const { accessToken, isNew } = await handleGitHubCallback(code, jwtService);
-    const redirectUrl = new URL(isNew ? '/dashboard?welcome=1' : '/dashboard', WEB_URL);
-    redirectUrl.searchParams.set('token', accessToken);
-    res.redirect(redirectUrl.toString());
-  } catch (err) {
-    next(err);
+    const { accessToken, refreshToken } = await handleGithubCallback(code);
+    const isProduction = env.NODE_ENV === 'production';
+    res.cookie('aria_refresh', refreshToken, { httpOnly: true, secure: isProduction, sameSite: 'lax', path: '/', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    return res.redirect(`${webBase}/auth/callback?token=${encodeURIComponent(accessToken)}`);
+  } catch {
+    return res.redirect(`${webBase}/login?error=github_failed`);
   }
 }

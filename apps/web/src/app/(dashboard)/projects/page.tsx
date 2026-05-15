@@ -1,47 +1,48 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { api, type Project } from '@/lib/api';
+import Link from 'next/link';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Plus, FolderGit2, Trash2 } from 'lucide-react';
-import Link from 'next/link';
+import type { Project } from '@aria/shared';
+import { Plus, FolderOpen, Loader2, Github } from 'lucide-react';
 
-function CreateProjectModal({ onCreated, onClose }: { onCreated: (p: Project) => void; onClose: () => void }) {
+function CreateModal({ onCreated, onClose }: { onCreated: (p: Project) => void; onClose: () => void }) {
   const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [desc, setDesc] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [err, setErr] = useState('');
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setError('Name is required'); return; }
+    if (!name.trim()) { setErr('Name is required'); return; }
     setLoading(true);
     try {
-      const res = await api.post<{ data: Project }>('/api/projects', { name, description });
-      onCreated(res.data);
-    } catch { setError('Failed to create project'); }
+      const d = await api<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify({ name: name.trim(), description: desc.trim() || undefined }) });
+      onCreated(d.project);
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : 'Failed'); }
     finally { setLoading(false); }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <Card className="w-full max-w-md">
-        <CardHeader><CardTitle>New Project</CardTitle></CardHeader>
+        <CardHeader><CardTitle>New Project</CardTitle><CardDescription>Create a workspace for your AI team</CardDescription></CardHeader>
         <CardContent>
           <form onSubmit={submit} className="space-y-4">
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {err && <p className="text-sm text-destructive">{err}</p>}
             <div className="space-y-1.5">
-              <Label htmlFor="proj-name">Project name</Label>
-              <Input id="proj-name" value={name} onChange={e => setName(e.target.value)} placeholder="My App" autoFocus />
+              <Label htmlFor="pname">Name</Label>
+              <Input id="pname" value={name} onChange={e => setName(e.target.value)} placeholder="My Platform" autoFocus />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="proj-desc">Description (optional)</Label>
-              <Input id="proj-desc" value={description} onChange={e => setDescription(e.target.value)} placeholder="What does this project do?" />
+              <Label htmlFor="pdesc">Description <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Input id="pdesc" value={desc} onChange={e => setDesc(e.target.value)} placeholder="What is this project?" />
             </div>
-            <div className="flex gap-3 justify-end">
-              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <div className="flex gap-2 justify-end">
+              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
               <Button type="submit" variant="aria" disabled={loading}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
               </Button>
@@ -56,80 +57,55 @@ function CreateProjectModal({ onCreated, onClose }: { onCreated: (p: Project) =>
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
-    api.get<{ data: Project[] }>('/api/projects')
-      .then(r => setProjects(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    api<{ projects: Project[] }>('/projects').then(d => setProjects(d.projects)).finally(() => setLoading(false));
   }, []);
 
-  const handleCreated = (p: Project) => {
-    setProjects(prev => [p, ...prev]);
-    setShowModal(false);
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Archive this project?')) return;
-    await api.delete(`/api/projects/${id}`);
-    setProjects(prev => prev.filter(p => p.id !== id));
-  };
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-    </div>
-  );
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Projects</h1>
-          <p className="text-muted-foreground text-sm mt-1">{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">Each project maps to one or more GitHub repositories</p>
         </div>
-        <Button variant="aria" onClick={() => setShowModal(true)}>
-          <Plus className="h-4 w-4 mr-2" />New Project
-        </Button>
+        <Button variant="aria" onClick={() => setShowCreate(true)}><Plus className="h-4 w-4 mr-2" />New Project</Button>
       </div>
 
       {projects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-24 gap-4">
-          <FolderGit2 className="h-12 w-12 text-muted-foreground/40" />
-          <p className="text-muted-foreground">No projects yet. Create your first one.</p>
-          <Button variant="aria" onClick={() => setShowModal(true)}><Plus className="h-4 w-4 mr-2" />New Project</Button>
+        <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-3">
+          <FolderOpen className="h-12 w-12 opacity-30" />
+          <p className="font-medium">No projects yet</p>
+          <p className="text-sm">Create your first project to get started</p>
+          <Button variant="aria" className="mt-2" onClick={() => setShowCreate(true)}><Plus className="h-4 w-4 mr-2" />Create Project</Button>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map(p => (
-            <Card key={p.id} className="group relative hover:border-aria-500/50 transition-colors">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <Link href={`/projects/${p.id}`} className="hover:underline">
+            <Link key={p.id} href={`/projects/${p.id}`}>
+              <Card className="hover:border-aria-500/50 transition-colors cursor-pointer h-full">
+                <CardHeader>
+                  <div className="flex items-start justify-between">
                     <CardTitle className="text-base">{p.name}</CardTitle>
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(p.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                    aria-label="Archive project"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground line-clamp-2">{p.description ?? 'No description'}</p>
-                <span className={`mt-3 inline-block text-xs px-2 py-0.5 rounded-full ${
-                  p.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-muted text-muted-foreground'
-                }`}>{p.status}</span>
-              </CardContent>
-            </Card>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${p.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground'}`}>{p.status}</span>
+                  </div>
+                  {p.description && <CardDescription className="line-clamp-2">{p.description}</CardDescription>}
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Github className="h-3.5 w-3.5" />
+                    <span>{(p as { repos?: unknown[] }).repos?.length ?? 0} repo(s)</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
           ))}
         </div>
       )}
-
-      {showModal && <CreateProjectModal onCreated={handleCreated} onClose={() => setShowModal(false)} />}
+      {showCreate && <CreateModal onCreated={p => { setProjects(prev => [p, ...prev]); setShowCreate(false); }} onClose={() => setShowCreate(false)} />}
     </div>
   );
 }

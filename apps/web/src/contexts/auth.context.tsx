@@ -1,106 +1,69 @@
 'use client';
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { apiClient, ApiError } from '@/lib/api';
+import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { api, ApiError } from '@/lib/api';
 import type { PublicUser, AuthResponse } from '@aria/shared';
 
-interface AuthState {
+interface AuthContextValue {
   user: PublicUser | null;
-  accessToken: string | null;
   isLoading: boolean;
-  isAuthenticated: boolean;
-}
-
-interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  refreshAccessToken: () => Promise<string | null>;
+  setToken: (token: string) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    accessToken: null,
-    isLoading: true,
-    isAuthenticated: false,
-  });
+  const [user, setUser] = useState<PublicUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const refreshAccessToken = useCallback(async (): Promise<string | null> => {
+  const setToken = useCallback((token: string) => {
+    localStorage.setItem('aria_token', token);
+  }, []);
+
+  const loadUser = useCallback(async () => {
+    const token = localStorage.getItem('aria_token');
+    if (!token) { setIsLoading(false); return; }
     try {
-      const res = await apiClient.post<{ success: boolean; data: { accessToken: string } }>(
-        '/api/auth/refresh', {}
-      );
-      const token = res.data.accessToken;
-      setState(prev => ({ ...prev, accessToken: token }));
-      return token;
+      const data = await api<{ user: PublicUser }>('/auth/me');
+      setUser(data.user);
     } catch {
-      setState({ user: null, accessToken: null, isLoading: false, isAuthenticated: false });
-      return null;
+      localStorage.removeItem('aria_token');
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
-  // On mount: try to restore session via refresh token cookie
-  useEffect(() => {
-    (async () => {
-      const token = await refreshAccessToken();
-      if (token) {
-        try {
-          const res = await apiClient.get<{ success: boolean; data: PublicUser }>(
-            '/api/auth/me', token
-          );
-          setState({ user: res.data, accessToken: token, isLoading: false, isAuthenticated: true });
-        } catch {
-          setState({ user: null, accessToken: null, isLoading: false, isAuthenticated: false });
-        }
-      } else {
-        setState(prev => ({ ...prev, isLoading: false }));
-      }
-    })();
-  }, [refreshAccessToken]);
+  useEffect(() => { loadUser(); }, [loadUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await apiClient.post<{ success: boolean; data: AuthResponse }>(
-      '/api/auth/login', { email, password }
-    );
-    setState({
-      user: res.data.user,
-      accessToken: res.data.accessToken,
-      isLoading: false,
-      isAuthenticated: true,
-    });
-  }, []);
+    const data = await api<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    setToken(data.accessToken);
+    setUser(data.user);
+  }, [setToken]);
 
   const signup = useCallback(async (name: string, email: string, password: string) => {
-    const res = await apiClient.post<{ success: boolean; data: AuthResponse }>(
-      '/api/auth/signup', { name, email, password }
-    );
-    setState({
-      user: res.data.user,
-      accessToken: res.data.accessToken,
-      isLoading: false,
-      isAuthenticated: true,
-    });
-  }, []);
+    const data = await api<AuthResponse>('/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+    setToken(data.accessToken);
+    setUser(data.user);
+  }, [setToken]);
 
   const logout = useCallback(async () => {
-    try {
-      await apiClient.post('/api/auth/logout', {});
-    } finally {
-      setState({ user: null, accessToken: null, isLoading: false, isAuthenticated: false });
-    }
+    try { await api('/auth/logout', { method: 'POST' }); } catch { /* noop */ }
+    localStorage.removeItem('aria_token');
+    setUser(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, signup, logout, refreshAccessToken }}>
+    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, setToken }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth(): AuthContextValue {
+export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
 }

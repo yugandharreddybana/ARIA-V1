@@ -1,87 +1,67 @@
-import crypto from 'crypto';
 import { db } from '@aria/db';
 import { users, workspaces } from '@aria/db';
 import { eq } from 'drizzle-orm';
-import { githubOAuthConfig as cfg } from '../config/github';
-import { JwtService } from '../config/jwt';
+import { randomUUID } from 'crypto';
+import { GITHUB_TOKEN_URL, GITHUB_USER_URL, GITHUB_EMAILS_URL, getGithubOAuthConfig } from '../config/github';
+import { signAccessToken, signRefreshToken } from '../config/jwt';
+import { AppError } from '../middleware/error.middleware';
 
-const stateStore = new Map<string, number>();
+interface GithubUser { id: number; login: string; name: string | null; email: string | null; }
+interface GithubEmail { email: string; primary: boolean; verified: boolean; }
 
-export function generateOAuthState(): string {
-  const state = crypto.randomBytes(24).toString('hex');
-  stateStore.set(state, Date.now() + 10 * 60 * 1000);
-  return state;
-}
-
-export function validateOAuthState(state: string): boolean {
-  const exp = stateStore.get(state);
-  stateStore.delete(state);
-  return !!exp && Date.now() < exp;
-}
-
-export function buildGitHubAuthorizeUrl(state: string): string {
-  const params = new URLSearchParams({
-    client_id: cfg.clientId,
-    redirect_uri: cfg.callbackUrl,
-    scope: cfg.scope,
-    state,
-  });
-  return `${cfg.authUrl}?${params.toString()}`;
-}
-
-async function exchangeCodeForToken(code: string): Promise<string> {
-  const res = await fetch(cfg.tokenUrl, {
+async function exchangeCode(code: string): Promise<string> {
+  const { clientId, clientSecret, callbackUrl } = getGithubOAuthConfig();
+  const res = await fetch(GITHUB_TOKEN_URL, {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: cfg.clientId, client_secret: cfg.clientSecret, code }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: callbackUrl }),
   });
-  const data = await res.json() as { access_token?: string; error?: string };
-  if (!data.access_token) throw new Error(data.error ?? 'GitHub token exchange failed');
+  const data = await res.json() as { access_token?: string };
+  if (!data.access_token) throw new AppError('GitHub token exchange failed', 502);
   return data.access_token;
 }
 
-async function getGitHubUser(token: string): Promise<{ id: number; login: string; name: string | null; email: string | null }> {
-  const [userRes, emailsRes] = await Promise.all([
-    fetch(cfg.userUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }),
-    fetch(cfg.emailsUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }),
+async function getGithubIdentity(token: string): Promise<{ ghUser: GithubUser; email: string }> {
+  const [uRes, eRes] = await Promise.all([
+    fetch(GITHUB_USER_URL, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }),
+    fetch(GITHUB_EMAILS_URL, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }),
   ]);
-  const user = await userRes.json() as { id: number; login: string; name: string | null; email: string | null };
-  if (!user.email) {
-    const emails = await emailsRes.json() as Array<{ email: string; primary: boolean; verified: boolean }>;
-    const primary = emails.find(e => e.primary && e.verified);
-    user.email = primary?.email ?? null;
-  }
-  return user;
+  const ghUser = await uRes.json() as GithubUser;
+  const emails = await eRes.json() as GithubEmail[];
+  const primary = emails.find(e => e.primary && e.verified);
+  const email = primary?.email ?? ghUser.email ?? '';
+  if (!email) throw new AppError('No verified email on GitHub account', 400);
+  return { ghUser, email };
 }
 
-export async function handleGitHubCallback(
-  code: string,
-  jwtService: JwtService,
-): Promise<{ accessToken: string; isNew: boolean }> {
-  const ghToken = await exchangeCodeForToken(code);
-  const ghUser = await getGitHubUser(ghToken);
-  if (!ghUser.email) throw new Error('GitHub account has no verified email');
+export async function handleGithubCallback(code: string) {
+  const ghToken = await exchangeCode(code);
+  const { ghUser, email } = await getGithubIdentity(ghToken);
 
-  let user = (await db.select().from(users).where(eq(users.email, ghUser.email)).limit(1))[0];
-  let isNew = false;
+  let existing = await db.query.users.findFirst({ where: eq(users.email, email) });
 
-  if (!user) {
-    const [ws] = await db.insert(workspaces).values({ name: `${ghUser.login}'s workspace` }).returning();
-    [user] = await db.insert(users).values({
+  if (!existing) {
+    const [ws] = await db.insert(workspaces).values({
+      id: randomUUID(),
+      name: `${ghUser.name ?? ghUser.login}'s Workspace`,
+    }).returning();
+    const [u] = await db.insert(users).values({
+      id: randomUUID(),
       workspaceId: ws.id,
       name: ghUser.name ?? ghUser.login,
-      email: ghUser.email,
-      passwordHash: crypto.randomBytes(32).toString('hex'),
+      email,
+      passwordHash: '',
+      isActive: true,
+      githubId: String(ghUser.id),
+      githubLogin: ghUser.login,
     }).returning();
-    isNew = true;
+    existing = u;
+  } else if (!existing.githubId) {
+    // Link GitHub to existing email account
+    await db.update(users).set({ githubId: String(ghUser.id), githubLogin: ghUser.login }).where(eq(users.id, existing.id));
   }
 
-  const accessToken = await jwtService.signAccessToken({
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    workspaceId: user.workspaceId,
-  });
-
-  return { accessToken, isNew };
+  const payload = { sub: existing.id, email: existing.email, name: existing.name, workspaceId: existing.workspaceId, jti: randomUUID() };
+  const [accessToken, refreshToken] = await Promise.all([signAccessToken(payload), signRefreshToken(payload)]);
+  return { user: existing, accessToken, refreshToken };
 }
