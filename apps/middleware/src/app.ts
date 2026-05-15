@@ -8,7 +8,6 @@ import { requestLogger } from './middleware/request-logger.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { notFound } from './middleware/not-found.middleware';
 import authRouter from './routes/auth.routes';
-import githubRoutes from './routes/github.routes';
 import projectsRoutes from './routes/projects.routes';
 import analysisRoutes from './routes/analysis.routes';
 import graphRoutes from './routes/graph.routes';
@@ -22,14 +21,19 @@ app.use(cors({ origin: env.CORS_ORIGINS.split(',').map(o => o.trim()), credentia
 app.use(express.json());
 app.use(cookieParser(env.COOKIE_SECRET));
 app.use(requestLogger);
-app.use(rateLimit({ windowMs: env.RATE_LIMIT_WINDOW_MS, max: env.RATE_LIMIT_MAX, standardHeaders: true, legacyHeaders: false }));
+app.use(rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
 
-app.use('/api/health', healthRoutes);
-app.use('/api/auth', authRouter);
-app.use('/api/auth/github', githubRoutes);
-app.use('/api/projects', projectsRoutes);
+app.use('/api/health',        healthRoutes);
+// authRouter contains /github/* sub-routes internally — no separate mount needed
+app.use('/api/auth',          authRouter);
+app.use('/api/projects',      projectsRoutes);
 app.use('/api/analysis/jobs', analysisRoutes);
-app.use('/api/graph', graphRoutes);
+app.use('/api/graph',         graphRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

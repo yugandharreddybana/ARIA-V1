@@ -4,6 +4,7 @@ import { authController } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { signupSchema, loginSchema } from '../schemas/auth.schemas';
+import githubRoutes from './github.routes';
 
 const authRouter = Router();
 
@@ -15,10 +16,13 @@ const authRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
-authRouter.post('/signup', authRateLimit, validate(signupSchema), authController.signup.bind(authController));
-authRouter.post('/login', authRateLimit, validate(loginSchema), authController.login.bind(authController));
+// GitHub OAuth — must be declared before email/password routes
+authRouter.use('/github', githubRoutes);
+
+authRouter.post('/signup',  authRateLimit, validate(signupSchema), authController.signup.bind(authController));
+authRouter.post('/login',   authRateLimit, validate(loginSchema),  authController.login.bind(authController));
 authRouter.post('/refresh', authController.refresh.bind(authController));
-authRouter.post('/logout', authController.logout.bind(authController));
-authRouter.get('/me', requireAuth, authController.me.bind(authController));
+authRouter.post('/logout',  authController.logout.bind(authController));
+authRouter.get('/me',       requireAuth,   authController.me.bind(authController));
 
 export default authRouter;
