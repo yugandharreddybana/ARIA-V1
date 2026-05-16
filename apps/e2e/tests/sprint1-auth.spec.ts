@@ -12,7 +12,12 @@ test.describe('Sprint 1 — Authentication', () => {
 
   test('S1-02: Login page shows GitHub OAuth button', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByRole('button', { name: /github/i })).toBeVisible();
+    // GitHub button is an <a> tag wrapping <Button asChild> — not a native <button>
+    // Use getByText as primary, with getByRole fallback via .or()
+    await expect(
+      page.getByText(/continue with github/i)
+        .or(page.getByRole('button', { name: /github/i }))
+    ).toBeVisible();
   });
 
   test('S1-03: Login with empty fields shows validation errors', async ({ page }) => {
@@ -39,7 +44,9 @@ test.describe('Sprint 1 — Authentication', () => {
   test('S1-06: Password strength indicator visible on signup', async ({ page }) => {
     await page.goto('/signup');
     await page.fill('[name="password"]', 'weak');
-    await expect(page.locator('.password-strength, [data-testid="password-strength"]')).toBeVisible();
+    // Strength meter renders as an inline <ul> checklist — no .password-strength class or data-testid
+    // Match the first rule label that is always rendered: "At least 8 characters"
+    await expect(page.getByText('At least 8 characters')).toBeVisible();
   });
 
   test('S1-07: Unauthenticated user is redirected from /dashboard to /login', async ({ page }) => {
