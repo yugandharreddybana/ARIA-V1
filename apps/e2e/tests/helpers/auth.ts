@@ -15,8 +15,15 @@ export async function login(page: Page): Promise<void> {
   await page.fill('[name="email"]', TEST_EMAIL);
   await page.fill('[name="password"]', TEST_PASSWORD);
   await page.click('button[type="submit"]');
-  // Wait for redirect — both /dashboard and /projects are valid landing pages
   await page.waitForURL(/\/(dashboard|projects)/, { timeout: 15_000 });
+}
+
+/**
+ * Alias used by older specs (dashboard.spec.ts, projects.spec.ts).
+ * Identical to `login` — both names are exported so either can be used.
+ */
+export async function loginAsTestUser(page: Page): Promise<void> {
+  return login(page);
 }
 
 /**
@@ -38,4 +45,43 @@ export async function signup(
   await page.click('button[type="submit"]');
   await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
   return { email, password };
+}
+
+/**
+ * Create a project via the UI Projects page.
+ * Navigates to /projects, opens the create modal, fills in the name, submits,
+ * and waits for the new project card to appear before returning.
+ */
+export async function createProject(page: Page, name: string): Promise<void> {
+  await page.goto('/projects');
+  await page.waitForSelector('button', { timeout: 10_000 });
+  await page.getByRole('button', { name: /new project/i }).click();
+  await page.waitForSelector('[id="pname"], [name="name"], input[placeholder*="project" i]', { timeout: 5_000 });
+  // Fill whichever name input is present
+  const nameInput = page.locator('[id="pname"]').or(page.locator('input[placeholder*="platform" i]')).first();
+  await nameInput.fill(name);
+  await page.getByRole('button', { name: /^create$/i }).click();
+  // Wait for the project card to appear in the list
+  await page.waitForSelector(`text=${name}`, { timeout: 10_000 });
+}
+
+/**
+ * Delete a project via the UI (best-effort — no-op if the project is not found).
+ * Navigates to /projects and removes the project by name if a delete button exists.
+ * Most current project cards don't expose a delete button so this is a graceful no-op.
+ */
+export async function deleteProject(page: Page, name: string): Promise<void> {
+  await page.goto('/projects');
+  // Attempt to find a delete / archive button near the project card
+  const card = page.locator(`text=${name}`).first();
+  if (await card.count() === 0) return; // already gone
+  const deleteBtn = card
+    .locator('xpath=ancestor::*[contains(@class,"card") or contains(@class,"Card")][1]')
+    .getByRole('button', { name: /delete|archive|remove/i });
+  if (await deleteBtn.count() > 0) {
+    await deleteBtn.click();
+    // Wait for card to disappear
+    await card.waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {});
+  }
+  // If no delete button exists the project stays — tests should not depend on clean-up
 }
