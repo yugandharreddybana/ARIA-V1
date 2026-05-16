@@ -1,38 +1,57 @@
 import type { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken } from '../config/jwt';
-import { AppError } from './error.middleware';
-import type { AuthTokenPayload } from '@aria/shared';
+import jwt from 'jsonwebtoken';
+import { validateEnv } from '../config/env';
 
 export interface AriaRequest extends Request {
-  user?: AuthTokenPayload;
+  user?: {
+    userId: string;
+    workspaceId: string;
+    email: string;
+  };
 }
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: AuthTokenPayload;
-    }
-  }
+interface JwtPayload {
+  sub: string;
+  workspaceId: string;
+  email: string;
+  type: 'access';
 }
 
 export function requireAuth(req: AriaRequest, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  // Also check httpOnly cookie as fallback (defence-in-depth)
+  const cookieToken = (req as Request & { cookies: Record<string, string> }).cookies?.aria_access_token;
+  const finalToken = token ?? cookieToken ?? null;
+
+  if (!finalToken) {
+    res.status(401).json({ success: false, error: 'Authentication required', code: 'UNAUTHORIZED' });
+    return;
+  }
+
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+    const env = validateEnv();
+    const payload = jwt.verify(finalToken, env.JWT_PUBLIC_KEY, {
+      algorithms: ['RS256'],
+    }) as JwtPayload;
+
+    if (payload.type !== 'access') {
+      res.status(401).json({ success: false, error: 'Invalid token type', code: 'UNAUTHORIZED' });
+      return;
     }
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-      throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
-    }
-    const payload = verifyAccessToken(token);
-    req.user = payload;
+
+    req.user = {
+      userId: payload.sub,
+      workspaceId: payload.workspaceId,
+      email: payload.email,
+    };
     next();
-  } catch (error) {
-    if (error instanceof AppError) {
-      next(error);
-    } else {
-      next(new AppError('Invalid or expired token', 401, 'TOKEN_INVALID'));
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      res.status(401).json({ success: false, error: 'Token expired', code: 'TOKEN_EXPIRED' });
+      return;
     }
+    res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
   }
 }

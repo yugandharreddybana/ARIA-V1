@@ -1,59 +1,40 @@
-import { Request, Response, NextFunction } from 'express';
-import { ZodError } from 'zod';
-import { logger } from '../config/logger';
+import type { Request, Response, NextFunction } from 'express';
 
 export class AppError extends Error {
   constructor(
-    public message: string,
+    message: string,
     public statusCode: number = 500,
     public code: string = 'INTERNAL_ERROR',
-    public details?: unknown
   ) {
     super(message);
     this.name = 'AppError';
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 
-export function errorHandler(
-  err: Error,
-  req: Request,
-  res: Response,
-  _next: NextFunction
-): void {
-  // Zod validation errors
-  if (err instanceof ZodError) {
-    res.status(400).json({
-      success: false,
-      error: 'Validation failed',
-      code: 'VALIDATION_ERROR',
-      details: err.issues.map(i => ({
-        field: i.path.join('.'),
-        message: i.message,
-      })),
-    });
-    return;
-  }
+export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
+  // Never leak stack traces in production
+  const isProd = process.env.NODE_ENV === 'production';
 
-  // Known application errors
   if (err instanceof AppError) {
-    if (err.statusCode >= 500) {
-      logger.error(`AppError: ${err.message}`, { code: err.code, stack: err.stack });
-    }
     res.status(err.statusCode).json({
       success: false,
       error: err.message,
       code: err.code,
-      ...(err.details ? { details: err.details } : {}),
+      ...(isProd ? {} : { stack: err.stack }),
     });
     return;
   }
 
-  // Unknown errors — never leak internals
-  logger.error('Unhandled error:', { message: err.message, stack: err.stack });
+  // Unexpected errors — log and return generic response
+  console.error('[ARIA] Unhandled error:', err);
   res.status(500).json({
     success: false,
     error: 'An unexpected error occurred',
     code: 'INTERNAL_ERROR',
+    ...(isProd ? {} : { detail: String(err) }),
   });
+}
+
+export function notFound(_req: Request, res: Response): void {
+  res.status(404).json({ success: false, error: 'Route not found', code: 'NOT_FOUND' });
 }
