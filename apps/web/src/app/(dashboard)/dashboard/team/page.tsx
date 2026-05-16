@@ -20,7 +20,7 @@ function AddSkillModal({ projectId, onCreated, onClose }: { projectId: string; o
   const [slug, setSlug]           = useState('');
   const [realName, setRealName]   = useState('');
   const [roleTitle, setRoleTitle] = useState('');
-  const [description, setDesc]   = useState('');
+  const [description, setDesc]    = useState('');
   const [loading, setLoading]     = useState(false);
   const [err, setErr]             = useState('');
 
@@ -107,7 +107,7 @@ export default function TeamPage() {
         <div className="flex items-center gap-3">
           <Users className="h-5 w-5 text-aria-400" />
           <div>
-            <h1 className="text-2xl font-bold">Team & Skills</h1>
+            <h1 className="text-2xl font-bold">Team &amp; Skills</h1>
             <p className="text-sm text-muted-foreground">AI skills assigned to this project</p>
           </div>
         </div>
@@ -116,7 +116,12 @@ export default function TeamPage() {
             <SelectTrigger className="w-44"><SelectValue placeholder="Select project" /></SelectTrigger>
             <SelectContent>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
           </Select>
-          <Button variant="aria" onClick={() => setShowAdd(true)} disabled={!projectId}>
+          <Button
+            variant="aria"
+            onClick={() => setShowAdd(true)}
+            disabled={!projectId}
+            data-testid="add-skill-btn"
+          >
             <Plus className="h-4 w-4 mr-2" />Add Skill
           </Button>
         </div>
@@ -135,7 +140,7 @@ export default function TeamPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {skills.map(s => (
-            <Card key={s.id} className="hover:border-aria-500/40 transition-colors">
+            <Card key={s.id} data-testid="skill-card" className="hover:border-aria-500/40 transition-colors">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between">
                   <CardTitle className="text-base">{s.realName}</CardTitle>

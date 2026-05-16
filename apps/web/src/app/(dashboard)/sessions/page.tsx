@@ -85,12 +85,12 @@ function StartSessionModal({ projectId, onCreated, onClose }: { projectId: strin
 }
 
 export default function SessionsPage() {
-  const [projects, setProjects]     = useState<{ id: string; name: string }[]>([]);
-  const [projectId, setProjectId]   = useState('');
-  const [sessions, setSessions]     = useState<Session[]>([]);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState('');
-  const [showStart, setShowStart]   = useState(false);
+  const [projects, setProjects]   = useState<{ id: string; name: string }[]>([]);
+  const [projectId, setProjectId] = useState('');
+  const [sessions, setSessions]   = useState<Session[]>([]);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+  const [showStart, setShowStart] = useState(false);
 
   useEffect(() => {
     api<{ projects: { id: string; name: string }[] }>('/projects')
@@ -122,7 +122,12 @@ export default function SessionsPage() {
             <SelectTrigger className="w-44"><SelectValue placeholder="Select project" /></SelectTrigger>
             <SelectContent>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
           </Select>
-          <Button variant="aria" onClick={() => setShowStart(true)} disabled={!projectId}>
+          <Button
+            variant="aria"
+            onClick={() => setShowStart(true)}
+            disabled={!projectId}
+            data-testid="new-session-btn"
+          >
             <Plus className="h-4 w-4 mr-2" />Start Session
           </Button>
         </div>
@@ -144,7 +149,7 @@ export default function SessionsPage() {
             const cfg = STATE_CONFIG[s.state] ?? STATE_CONFIG.new;
             const Icon = cfg.icon;
             return (
-              <Card key={s.id}>
+              <Card key={s.id} data-testid="session-card">
                 <CardContent className="pt-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-1">

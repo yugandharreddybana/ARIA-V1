@@ -7,14 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { IdeaCard, IdeaStatus } from '@aria/shared';
-import { Plus, Loader2, AlertCircle, Lightbulb, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, Lightbulb, CheckCircle2, XCircle } from 'lucide-react';
 
 const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string }> = {
   draft:            { label: 'Draft',            color: 'bg-muted text-muted-foreground' },
   ready_for_review: { label: 'Ready for Review', color: 'bg-blue-500/10 text-blue-400' },
   approved:         { label: 'Approved',         color: 'bg-emerald-500/10 text-emerald-400' },
   rejected:         { label: 'Rejected',         color: 'bg-red-500/10 text-red-400' },
-  in_development:   { label: 'In Development',  color: 'bg-amber-500/10 text-amber-400' },
+  in_development:   { label: 'In Development',   color: 'bg-amber-500/10 text-amber-400' },
 };
 
 function CreateIdeaModal({ projectId, onCreated, onClose }: { projectId: string; onCreated: (i: IdeaCard) => void; onClose: () => void }) {
@@ -52,11 +52,12 @@ function CreateIdeaModal({ projectId, onCreated, onClose }: { projectId: string;
         <CardContent>
           <form onSubmit={submit} className="space-y-3">
             {err && <p className="text-sm text-destructive">{err}</p>}
-            {[{label:'Title', value:title, set:setTitle, placeholder:'What is the idea?'},
-              {label:'Summary', value:summary, set:setSummary, placeholder:'Brief description'},
-              {label:'User Impact', value:userImpact, set:setUser, placeholder:'How does it help users?'},
-              {label:'Business Impact', value:bizImpact, set:setBiz, placeholder:'Why does it matter to the business?'},
-            ].map(({label, value, set, placeholder}) => (
+            {[
+              { label: 'Title',           value: title,      set: setTitle,   placeholder: 'What is the idea?' },
+              { label: 'Summary',         value: summary,    set: setSummary, placeholder: 'Brief description' },
+              { label: 'User Impact',     value: userImpact, set: setUser,    placeholder: 'How does it help users?' },
+              { label: 'Business Impact', value: bizImpact,  set: setBiz,     placeholder: 'Why does it matter to the business?' },
+            ].map(({ label, value, set, placeholder }) => (
               <div key={label} className="space-y-1">
                 <Label>{label}</Label>
                 <Input value={value} onChange={e => set(e.target.value)} placeholder={placeholder} />
@@ -76,11 +77,11 @@ function CreateIdeaModal({ projectId, onCreated, onClose }: { projectId: string;
 }
 
 export default function PlanningPage() {
-  const [projects, setProjects]    = useState<{ id: string; name: string }[]>([]);
-  const [projectId, setProjectId]  = useState('');
-  const [ideas, setIdeas]          = useState<IdeaCard[]>([]);
-  const [loading, setLoading]      = useState(false);
-  const [error, setError]          = useState('');
+  const [projects, setProjects]     = useState<{ id: string; name: string }[]>([]);
+  const [projectId, setProjectId]   = useState('');
+  const [ideas, setIdeas]           = useState<IdeaCard[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
@@ -123,7 +124,12 @@ export default function PlanningPage() {
             <SelectTrigger className="w-44"><SelectValue placeholder="Select project" /></SelectTrigger>
             <SelectContent>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
           </Select>
-          <Button variant="aria" onClick={() => setShowCreate(true)} disabled={!projectId}>
+          <Button
+            variant="aria"
+            onClick={() => setShowCreate(true)}
+            disabled={!projectId}
+            data-testid="new-idea-btn"
+          >
             <Plus className="h-4 w-4 mr-2" />New Idea
           </Button>
         </div>
@@ -145,7 +151,7 @@ export default function PlanningPage() {
             const cfg = STATUS_CONFIG[idea.status as IdeaStatus] ?? STATUS_CONFIG.draft;
             const isPending = idea.status === 'draft' || idea.status === 'ready_for_review';
             return (
-              <Card key={idea.id}>
+              <Card key={idea.id} data-testid="idea-card">
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="text-base">{idea.title}</CardTitle>
@@ -166,11 +172,13 @@ export default function PlanningPage() {
                   </div>
                   {isPending && (
                     <div className="flex items-center gap-2 pt-1">
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                      <Button size="sm" variant="outline"
+                        className="h-7 text-xs gap-1.5 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
                         onClick={() => handleApprove(idea.id, true)}>
                         <CheckCircle2 className="h-3.5 w-3.5" />Approve
                       </Button>
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+                      <Button size="sm" variant="outline"
+                        className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
                         onClick={() => handleApprove(idea.id, false)}>
                         <XCircle className="h-3.5 w-3.5" />Reject
                       </Button>
