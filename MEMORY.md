@@ -8,6 +8,21 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-16 (evening) — Sprint 6 closed
+- Shipped the V27.9 §12–§14 safety layer: two-stage **sanitizer** with rate-limited defensive posture,
+  Ed25519-signed **FIM** over CORE_VALUES / DESIGN / DOMAIN_BOUNDARIES / SKILL, copyleft-aware
+  **plagiarism scanner**, deterministic **Red Team probe generator**, 5-axis **Anti-Slop Gate**,
+  regex-based **Anti-Test-Dodging linter**, **Turn-1 Discovery Form** with YAML mirror, Playwright **device
+  matrix** (1920 / 768 / 375), `.github/workflows/ci.yml`, Flyway **V6** schema.
+- Discovered + fixed a `.gitignore` bug that was silently excluding the entire `.entiresystem/` directory —
+  Sprint 5 ADRs were never actually pushed. New rule: `.aria/` (private runtime) gitignored,
+  `.entiresystem/` (canonical knowledge) committed.
+- Created the canonical brain files (CORE_VALUES.yml, DESIGN.md, DOMAIN_BOUNDARIES.json, SKILL.md stub) and
+  signed the FIM registry. Daemon Ed25519 key at `.aria/keys/daemon.ed25519`, public key at
+  `.entiresystem/keys/daemon.pub`.
+- Tests: 29 / 29 middleware (Sprints 5 + 6), 5 / 5 Java orchestrator, web typecheck green. 5 new E2E specs.
+- New ADRs: 0004 sanitizer thresholds, 0005 Anti-Slop axes, 0006 FIM signing key custody.
+
 ### 2026-05-16 (afternoon) — Sprint 5 closed end-to-end
 - Shipped Token Gateway (TS), Java Orchestrator, WebSocket hub, Flyway V5 migration, docker-compose stack,
   pgvector, Ollama init container, web session-status indicator + `useAriaSocket` hook.

@@ -7,13 +7,64 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 6 — Phase 1: Safety & Quality**  *(queued — start after user review of Sprint 5)*
-- Spec anchors: §12 (Security/FIM/Sanitization), §13 (QA/Red Team/IP scanner), §14 (Anti-Slop, Turn-1 Discovery)
-- DoD checklist: see IMPLEMENTATION.md §3.
+**Sprint 7 — Phase 2: Experience & Memory**  *(queued — start after user review of Sprint 6)*
+- Spec anchors: §2.2 (State Stores), §6 (Memory layers), §9 (Skill Experience).
+- DoD checklist: see IMPLEMENTATION.md §4.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 6 — Phase 1: Safety & Quality
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §12, §13, §14
+
+What was built:
+- **Sanitizer** (`apps/middleware/src/services/sanitizer.service.ts`) — two-stage detector (structural strip
+  + 11 weighted heuristics), thresholds `<0.70 cleared` / `0.70–0.89 quarantined` / `≥0.90 rejected`,
+  defensive auto-reject after `>20 quarantines / 60 min`. Optional `OllamaScorer` blends 50/50 with the
+  heuristic. Pure heuristic mode works without a live Ollama.
+- **File Integrity Monitor** (`apps/middleware/src/services/fim.service.ts`) — Ed25519-signed registry over
+  `SKILL.md`, `DESIGN.md`, `DOMAIN_BOUNDARIES.json`, `CORE_VALUES.yml`. Detects `ok`, `missing`, `untracked`,
+  `modified`, `invalid_signature`. Private key auto-generated at `.aria/keys/daemon.ed25519` (gitignored);
+  public key committed to `.entiresystem/keys/daemon.pub`; signed registry committed to
+  `.entiresystem/fim_registry.json`.
+- **Plagiarism / IP scanner** (`apps/middleware/src/services/plagiarism.service.ts`) — SPDX + 5-gram
+  fingerprint scan. Copyleft trips Legal Kill-Switch; permissive requires attribution; corpus matches above
+  15% similarity flag for review.
+- **Red Team probe generator** (`apps/middleware/src/services/redTeam.service.ts`) — deterministic seeded
+  LCG produces SQLi/XSS/CSRF/IDOR/mass-assign probes per changed route. Critical/high block merge.
+- **Anti-Slop Gate** (`apps/middleware/src/services/antiSlop.service.ts` + `tools/anti-slop-gate.ts`) —
+  5-axis rubric (Philosophy/Hierarchy/Execution/Specificity/Restraint). P0 violations hard-fail; total
+  score < 6 fails.
+- **Anti-Test-Dodging linter** (`tools/anti-test-dodging.ts`) — rejects tests with zero `expect()`, trivial
+  `expect(true).toBe(true)`-style assertions, or `it.skip` / `it.todo` / `xit(` / `xdescribe(`.
+- **Turn-1 Discovery Form** — `POST/GET /api/ui-discovery`, persisted to Postgres + mirrored to
+  `.entiresystem/ui_discovery/<ticket-id>.yml`. New page at `/(dashboard)/ui-discovery/[ticket]`.
+- **Playwright config** — device matrix added: `chromium-desktop` (1920×1080), `chromium-tablet`
+  (768×1024), `chromium-mobile` (375×667). Every spec runs on all three projects.
+- **Flyway V6** — `quarantine_events`, `fim_registry`, `fim_alerts`, `red_team_findings`,
+  `ui_discovery_forms` tables.
+- **CI workflow** (`.github/workflows/ci.yml`) — jobs: typecheck, unit-tests, java-tests, anti-test-dodging,
+  anti-slop, e2e matrix (desktop/tablet/mobile).
+- **`.entiresystem/` brain files** stubbed and signed: CORE_VALUES.yml, DESIGN.md (read-only marker),
+  DOMAIN_BOUNDARIES.json, SKILL.md.
+- 3 new ADRs: 0004 sanitizer thresholds, 0005 Anti-Slop axes, 0006 FIM signing key custody.
+- Fixed a pre-existing `.gitignore` bug that excluded `.entiresystem/` entirely — Sprint 5 ADRs were never
+  actually pushed. Now `.aria/` (daemon-private runtime) is gitignored and `.entiresystem/` (canonical
+  knowledge store) is committed.
+
+Tests:
+- Middleware Vitest 29/29 green (5 sanitizer + 5 FIM + 4 plagiarism + 5 redTeam + 3 antiSlop + 7 tokenGateway).
+- Java JUnit 5/5 green (1 `@Disabled` until Sprint 14 Testcontainers).
+- Web typecheck green.
+- 5 new Playwright specs: `sprint6-{sanitizer,fim,redteam,plagiarism,ui-discovery}.spec.ts`.
+
+Known state:
+- Sanitizer / FIM are wired as services; binding them to specific ingress points
+  (Token Gateway sanitization, FIM watcher on commit) is Sprint 7 + 9 work.
+- Red Team runner is offline — chaos sandbox + Blue Team correlation lands Sprint 14.
+
+---
 
 ### Sprint 5 — Phase 0 closeout: Token Gateway + Orchestrator + WebSocket + Infra
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §2.1, §2.2, §4, §6, §18F, §18H
@@ -127,7 +178,7 @@ Known state:
 | Sprint | Spec phase | Theme |
 |---|---|---|
 | 5 | Phase 0 | ✅ Core Foundation closeout — Token Gateway, Orchestrator, WebSocket, Flyway, docker-compose, pgvector |
-| 6 | Phase 1 | Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
+| 6 | Phase 1 | ✅ Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
 | 7 | Phase 2 | Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer |
 | 8 | Phase 3 | Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading |
 | 9 | Phase 4 | Telemetry & Incidents — OpenTelemetry, Incident Commander, Migration Orchestrator, Semantic Tripwires |
@@ -157,13 +208,13 @@ Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 | IDOR ownership checks | ✅ Sprint 3 (re-audit every new user-scoped route) |
 | Zod validation on every endpoint | ✅ Sprint 1 (enforced) |
 | Ed25519 agent identity + signed actions | 🔜 Sprint 12 |
-| FIM (SKILL.md / DESIGN.md / DOMAIN_BOUNDARIES.json / CORE_VALUES.yml) | 🔜 Sprint 6 |
-| Content sanitization (two-stage injection detector) | 🔜 Sprint 6 |
-| Red Team Saboteur (local pre-merge) | 🔜 Sprint 6 |
+| FIM (SKILL.md / DESIGN.md / DOMAIN_BOUNDARIES.json / CORE_VALUES.yml) | ✅ Sprint 6 |
+| Content sanitization (two-stage injection detector) | ✅ Sprint 6 |
+| Red Team Saboteur (local pre-merge) | ✅ Sprint 6 |
 | Red Team vs Blue Team (chaos every 6h) | 🔜 Sprint 14 |
-| Anti-Slop Gate (5 axes) | 🔜 Sprint 6 |
-| P0 deterministic linter | 🔜 Sprint 6 |
-| Anti-test-dodging static linter | 🔜 Sprint 6 |
+| Anti-Slop Gate (5 axes) | ✅ Sprint 6 |
+| P0 deterministic linter | ✅ Sprint 6 |
+| Anti-test-dodging static linter | ✅ Sprint 6 |
 | Golden Dataset evaluator regression | 🔜 Sprint 14 |
 | SWE-bench Lite CI gate | 🔜 Sprint 14 |
 | SWE-bench Verified + WebArena weekly | 🔜 Sprint 14 |
@@ -229,6 +280,11 @@ Coverage table is auto-refreshed at the end of every sprint after `pnpm test --c
 
 ## 📝 Session Notes
 
+- **2026-05-16 (evening)** — Sprint 6 closed. Shipped sanitizer + FIM + plagiarism + Red Team + Anti-Slop +
+  Anti-Test-Dodging + Turn-1 Discovery Form + device-matrix Playwright + Flyway V6 + CI workflow + signed
+  `.entiresystem/` brain files. 29 middleware tests green, 5 Java tests green, web typecheck green. Three
+  new ADRs (0004–0006). Found and fixed pre-existing `.gitignore` bug that was silently excluding
+  `.entiresystem/` — Sprint 5 ADRs now committed alongside Sprint 6 work.
 - **2026-05-16 (afternoon)** — Sprint 5 closed. Full Token Gateway + Java Orchestrator + WebSocket hub + Flyway
   V5 migration + docker-compose stack + pgvector + Ollama wiring + Anthropic stub. Middleware typecheck/test/build
   green, Java tests green, web typecheck green. Three ADRs committed under `.entiresystem/ADRs/`. Existing

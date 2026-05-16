@@ -1,0 +1,40 @@
+{
+  "$schema": "https://aria.dev/schemas/domain-boundaries-v1.json",
+  "version": 1,
+  "services": [
+    {
+      "name": "web",
+      "path": "apps/web",
+      "language": "TypeScript",
+      "framework": "Next.js 14",
+      "owner": "frontend-web-specialist",
+      "exposes": ["browser UI", "PWA"],
+      "depends_on": ["middleware"]
+    },
+    {
+      "name": "middleware",
+      "path": "apps/middleware",
+      "language": "TypeScript",
+      "framework": "Express 4",
+      "owner": "backend-api-specialist",
+      "exposes": ["REST /api/*", "WebSocket /ws"],
+      "depends_on": ["backend", "ollama", "postgres", "redis"]
+    },
+    {
+      "name": "backend",
+      "path": "apps/backend",
+      "language": "Java 21",
+      "framework": "Spring Boot 3",
+      "owner": "backend-api-specialist",
+      "exposes": ["REST /api/orchestrator/*", "REST /api/analysis/*", "REST /api/graph/*"],
+      "depends_on": ["postgres"]
+    }
+  ],
+  "domains": [
+    { "name": "auth",              "owned_by": "security-engineer",     "files": ["apps/middleware/src/services/auth.service.ts", "apps/middleware/src/middleware/auth.middleware.ts", "apps/middleware/src/config/jwt.ts"] },
+    { "name": "orchestrator",      "owned_by": "backend-api-specialist","files": ["apps/backend/src/main/java/com/aria/orchestrator/**"] },
+    { "name": "token-gateway",     "owned_by": "backend-api-specialist","files": ["apps/middleware/src/services/tokenGateway*.ts", "apps/middleware/src/services/dispatcher.*.ts"] },
+    { "name": "concept-graph",     "owned_by": "knowledge-graph-architect","files": ["apps/backend/src/main/java/com/aria/model/Concept*.java", "apps/backend/src/main/java/com/aria/controller/ConceptGraphController.java"] },
+    { "name": "safety-quality",    "owned_by": "security-engineer",     "files": ["apps/middleware/src/services/sanitizer.service.ts", "apps/middleware/src/services/fim.service.ts", "apps/middleware/src/services/redTeam.service.ts", "apps/middleware/src/services/plagiarism.service.ts", "apps/middleware/src/services/antiSlop.service.ts"] }
+  ]
+}

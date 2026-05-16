@@ -19,6 +19,7 @@ import ideasRoutes from './routes/ideas.routes';
 import aiRoutes from './routes/ai.routes';
 import llmRoutes from './routes/llm.routes';
 import orchestratorRoutes from './routes/orchestrator.routes';
+import uiDiscoveryRoutes from './routes/uiDiscovery.routes';
 
 /**
  * Build the Express app. Factory pattern so tests (and the WS attach step
@@ -51,6 +52,7 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/ai',            aiRoutes);
   app.use('/api/llm',           llmRoutes);
   app.use('/api/orchestrator',  orchestratorRoutes);
+  app.use('/api/ui-discovery',  uiDiscoveryRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
