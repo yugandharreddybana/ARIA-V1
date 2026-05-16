@@ -12,6 +12,11 @@ import projectsRoutes from './routes/projects.routes';
 import analysisRoutes from './routes/analysis.routes';
 import graphRoutes from './routes/graph.routes';
 import healthRoutes from './routes/health.routes';
+import ticketsRoutes from './routes/tickets.routes';
+import sessionsRoutes from './routes/sessions.routes';
+import skillsRoutes from './routes/skills.routes';
+import ideasRoutes from './routes/ideas.routes';
+import aiRoutes from './routes/ai.routes';
 
 const env = validateEnv();
 const app = express();
@@ -29,11 +34,15 @@ app.use(rateLimit({
 }));
 
 app.use('/api/health',        healthRoutes);
-// authRouter contains /github/* sub-routes internally — no separate mount needed
 app.use('/api/auth',          authRouter);
 app.use('/api/projects',      projectsRoutes);
+app.use('/api/projects',      skillsRoutes);   // /:projectId/skills and /:projectId/teams
 app.use('/api/analysis/jobs', analysisRoutes);
 app.use('/api/graph',         graphRoutes);
+app.use('/api/tickets',       ticketsRoutes);
+app.use('/api/sessions',      sessionsRoutes);
+app.use('/api/ideas',         ideasRoutes);
+app.use('/api/ai',            aiRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
