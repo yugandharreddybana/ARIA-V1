@@ -11,8 +11,16 @@ export class AppError extends Error {
   }
 }
 
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
-  // Never leak stack traces in production
+/**
+ * Central Express error handler.
+ * Stack traces are stripped in production to prevent information leakage.
+ */
+export function errorHandler(
+  err: unknown,
+  _req: Request,
+  res: Response,
+  _next: NextFunction,
+): void {
   const isProd = process.env.NODE_ENV === 'production';
 
   if (err instanceof AppError) {
@@ -25,7 +33,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
-  // Unexpected errors — log and return generic response
   console.error('[ARIA] Unhandled error:', err);
   res.status(500).json({
     success: false,
@@ -33,8 +40,4 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     code: 'INTERNAL_ERROR',
     ...(isProd ? {} : { detail: String(err) }),
   });
-}
-
-export function notFound(_req: Request, res: Response): void {
-  res.status(404).json({ success: false, error: 'Route not found', code: 'NOT_FOUND' });
 }
