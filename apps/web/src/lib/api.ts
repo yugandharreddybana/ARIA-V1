@@ -23,8 +23,14 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     credentials: 'include',
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: 'Request failed' }));
-    throw new ApiError(body.message ?? 'Request failed', res.status, body.details ?? []);
+    const body = await res.json().catch(() => ({ error: 'Request failed' }));
+    // Middleware sends { success, error, code } — prefer `error`, fall back to
+    // `message` for any legacy or third-party responses that still use that field.
+    throw new ApiError(
+      body.error ?? body.message ?? 'Request failed',
+      res.status,
+      body.details ?? [],
+    );
   }
   if (res.status === 204) return undefined as T;
   return res.json();

@@ -2,11 +2,21 @@ import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { validateEnv } from '../config/env';
 
+/**
+ * AriaRequest — extends Express Request with the authenticated user payload.
+ *
+ * IMPORTANT: the JWT payload uses `sub` for the userId (standard JWT claim),
+ * but we map it to `userId` here so every controller uses the explicit field
+ * name and TypeScript enforces it at compile time. Never read `req.user.sub`
+ * in a controller — it will be undefined at runtime.
+ */
 export interface AriaRequest extends Request {
   user?: {
+    /** Authenticated user's database UUID — mapped from JWT `sub` claim. */
     userId: string;
     workspaceId: string;
     email: string;
+    name: string;
   };
 }
 
@@ -14,6 +24,7 @@ interface JwtPayload {
   sub: string;
   workspaceId: string;
   email: string;
+  name: string;
   type: 'access';
 }
 
@@ -63,10 +74,13 @@ export function requireAuth(
       return;
     }
 
+    // Map JWT `sub` → `userId` so all controllers use the explicit field name.
+    // TypeScript will catch any attempt to use req.user.sub at compile time.
     req.user = {
       userId: payload.sub,
       workspaceId: payload.workspaceId,
       email: payload.email,
+      name: payload.name,
     };
     next();
   } catch (err) {
