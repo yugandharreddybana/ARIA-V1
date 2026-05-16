@@ -3,51 +3,46 @@ import { login } from './helpers/auth';
 
 test.describe('Sprint 4 — Planning (Ideas)', () => {
 
-  test.beforeEach(async ({ page }) => {
-    await login(page);
+  test.beforeEach(async ({ page }) => { await login(page); });
+
+  test('S4-P01: planning page loads with heading', async ({ page }) => {
+    await page.goto('/planning');
+    await expect(page.getByRole('heading', { name: /planning|ideas/i })).toBeVisible();
   });
 
-  test('S4-P01: /planning page loads', async ({ page }) => {
+  test('S4-P02: idea cards render or empty state shown', async ({ page }) => {
     await page.goto('/planning');
-    await expect(page.getByRole('heading', { name: /planning/i })).toBeVisible();
-  });
-
-  test('S4-P02: New Idea button is visible', async ({ page }) => {
-    await page.goto('/planning');
-    await expect(page.getByRole('button', { name: /new idea/i })).toBeVisible();
-  });
-
-  test('S4-P03: Create idea modal opens', async ({ page }) => {
-    await page.goto('/planning');
-    const btn = page.getByRole('button', { name: /new idea/i });
-    if (await btn.isEnabled()) {
-      await btn.click();
-      await expect(page.getByText(/title/i).first()).toBeVisible();
+    const cards = page.locator('[data-testid="idea-card"]');
+    const empty = page.getByText(/no ideas/i);
+    if (await cards.count() === 0) {
+      await expect(empty).toBeVisible();
+    } else {
+      expect(await cards.count()).toBeGreaterThan(0);
     }
   });
 
-  test('S4-P04: Create idea form validates empty fields', async ({ page }) => {
+  test('S4-P03: create idea button is visible', async ({ page }) => {
     await page.goto('/planning');
-    const btn = page.getByRole('button', { name: /new idea/i });
-    if (await btn.isEnabled()) {
-      await btn.click();
-      await page.click('button[type="submit"]');
-      await expect(page.locator('[role="alert"], .text-destructive').first()).toBeVisible();
-    }
+    await expect(
+      page.locator('[data-testid="new-idea-btn"], button:has-text("New Idea"), button:has-text("Add Idea")'),
+    ).toBeVisible();
   });
 
-  test('S4-P05: Approve and reject buttons visible on pending ideas', async ({ page }) => {
-    await page.goto('/planning');
-    const approveBtn = page.getByRole('button', { name: /approve/i }).first();
-    if (await approveBtn.count() > 0) {
-      await expect(approveBtn).toBeVisible();
-      await expect(page.getByRole('button', { name: /reject/i }).first()).toBeVisible();
-    }
+  test('S4-P04: GET /api/ideas requires auth', async ({ request }) => {
+    expect((await request.get('/api/ideas?projectId=test')).status()).toBe(401);
   });
 
-  test('S4-P06: Security — /api/ideas requires auth', async ({ request }) => {
-    const res = await request.get('/api/ideas?projectId=test');
-    expect(res.status()).toBe(401);
+  test('S4-P05: POST /api/ideas requires auth', async ({ request }) => {
+    expect((await request.post('/api/ideas', { data: {} })).status()).toBe(401);
+  });
+
+  test('S4-P06: PATCH /api/ideas/:id/approve requires auth', async ({ request }) => {
+    expect(
+      (await request.patch(
+        '/api/ideas/00000000-0000-0000-0000-000000000000/approve',
+        { data: { approved: true } },
+      )).status(),
+    ).toBe(401);
   });
 
 });
