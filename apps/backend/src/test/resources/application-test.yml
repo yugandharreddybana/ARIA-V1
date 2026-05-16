@@ -1,20 +1,18 @@
+# Test profile — JPA/JDBC autoconfigure off so context-load tests don't need Postgres.
+# Integration tests that need a real DB should activate the `it` profile (Testcontainers wiring TBD).
 spring:
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/aria_test}
-  flyway:
-    enabled: false
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration
 
 aria:
   jwt:
+    # base64-encoded valid Ed25519 / RSA public key (placeholder — verified only when filter is hit)
     public-key: dGVzdA==
-  backend:
-    middleware-url: http://localhost:3001
-  ollama:
-    base-url: http://localhost:11434
-    default-model: llama3
 
 logging:
   level:

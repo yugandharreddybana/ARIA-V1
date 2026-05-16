@@ -1,7 +1,9 @@
-import { pgTable, text, uuid, doublePrecision, timestamptz } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, doublePrecision, timestamp } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { workspaces } from './workspaces';
 import { projects } from './projects';
+
+const tstz = (name: string) => timestamp(name, { withTimezone: true });
 
 // ── concept_nodes ───────────────────────────────────────────────────
 export const conceptNodes = pgTable('concept_nodes', {
@@ -13,8 +15,8 @@ export const conceptNodes = pgTable('concept_nodes', {
   filePath:    text('file_path'),
   summary:     text('summary'),
   metadata:    text('metadata'),
-  createdAt:   timestamptz('created_at').notNull().defaultNow(),
-  updatedAt:   timestamptz('updated_at').notNull().defaultNow(),
+  createdAt:   tstz('created_at').notNull().defaultNow(),
+  updatedAt:   tstz('updated_at').notNull().defaultNow(),
 });
 
 // ── concept_edges ───────────────────────────────────────────────────
@@ -27,7 +29,7 @@ export const conceptEdges = pgTable('concept_edges', {
   edgeType:     text('edge_type').notNull(),
   label:        text('label'),
   confidence:   doublePrecision('confidence'),
-  createdAt:    timestamptz('created_at').notNull().defaultNow(),
+  createdAt:    tstz('created_at').notNull().defaultNow(),
 });
 
 // ── Relations ─────────────────────────────────────────────────────────

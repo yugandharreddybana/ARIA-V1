@@ -1,0 +1,199 @@
+# ──────────────────────────────────────────────────────────────────────
+# ARIA-V1 docker-compose — local-first development stack
+#
+# Services:
+#   postgres   — Postgres 16 with pgvector extension preinstalled
+#   redis      — Redis 7 (Pub/Sub, file locks, hydration cache)
+#   ollama     — Local LLM runtime; init container pulls required models
+#   backend    — Spring Boot 3 / Java 21 (Orchestrator + Concept Graph)
+#   middleware — Node.js 20 / Express 4 (Token Gateway + WebSocket hub)
+#   web        — Next.js 14 (dashboard)
+#
+# Usage:
+#   bash scripts/dev-up.sh        # full bring-up (also runs key gen)
+#   docker compose up -d          # services only
+#   docker compose down -v        # stop and wipe volumes
+#   docker compose logs -f <svc>  # tail logs
+# ──────────────────────────────────────────────────────────────────────
+
+name: aria-v1
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aria-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-aria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aria}
+      POSTGRES_DB:       ${POSTGRES_DB:-aria_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - aria-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aria} -d ${POSTGRES_DB:-aria_dev}"]
+      interval: 5s
+      timeout:  5s
+      retries:  20
+    networks:
+      - aria-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: aria-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - aria-redis-data:/data
+    healthcheck:
+      test:     ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout:  5s
+      retries:  20
+    networks:
+      - aria-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aria-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - aria-ollama-models:/root/.ollama
+    healthcheck:
+      test:     ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout:  5s
+      retries:  20
+    networks:
+      - aria-net
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: aria-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        export OLLAMA_HOST=http://ollama:11434
+        echo "Pulling qwen2.5-coder..." && ollama pull qwen2.5-coder:7b || true
+        echo "Pulling nomic-embed-text..." && ollama pull nomic-embed-text || true
+        echo "Models ready."
+    restart: "no"
+    networks:
+      - aria-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: aria-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      POSTGRES_HOST:     postgres
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       ${POSTGRES_DB:-aria_dev}
+      POSTGRES_USER:     ${POSTGRES_USER:-aria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aria}
+      JWT_PUBLIC_KEY:    ${JWT_PUBLIC_KEY}
+      BACKEND_PORT:      8080
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    healthcheck:
+      test:     ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health || exit 1"]
+      interval: 10s
+      timeout:  5s
+      retries:  30
+    networks:
+      - aria-net
+
+  middleware:
+    build:
+      context: .
+      dockerfile: Dockerfile.middleware
+    container_name: aria-middleware
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      NODE_ENV:               development
+      DATABASE_URL:           postgresql://${POSTGRES_USER:-aria}:${POSTGRES_PASSWORD:-aria}@postgres:5432/${POSTGRES_DB:-aria_dev}
+      REDIS_URL:              redis://redis:6379
+      OLLAMA_BASE_URL:        http://ollama:11434
+      OLLAMA_DEFAULT_MODEL:   ${OLLAMA_DEFAULT_MODEL:-qwen2.5-coder:7b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      BACKEND_URL:            http://backend:8080
+      JWT_PRIVATE_KEY:        ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY:         ${JWT_PUBLIC_KEY}
+      JWT_ACCESS_EXPIRES_IN:  ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      COOKIE_SECRET:          ${COOKIE_SECRET}
+      MIDDLEWARE_PORT:        3001
+      CORS_ORIGINS:           ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_MAX:         ${RATE_LIMIT_MAX:-100}
+      RATE_LIMIT_WINDOW_MS:   ${RATE_LIMIT_WINDOW_MS:-900000}
+      GITHUB_CLIENT_ID:       ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET:   ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_CALLBACK_URL:    ${GITHUB_CALLBACK_URL:-http://localhost:3001/api/auth/github/callback}
+      ANTHROPIC_ENABLED:      ${ANTHROPIC_ENABLED:-false}
+      ANTHROPIC_API_KEY:      ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_DEFAULT_MODEL: ${ANTHROPIC_DEFAULT_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_HIGH_STAKES_MODEL: ${ANTHROPIC_HIGH_STAKES_MODEL:-claude-opus-4-7}
+      MAX_SESSION_TOKEN_BUDGET: ${MAX_SESSION_TOKEN_BUDGET:-500000}
+      TOKEN_BUDGET_WARN_RATIO:  ${TOKEN_BUDGET_WARN_RATIO:-0.80}
+      TOKEN_BUDGET_HARD_RATIO:  ${TOKEN_BUDGET_HARD_RATIO:-0.95}
+      MAX_QUEUE_DEPTH:        ${MAX_QUEUE_DEPTH:-50}
+    ports:
+      - "${MIDDLEWARE_PORT:-3001}:3001"
+    healthcheck:
+      test:     ["CMD-SHELL", "wget -qO- http://localhost:3001/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout:  5s
+      retries:  20
+    networks:
+      - aria-net
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: aria-web
+    restart: unless-stopped
+    depends_on:
+      middleware:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_MIDDLEWARE_URL: ${NEXT_PUBLIC_MIDDLEWARE_URL:-http://localhost:3001}
+      NEXT_PUBLIC_WS_URL:         ${NEXT_PUBLIC_WS_URL:-http://localhost:3001}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    networks:
+      - aria-net
+
+volumes:
+  aria-pg-data:
+  aria-redis-data:
+  aria-ollama-models:
+
+networks:
+  aria-net:
+    name: aria-net
+    driver: bridge

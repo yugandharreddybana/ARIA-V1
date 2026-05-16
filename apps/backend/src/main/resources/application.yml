@@ -2,9 +2,11 @@ spring:
   application:
     name: aria-backend
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/aria_dev}
-    username: ${DB_USERNAME:aria}
-    password: ${DB_PASSWORD:aria}
+    # stringtype=unspecified lets Postgres infer the column type from JDBC text params —
+    # required because existing JPA entities (AnalysisJob etc.) map UUID columns to Java String fields.
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:aria_dev}?stringtype=unspecified}
+    username: ${POSTGRES_USER:aria}
+    password: ${POSTGRES_PASSWORD:aria}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -14,8 +16,12 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+        jdbc:
+          time_zone: UTC
   flyway:
-    enabled: false  # Flyway managed by packages/db
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
 
 server:
   port: ${BACKEND_PORT:8080}

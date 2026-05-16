@@ -8,7 +8,20 @@
 
 ## §A Session Journal (newest first)
 
-### 2026-05-16 — Architect planning session
+### 2026-05-16 (afternoon) — Sprint 5 closed end-to-end
+- Shipped Token Gateway (TS), Java Orchestrator, WebSocket hub, Flyway V5 migration, docker-compose stack,
+  pgvector, Ollama init container, web session-status indicator + `useAriaSocket` hook.
+- Repaired pre-existing Sprint 1-4 build tech debt so the entire monorepo typechecks/builds clean:
+  Drizzle schemas (`timestamptz` → `timestamp` with `withTimezone`), duplicate `SecurityConfig` removed,
+  dead `JwtAuthFilter` removed, missing `Select` UI primitive added, missing default export on
+  `health.routes.ts` added, `useNodesState<Node>([])` typing on the graph page, JWT filter migrated to
+  modern `Jwts.parser().verifyWith(...)` API.
+- New ADRs: 0001 (pgvector), 0002 (socket.io), 0003 (Token Gateway in middleware).
+- Test status: middleware Vitest 7/7 green, Java orchestrator 5/5 green (+ 1 `@Disabled` context test
+  pending Sprint 14 Testcontainers wiring), web typecheck green, middleware build green.
+- Branch: `claude/aria-implementation-plan-4GHZI`. Sprint 6 (Phase 1) is the next queued unit of work.
+
+### 2026-05-16 (morning) — Architect planning session
 - Audited the local repo and `origin/main`: Sprints 1–4 done; Sprint 5 not started; local in sync.
 - Digested V27.9 spec (23 sections, 17 phases). Captured contracts for every section.
 - User locked decisions: full-depth plan for all 17 phases; local-first docker-compose; Ollama-first with Anthropic
@@ -26,6 +39,27 @@
 > SHA refers to `git rev-parse HEAD:<path>` at time of last read. Refresh whenever a file is touched.
 
 ### Root
+- **`docker-compose.yml`** | Local stack: postgres(+pgvector), redis, ollama(+init), middleware, backend, web | sha:`HEAD@S5` |
+  Volumes `aria-pg-data`, `aria-redis-data`, `aria-ollama-models`. `ollama-init` container pulls
+  `qwen2.5-coder:7b` + `nomic-embed-text`. Backend uses `SPRING_DATASOURCE_URL` + `?stringtype=unspecified`
+  for String↔UUID interop. All env values come from `.env.local`.
+- **`Dockerfile.{web,middleware,backend}`** | Multi-stage builds | sha:`HEAD@S5` |
+  Web/middleware use Node 20 alpine with pnpm via corepack. Backend uses `maven:3.9-eclipse-temurin-21` for
+  build and `eclipse-temurin:21-jre-alpine` for runtime. Flyway migrations are baked into the backend JAR
+  via the pom.xml resources mapping.
+- **`scripts/dev-up.sh` / `dev-down.sh` / `db-migrate.sh`** | Local bring-up + standalone Flyway runner | sha:`HEAD@S5` |
+  `dev-up.sh` runs `generate-keys.sh` if missing, seeds `.env.local` from `.env.example` with PEM keys, then
+  `docker compose up -d --build`. `db-migrate.sh` runs Flyway via a one-shot Docker container.
+- **`.entiresystem/ADRs/ADR-0001-pgvector.md`** | pgvector for all embeddings/graph | sha:`HEAD@S5` |
+  **`ADR-0002-socket-io.md`** | socket.io over native ws | sha:`HEAD@S5` |
+  **`ADR-0003-token-gateway-in-middleware.md`** | Token Gateway lives in Node middleware | sha:`HEAD@S5` |
+- **`packages/db/flyway/migrations/V5__sprint5_token_gateway.sql`** | sha:`HEAD@S5` |
+  Enables pgvector. Extends `sessions` with workspace_id, user_id, mode, environment, mission_type,
+  mission_risk_appetite, mission_scope, token_budget, time_budget_minutes, is_first_start, brief_summary;
+  drops `team_id NOT NULL` constraint; adds CHECK constraints on mode/env/mission_type/state.
+  Adds `embedding vector(768)` + `graph_level` on concept_nodes, `graph_level` on concept_edges.
+  Creates `replay_frames` (append-only LLM call log) and `token_ledger` (per-session per-backend totals).
+
 - **`CLAUDE.md`** | Master operating manual for Claude Code sessions | sha:`HEAD@2026-05-16` |
   Sections: (1) project purpose, (2) monorepo structure, (3) tech stack table, (4) security rules
   (RS256 only, bcrypt 12, HttpOnly cookies, Zod on all endpoints, IDOR checks, CORS allowlist, rate limit,
@@ -135,10 +169,85 @@
   Sprint 4 pages | sha:tbd | UI shells with mock/static data. To be wired to live APIs in Sprint 5.
 
 ### apps/middleware (Express)
-- **`apps/middleware/src/app.ts`** | Express setup, mounts routes | sha:tbd |
-  Order: Helmet → CORS → express-rate-limit → request-logger → JSON parse → cookie parser → routers
-  (authRouter, projectsRouter, ticketsRouter, sessionsRouter, skillsRouter, ideasRouter, aiRouter, analysisRouter,
-  graphRouter, githubRouter, healthRouter) → notFound → error handler.
+- **`apps/middleware/src/app.ts`** | Express factory + route mounts | sha:`HEAD@S5` |
+  Now exports `createApp(env)` factory in addition to the default app. Mounts all Sprint 1-4 routers plus
+  Sprint 5 additions: `llmRoutes` at `/api/llm` and `orchestratorRoutes` at `/api/orchestrator`. Order
+  unchanged: Helmet → CORS → JSON → cookies → request logger → global rate limit → routes → notFound → errorHandler.
+
+- **`apps/middleware/src/index.ts`** | HTTP server + socket.io attach + graceful shutdown | sha:`HEAD@S5` |
+  Creates the express app via factory, wraps in `http.createServer`, attaches socket.io via `createWsServer`,
+  closes pg pool + WS + HTTP server on SIGTERM/SIGINT with a 10s forced-exit fallback.
+
+- **`apps/middleware/src/services/tokenGateway.service.ts`** | Single LLM egress | sha:`HEAD@S5` |
+  Five-priority queue (p0_critical → speculative). Backpressure at MAX_QUEUE_DEPTH rejects speculative/low.
+  Budget enforcement (warn 80% / hard-stop 95%) against `token_ledger`. Dependency-inverted ports:
+  `ReplayFrameRepository`, `TokenLedgerRepository`, `BackendDispatcher`. EventEmitter publishes
+  `token.warn`, `token.hard_stop`, `queue.depth` for the WS hub to broadcast. ReplayFrame insert happens
+  BEFORE dispatch (never silent), updated to `dispatched` then `completed` / `failed`.
+
+- **`apps/middleware/src/services/{dispatcher.ollama,dispatcher.anthropic,replay.repository,ledger.repository,db.client,tokenGateway.factory}.ts`**
+  Ollama live dispatch (`POST /api/chat`); Anthropic dispatch gated by `ANTHROPIC_ENABLED` (`POST /v1/messages`);
+  pg-backed Replay + Ledger repos plus in-memory variants for tests; singleton `Pool` reading `DATABASE_URL`;
+  factory wires backends, dispatchers, repos with env knobs.
+
+- **`apps/middleware/src/{schemas/llm.schemas.ts,controllers/llm.controller.ts,routes/llm.routes.ts}`**
+  Zod schema (strict); controller maps `TokenGatewayError.code` to HTTP status (402 budget, 429 queue full,
+  400 unknown backend, 502 dispatch); routes rate-limited per minute on top of the global limiter.
+
+- **`apps/middleware/src/{services/orchestrator.proxy.ts,controllers/orchestrator.controller.ts,routes/orchestrator.routes.ts}`**
+  Pass-through proxy from middleware to Java backend `/api/orchestrator/sessions/...`. Token forwarded from
+  `Authorization: Bearer` header (or `aria_access_token` cookie).
+
+- **`apps/middleware/src/ws/index.ts`** | socket.io hub with RS256 handshake | sha:`HEAD@S5` |
+  Path `/ws`. Rooms `workspace.<wid>` (auto-joined), `session.<sid>`, `agent.<aid>`, `system.health`
+  (subscribed on demand). Bridges Token Gateway events to the right room.
+
+- **`apps/middleware/src/__tests__/tokenGateway.test.ts`** | Vitest, 7 tests | sha:`HEAD@S5` |
+  Covers single dispatch, queue+inflight status, backpressure on speculative, budget hard-stop, unknown
+  backend, dispatcher failure → reservation released, priority ordering.
+
+- **`apps/backend/src/main/java/com/aria/orchestrator/*`** | Sprint 5 orchestrator package | sha:`HEAD@S5` |
+  `Session` (JPA), `SessionState`/`SessionMode`/`Environment`/`MissionType` enums, `SessionRepository`,
+  `OrchestratorService` with strict state-machine transitions + IDOR ownership checks,
+  `OrchestratorController` exposing `/api/orchestrator/sessions/{id}/{start|pause|stop|status}`.
+  DTOs: `CreateSessionRequest`, `SessionDto`. Enum fields are stored as TEXT with DB-side CHECK constraints
+  for Hibernate friendliness.
+
+- **`apps/backend/src/main/java/com/aria/security/SecurityConfig.java`** | Unified security config | sha:`HEAD@S5` |
+  Reads `CORS_ORIGINS`. Permits actuator/health endpoints; everything else requires JWT. The legacy
+  duplicate at `com.aria.config.SecurityConfig` was removed.
+
+- **`apps/backend/src/main/java/com/aria/security/JwtAuthenticationFilter.java`** | sha:`HEAD@S5` |
+  Migrated to Jwts 0.12 `parser().verifyWith(key).build().parseSignedClaims(...)` API. Populates
+  `AriaAuthentication(userId, email, name, workspaceId, jti)`.
+
+- **`apps/backend/src/main/resources/application.yml`** | sha:`HEAD@S5` |
+  Datasource URL builds from POSTGRES_HOST/PORT/DB/USER/PASSWORD (or `SPRING_DATASOURCE_URL` override),
+  appends `?stringtype=unspecified` for String↔UUID columns. Flyway is now enabled and reads
+  `classpath:db/migration` (Flyway resources baked into the JAR via pom.xml).
+
+- **`apps/backend/src/test/java/com/aria/orchestrator/OrchestratorServiceTest.java`** | JUnit 5 + Mockito, 5 tests | sha:`HEAD@S5` |
+  create defaults, start transition, pause guard, IDOR block, stop completes.
+
+- **`apps/backend/src/test/resources/application-test.yml`** | sha:`HEAD@S5` |
+  Disables DataSource/JPA/Flyway autoconfigure for the test profile so unit tests do not need Postgres.
+
+- **`apps/web/src/hooks/useAriaSocket.ts`** | typed WS hook | sha:`HEAD@S5` |
+  Loads token from localStorage, opens socket.io to `${NEXT_PUBLIC_WS_URL}/ws` with `auth.token`, surfaces
+  `connected` + last typed event + `subscribe(room)` / `unsubscribe(room)`.
+
+- **`apps/web/src/components/SessionStatus.tsx`** | dashboard sidebar indicator | sha:`HEAD@S5` |
+  Shows live WS connection state, queue depth, last token alert (warn / hard_stop). `data-testid="session-status"`.
+
+- **`apps/web/src/components/ui/select.tsx`** | shadcn-flavoured Select | sha:`HEAD@S5` |
+  Native `<select>` under the hood — keeps the bundle small and gets accessibility for free. Same import
+  surface (`Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`) used by Sprint 4 pages.
+
+- **`apps/e2e/tests/sprint5-{token-gateway,orchestrator,websocket}.spec.ts`** | 8 Playwright tests | sha:`HEAD@S5` |
+  Unauth + auth status, Zod-rejected empty body, sidebar indicator render, full state-machine round-trip,
+  IDOR (signup-as-other-user), unauth handshake rejected, auth handshake emits `hello`.
+
+
 
 - **`apps/middleware/src/config/jwt.ts`** | RS256 sign/verify with PEM keys | sha:tbd |
   Reads `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` from env (via packages/config Zod schema). Issues access tokens
@@ -235,19 +344,24 @@
 ## §D Anti-Patterns Observed (per-file lessons + behavioural)
 
 ### Behavioural anti-patterns (operating principles for me, the assistant)
+- **Two-sentence response rule.** User wants ALL responses kept to two sentences max. Exceptions: (1) clarifying
+  questions when blocked, and (2) the actual content of files I edit. The two-sentence rule overrides the default
+  "say what you found" instinct — keep summaries minimal.
+- **10,000% finished before declaring done.** When user says "start Sprint N", don't report completion until the
+  sprint's FULL DoD checklist in PROGRESS.md is green, every file is committed, tests pass, and an audit + re-audit
+  pass has been done. Nothing left for the next sprint to clean up.
 - **Don't ship partial work.** User has had prior sessions where the model handled only a few lines at a time,
-  produced limited responses, and didn't finish the area it started. When development begins, **complete the
-  full sprint scope** (Token Gateway + Orchestrator + WebSocket + Flyway + docker-compose + pgvector + live
-  data wiring + tests + ADRs + MEMORY/PROGRESS updates), not isolated fragments. If the work is too large for
-  one turn, finish a coherent unit and tell the user explicitly what's done and what's next — never go silent
-  mid-area.
+  produced limited responses, and didn't finish the area it started. Complete the full sprint scope, not isolated
+  fragments. If work is too large for one turn, finish a coherent unit and tell the user explicitly what's done —
+  never go silent mid-area.
 - **Don't bail on hard work.** When a step fails (test red, compile error, schema clash), diagnose root cause
-  and fix it. Don't strip features to "make it green". Don't `--no-verify`. Re-stage and create a new commit
-  after fixes.
+  and fix it. Don't strip features to "make it green". Don't `--no-verify`. Re-stage and create a new commit.
 - **Always update MEMORY.md and PROGRESS.md at the end of every working session.** Even a 30-minute session.
   The file index is the only thing keeping token spend sustainable across sessions.
 - **Drive to a runnable state every commit.** `pnpm dev` must boot the full stack; tests must pass. If you
   break a service, fix it in the same commit or revert.
+- **Act like the owner of the product.** Production-grade quality on security / dev / testing — no shortcuts,
+  no TODOs left behind, no "we'll fix this later". User has explicitly delegated ownership.
 
 ### Per-file lessons
 

@@ -48,3 +48,4 @@ private_key*
 
 # ARIA system directory (contains sensitive workspace data)
 .entiresystem/
+tsconfig.tsbuildinfo

@@ -1,7 +1,9 @@
-import { pgTable, text, uuid, timestamptz } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, timestamp } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { workspaces } from './workspaces';
 import { projects, projectRepos } from './projects';
+
+const tstz = (name: string) => timestamp(name, { withTimezone: true });
 
 export const analysisJobs = pgTable('analysis_jobs', {
   id:           text('id').primaryKey(),                // Spring-generated string ID
@@ -12,8 +14,8 @@ export const analysisJobs = pgTable('analysis_jobs', {
   workspaceId:  uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   status:       text('status').notNull().default('queued'),
   errorMessage: text('error_message'),
-  createdAt:    timestamptz('created_at').notNull().defaultNow(),
-  updatedAt:    timestamptz('updated_at').notNull().defaultNow(),
+  createdAt:    tstz('created_at').notNull().defaultNow(),
+  updatedAt:    tstz('updated_at').notNull().defaultNow(),
 });
 
 export const analysisJobsRelations = relations(analysisJobs, ({ one }) => ({

@@ -12,8 +12,14 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "test": "turbo test",
+    "typecheck": "turbo typecheck",
     "clean": "turbo clean",
-    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "dev:up": "bash scripts/dev-up.sh",
+    "dev:down": "bash scripts/dev-down.sh",
+    "dev:reset": "bash scripts/dev-down.sh --wipe && bash scripts/dev-up.sh",
+    "db:migrate": "bash scripts/db-migrate.sh",
+    "test:e2e": "pnpm -F @aria/e2e test"
   },
   "devDependencies": {
     "turbo": "^2.0.4",
