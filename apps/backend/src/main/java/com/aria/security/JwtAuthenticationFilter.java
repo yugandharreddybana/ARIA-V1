@@ -8,7 +8,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -36,17 +35,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         final String token = header.substring(7);
         try {
             PublicKey publicKey = keyProvider.getPublicKey();
-            Claims claims = Jwts.parserBuilder()
-                    .setSigningKey(publicKey)
+            Claims claims = Jwts.parser()
+                    .verifyWith(publicKey)
                     .build()
-                    .parseClaimsJws(token)
-                    .getBody();
+                    .parseSignedClaims(token)
+                    .getPayload();
 
-            String userId = claims.getSubject();
-            String email = claims.get("email", String.class);
-            String name = claims.get("name", String.class);
+            String userId      = claims.getSubject();
+            String email       = claims.get("email", String.class);
+            String name        = claims.get("name", String.class);
             String workspaceId = claims.get("workspaceId", String.class);
-            String jti = claims.getId();
+            String jti         = claims.getId();
 
             AriaAuthentication auth = new AriaAuthentication(userId, email, name, workspaceId, jti);
             SecurityContextHolder.getContext().setAuthentication(auth);

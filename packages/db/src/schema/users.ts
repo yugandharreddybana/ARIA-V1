@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamptz } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { workspaces } from './workspaces';
 
@@ -12,8 +12,8 @@ export const users = pgTable('users', {
   githubId: text('github_id').unique(),
   githubLogin: text('github_login'),
   avatarUrl: text('avatar_url'),
-  createdAt: timestamptz('created_at').notNull().defaultNow(),
-  updatedAt: timestamptz('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const usersRelations = relations(users, ({ one }) => ({

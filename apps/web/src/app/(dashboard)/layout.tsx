@@ -9,6 +9,7 @@ import {
   Bot, Settings, LogOut, Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SessionStatus } from '@/components/SessionStatus';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
@@ -50,6 +51,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <BrainCircuit className="h-5 w-5 text-aria-500" />
           <span className="font-bold tracking-tight">ARIA</span>
           <span className="text-xs text-muted-foreground ml-auto">v0.1</span>
+        </div>
+
+        <div className="px-3 pt-3">
+          <SessionStatus />
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">

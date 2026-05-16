@@ -1,0 +1,27 @@
+# ARIA Middleware — Node 20 / Express 4
+FROM node:20-alpine AS deps
+WORKDIR /repo
+RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
+COPY pnpm-lock.yaml* package.json turbo.json ./
+COPY apps/middleware/package.json apps/middleware/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/config/package.json packages/config/package.json
+RUN pnpm install --frozen-lockfile=false
+
+FROM node:20-alpine AS build
+WORKDIR /repo
+RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
+COPY --from=deps /repo /repo
+COPY . .
+RUN pnpm --filter @aria/middleware build
+
+FROM node:20-alpine AS runtime
+WORKDIR /repo
+RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
+RUN apk add --no-cache wget
+ENV NODE_ENV=production
+COPY --from=build /repo /repo
+WORKDIR /repo/apps/middleware
+EXPOSE 3001
+CMD ["pnpm", "start"]

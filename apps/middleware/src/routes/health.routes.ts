@@ -11,3 +11,5 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     version: '0.1.0',
   });
 });
+
+export default healthRouter;

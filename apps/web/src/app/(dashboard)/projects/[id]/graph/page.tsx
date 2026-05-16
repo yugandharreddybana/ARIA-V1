@@ -139,8 +139,8 @@ export default function GraphPage() {
   const [selected, setSelected] = useState<ConceptNode | null>(null);
   const [clearing, setClearing] = useState(false);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const fetchGraph = useCallback(async () => {
     setLoading(true); setError('');

@@ -1,0 +1,17 @@
+# ARIA Backend — Java 21 / Spring Boot 3 (multi-stage)
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build
+COPY apps/backend/pom.xml apps/backend/pom.xml
+COPY packages/db/flyway packages/db/flyway
+WORKDIR /build/apps/backend
+RUN mvn -B -ntp dependency:go-offline
+COPY apps/backend/src ./src
+RUN mvn -B -ntp -DskipTests package
+
+FROM eclipse-temurin:21-jre-alpine AS runtime
+WORKDIR /app
+RUN apk add --no-cache curl
+COPY --from=build /build/apps/backend/target/*.jar app.jar
+EXPOSE 8080
+ENV JAVA_OPTS="--enable-preview"
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar /app/app.jar"]

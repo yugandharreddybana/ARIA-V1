@@ -1,23 +1,55 @@
 # ARIA-V1 — Progress Log
 
-> This is the Claude Code session handoff file.
-> READ THIS at the start of every session to know exactly where we are.
-> UPDATE THIS at the end of every session.
+> This is the session handoff file. READ at session start, UPDATE at session end.
+> Pair with `MEMORY.md` (file index + decisions + anti-patterns) and `IMPLEMENTATION.md` (full 17-phase build plan).
 
 ---
 
-## Current Sprint: 5 — Token Gateway + Agent Orchestrator + WebSocket Layer
-## Status: NOT STARTED
-## Last Updated: 2026-05-16
-## Last Commit: fix(web): add missing data-testid attrs for sprint4 e2e specs (planning, sessions, team)
+## 🔄 Active Sprint
+
+**Sprint 6 — Phase 1: Safety & Quality**  *(queued — start after user review of Sprint 5)*
+- Spec anchors: §12 (Security/FIM/Sanitization), §13 (QA/Red Team/IP scanner), §14 (Anti-Slop, Turn-1 Discovery)
+- DoD checklist: see IMPLEMENTATION.md §3.
 
 ---
 
-## ✅ COMPLETED SPRINTS
+## ✅ Completed Sprints
+
+### Sprint 5 — Phase 0 closeout: Token Gateway + Orchestrator + WebSocket + Infra
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §2.1, §2.2, §4, §6, §18F, §18H
+
+What was built:
+- `docker-compose.yml` + `Dockerfile.{web,middleware,backend}` — Postgres 16 + pgvector, Redis 7, Ollama (with init container pulling `qwen2.5-coder:7b` + `nomic-embed-text`), middleware, backend, web. Healthchecks + named volumes.
+- `scripts/dev-up.sh`, `dev-down.sh`, `db-migrate.sh` — full local bring-up + Flyway via Docker.
+- Flyway `V5__sprint5_token_gateway.sql` — enables pgvector, extends `sessions` with Orchestrator fields (mode/environment/mission_type/token_budget/user_id) + CHECK constraints, reserves `embedding vector(768)` on `concept_nodes`, creates `replay_frames` and `token_ledger`.
+- **Token Gateway** (`apps/middleware/src/services/tokenGateway.service.ts`) — 5-priority queue, rolling 60s window, backpressure at MAX_QUEUE_DEPTH, dependency-inverted ports for testing, ReplayFrame on every dispatch, budget enforcement (warn 80% / hard-stop 95%), event emitter for WS bridge.
+- Routing dispatcher with `OllamaDispatcher` (live) + `AnthropicDispatcher` (gated by `ANTHROPIC_ENABLED`).
+- Postgres-backed `PgReplayFrameRepository` + `PgTokenLedgerRepository`; in-memory variants for tests.
+- Middleware routes: `POST /api/llm/invoke`, `GET /api/llm/queue/status` (rate-limited + JWT-authed), `POST/GET /api/orchestrator/sessions/:id/{start|pause|stop|status}` (proxies to Java backend).
+- **WebSocket hub** (`apps/middleware/src/ws/index.ts`) — socket.io on `/ws`, RS256 JWT handshake auth, rooms `session.<id>` / `agent.<id>` / `system.health`, bridges Token Gateway `token.warn` / `token.hard_stop` / `queue.depth`.
+- Middleware refactored to a `createApp(env)` factory; `index.ts` attaches the HTTP server + socket.io and handles graceful shutdown.
+- **Java Orchestrator** (`com.aria.orchestrator.*`) — `Session` JPA entity, `SessionState` / `SessionMode` / `Environment` / `MissionType` enums, `SessionRepository`, `OrchestratorService` with full state machine + IDOR ownership checks, `OrchestratorController` REST surface, DTOs.
+- Spring `SecurityConfig` consolidated (removed dead duplicate); CORS + `/api/orchestrator/**` authn. `application.yml` flips Flyway on, points to bundled `db/migration`, sets `stringtype=unspecified` for String↔UUID interop.
+- Web: `apps/web/src/hooks/useAriaSocket.ts` (auto-reconnect, typed events) + `SessionStatus` sidebar indicator wired into dashboard layout; new `Select` primitive added.
+- Tests: 7 Vitest tests for the Token Gateway (queue order, backpressure, budget, IDOR, dispatcher-fail reservation release), 5 JUnit/Mockito tests for the Orchestrator state machine. 3 new Playwright E2E specs (`sprint5-token-gateway`, `sprint5-orchestrator`, `sprint5-websocket`).
+- 3 new ADRs under `.entiresystem/ADRs/` (pgvector, socket.io, Token Gateway location).
+- Schema fixes that unblock the build for everyone:
+  - `packages/db/src/schema/*` — replaced non-existent `timestamptz` import with `timestamp(..., { withTimezone: true })`.
+  - `apps/middleware/src/routes/health.routes.ts` — added default export.
+  - `apps/middleware/tsconfig.json` — disabled portability-blocking `.d.ts` emission.
+  - `apps/backend` — removed duplicate `SecurityConfig` and dead `JwtAuthFilter`; switched filter to `Jwts.parser().verifyWith(...)`.
+  - `apps/web/src/components/ui/select.tsx` — added the missing shadcn `Select` API used by Sprints 4 pages.
+
+Known state:
+- `pnpm -F @aria/middleware typecheck` / `test` / `build` — green.
+- `mvn test` — green (5 orchestrator tests pass; full-context `AriaBackendApplicationTests` `@Disabled` until Sprint 14 wires Testcontainers).
+- `pnpm -F @aria/web exec tsc --noEmit` — green.
+- Playwright E2E specs are committed; running them locally requires `pnpm dev:up` (docker-compose + Ollama models).
+
+---
 
 ### Sprint 1 — Auth, Security Baseline, Monorepo Setup
-**Branch**: main (merged)
-**SPEC**: §12 (Security), §2.2 (State Stores)
+**Branch**: main (merged) | **Spec**: §12, §2.2
 
 What was built:
 - Full monorepo: Turborepo + pnpm workspaces
@@ -40,8 +72,7 @@ Known state:
 ---
 
 ### Sprint 2 — Projects, Dashboard, Concept Graph Models
-**Branch**: main (merged)
-**SPEC**: §6 (Knowledge/Graph), §15 (Business Logic)
+**Branch**: main (merged) | **Spec**: §6, §15
 
 What was built:
 - `apps/middleware/src/routes/projects.routes.ts` — CRUD routes
@@ -53,13 +84,12 @@ What was built:
 
 Known state:
 - Projects routes: GET /projects, POST /projects, GET /projects/:id, PUT /projects/:id, DELETE /projects/:id
-- Concept Graph models are JPA entities — DB tables need Flyway migrations
+- Concept Graph models are JPA entities — DB tables need Flyway migrations (Sprint 5 work)
 
 ---
 
 ### Sprint 3 — Analysis, GitHub Proxy, Security Hardening
-**Branch**: main (merged)
-**SPEC**: §12 (Security), §8A (Bug Fix / QA Audit Trail)
+**Branch**: main (merged) | **Spec**: §12, §8A
 
 What was built:
 - `apps/middleware/src/routes/analysis.routes.ts`
@@ -77,154 +107,135 @@ Known state:
 ---
 
 ### Sprint 4 — Tickets, Sessions, Team, Planning, AI Strategy (Web UI)
-**Branch**: main (merged)
-**SPEC**: §4 (Session Model), §3 (Agent Roles)
+**Branch**: main (merged) | **Spec**: §4, §3
 
 What was built:
-- `apps/web/src/app/(dashboard)/` — all Sprint 4 pages:
-  - Tickets Kanban board page
-  - Sessions page
-  - Team / Skills page
-  - Planning page
-  - AI Strategy page
-  - Settings page stub
-- `apps/middleware/src/routes/tickets.routes.ts`
-- `apps/middleware/src/routes/sessions.routes.ts`
-- `apps/middleware/src/routes/skills.routes.ts`
-- `apps/middleware/src/routes/ideas.routes.ts`
+- `apps/web/src/app/(dashboard)/` — Tickets Kanban, Sessions, Team/Skills, Planning, AI Strategy, Settings pages
+- `apps/middleware/src/routes/tickets.routes.ts`, `sessions.routes.ts`, `skills.routes.ts`, `ideas.routes.ts`
 - Redirect stubs for /ai and /team routes
 - `data-testid` attributes added to all Sprint 4 UI elements for E2E
-- E2E: sprint4-tickets, sprint4-sessions, sprint4-planning, sprint4-team, sprint4-settings, sprint4-ai specs
+- E2E: sprint4-tickets, sprint4-sessions, sprint4-planning, sprint4-team, sprint4-settings, sprint4-ai
 
 Known state:
-- All Sprint 4 pages are UI shells — they show mock/static data
-- Routes exist in middleware but services behind them are stubs
-- WebSocket layer not yet implemented (sessions page will need real-time updates)
+- All Sprint 4 pages are UI shells — show mock/static data; live wiring in Sprint 5
+- Routes exist in middleware but some services behind them are stubs
 
 ---
 
-## 🔜 NEXT SESSION — Sprint 5 Tasks
+## 🔜 Upcoming Sprints (one sprint per spec phase)
 
-### SPRINT 5: Token Gateway + Agent Orchestrator + WebSocket
-**Target branch**: `feat/sprint-5-orchestrator`
-**SPEC sections**: §18H (Token Gateway), §4 (Session Model + Commands), §2.1 (Topology)
+| Sprint | Spec phase | Theme |
+|---|---|---|
+| 5 | Phase 0 | ✅ Core Foundation closeout — Token Gateway, Orchestrator, WebSocket, Flyway, docker-compose, pgvector |
+| 6 | Phase 1 | Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
+| 7 | Phase 2 | Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer |
+| 8 | Phase 3 | Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading |
+| 9 | Phase 4 | Telemetry & Incidents — OpenTelemetry, Incident Commander, Migration Orchestrator, Semantic Tripwires |
+| 10 | Phase 5 | Fleet & Speculation — Pub/Sub mesh, FleetOutcome, healing cascade guardrail, Deadlock Breaker |
+| 11 | Phase 6 | IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context |
+| 12 | Phase 7 | Governance & Legal — Ed25519 agent identity, Compliance Auditor, GDPR erasure, /aria explain, audit export |
+| 13 | Phase 8 | Finance & Procurement — FinOps Oracle, Procurement Scout, Stripe Issuing stub, Arbitrage Engine |
+| 14 | Phase 9 | Security Protocol & Benchmarking — Chaos Sandbox, Synthetic Hydrator, Replay Engine, SWE-bench Lite gate, Golden Dataset |
+| 15 | Phase 10 | HR, Kill Switch, Resilience — Zero-Trust HR, Defcon-1, Historian, Reaper, Weekend Janitor, Seed Vault |
+| 16 | Phase 11 | Skill Ecosystem — Talent Acquisition, Skill Quarantine, lazy-load orchestrator |
+| 17 | Phase 12 | Growth, Strategy, Meta-Evolution — Synthesizer, Exec Board, Supreme Court, Meta-Evolution Architect |
+| 18 | Phase 13 | Horizon Scanner — sources, Hype-vs-Value gate, autonomous PoC, Evolution RFC |
+| 19 | Phase 14 | Gradual Autonomy Onboarding — Shadow Mode, Training Wheels, Graduated Autonomy tiers |
+| 20 | Phase 15 | Edge Swarm + Predictive Data Gravity — SLM compilation, Behavioural Analyzer, hydration cache |
+| 21 | Phase 16 | Genesis & Omnichannel — /genesis-start, Contract-First, Gap Analyzer, Responsive Retrofit |
 
----
-
-#### Task 5.1 — Token Gateway Service (middleware)
-File: `apps/middleware/src/services/tokenGateway.service.ts`
-
-Build:
-```typescript
-// Session budget shape
-interface SessionBudget {
-  sessionId: string;
-  maxTokens: number;
-  used: number;
-  reserved: number;
-  hardLimit: number; // 95% of maxTokens
-  warnLimit: number; // 80% of maxTokens
-  status: 'ok' | 'warning' | 'hard_stop';
-}
-
-// TokenGateway must:
-// - track token usage per session
-// - reserve tokens before parallel calls
-// - release reservations on completion
-// - emit 'warn' event at 80%
-// - block new calls at 95%
-// - expose: reserve(), release(), consume(), getStatus(), resetSession()
-```
-
-Also update: `apps/middleware/src/routes/ai.routes.ts` — route all Ollama calls through TokenGateway.
-
-E2E to write: `apps/e2e/tests/sprint5-token-gateway.spec.ts`
+Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 
 ---
 
-#### Task 5.2 — Agent Orchestrator (backend, Java)
-Package: `apps/backend/src/main/java/com/aria/orchestrator/`
+## 📋 Cross-Cutting Coverage Matrix
 
-Build:
-```
-orchestrator/
-  SessionModel.java          — JPA entity: id, projectId, scope, budget, mode, state
-  SessionMode.java           — enum: PLAN_ONLY, APPLY, PRECISION, THROUGHPUT, DESIGN, EXPERIMENT
-  SessionState.java          — enum: NEW, RUNNING, PAUSED, COMPLETED, FAILED
-  OrchestratorService.java   — startWork(), stopWork(), getSessionStatus(), pauseSession()
-  OrchestratorController.java — REST endpoints:
-                                POST /orchestrator/start
-                                POST /orchestrator/stop
-                                GET  /orchestrator/status/:sessionId
-                                POST /orchestrator/pause
-```
-
-Wire to middleware: add `apps/middleware/src/routes/orchestrator.routes.ts`
-
----
-
-#### Task 5.3 — WebSocket Layer (middleware)
-File: `apps/middleware/src/services/websocket.service.ts`
-
-Build:
-- Add `socket.io` to middleware
-- Emit events: `agent:status`, `session:update`, `token:warning`, `token:hard_stop`
-- Authenticate WebSocket connections with JWT (same middleware as REST)
-
-Update: `apps/web/src/lib/` — add WebSocket client hook `useAriaSocket.ts`
-Update: `apps/web/src/app/(dashboard)/` — show real-time agent status indicator in sidebar
-
-E2E to write: `apps/e2e/tests/sprint5-websocket.spec.ts`
-
----
-
-#### Task 5.4 — PROGRESS.md update + commit + push
-- Update this file
-- Commit: `feat(sprint5): token gateway, agent orchestrator, websocket layer`
-- Create PR to main with full description
-
----
-
-## 📋 FULL SPRINT ROADMAP
-
-| Sprint | Focus | SPEC | Status |
-|---|---|---|---|
-| 1 | Auth, monorepo, security baseline | §12, §2.2 | ✅ Done |
-| 2 | Projects, dashboard, concept graph models | §6, §15 | ✅ Done |
-| 3 | Analysis, GitHub proxy, security hardening | §12, §8A | ✅ Done |
-| 4 | Tickets, sessions, team, planning, AI strategy (web UI) | §4, §3 | ✅ Done |
-| **5** | **Token Gateway + Agent Orchestrator + WebSocket** | **§18H, §4** | 🔜 Next |
-| 6 | Skill Engine — SKILL.md loader, lazy routing, .entiresystem/ store | §9, §2.2 | ⬜ Queued |
-| 7 | Concept Graph full — builder, chunker, GraphRAG queries | §6, §18N | ⬜ Queued |
-| 8 | Ollama full integration — routed through Token Gateway | §2.3 | ⬜ Queued |
-| 9 | gstack agent roles — CEO/CTO/PM/QA/Security role dispatch | §3 | ⬜ Queued |
-| 10 | Horizon Scanner — RSS/GitHub Trending/ArXiv feeds, Stability Gate | §10 | ⬜ Queued |
-| 11 | Meta-Evolution Architect (Ouroboros Engine) | §18A | ⬜ Queued |
-| 12 | Fleet Commander + Pub/Sub mesh + Deadlock Breaker | §17.4 | ⬜ Queued |
-| 13 | Flyway DB migrations — all tables versioned | §2.2 | ⬜ Queued |
-| 14 | Full security hardening — Red Team, FIM, supply chain | §12, §13.5 | ⬜ Queued |
-| 15 | Genesis Pipeline + Omnichannel Analyzer | §16 | ⬜ Queued |
-| 16 | Edge Swarm (SLM binaries) + Predictive Data Gravity | §18J, §18K | ⬜ Queued |
+| Dimension | Status / sprint covering |
+|---|---|
+| AuthN/AuthZ (RS256, bcrypt-12, refresh cookies) | ✅ Sprint 1 |
+| Rate limiting + CORS + Helmet | ✅ Sprint 1 (re-audit every new route) |
+| IDOR ownership checks | ✅ Sprint 3 (re-audit every new user-scoped route) |
+| Zod validation on every endpoint | ✅ Sprint 1 (enforced) |
+| Ed25519 agent identity + signed actions | 🔜 Sprint 12 |
+| FIM (SKILL.md / DESIGN.md / DOMAIN_BOUNDARIES.json / CORE_VALUES.yml) | 🔜 Sprint 6 |
+| Content sanitization (two-stage injection detector) | 🔜 Sprint 6 |
+| Red Team Saboteur (local pre-merge) | 🔜 Sprint 6 |
+| Red Team vs Blue Team (chaos every 6h) | 🔜 Sprint 14 |
+| Anti-Slop Gate (5 axes) | 🔜 Sprint 6 |
+| P0 deterministic linter | 🔜 Sprint 6 |
+| Anti-test-dodging static linter | 🔜 Sprint 6 |
+| Golden Dataset evaluator regression | 🔜 Sprint 14 |
+| SWE-bench Lite CI gate | 🔜 Sprint 14 |
+| SWE-bench Verified + WebArena weekly | 🔜 Sprint 14 |
+| Token Gateway (queue, reservations, replay frames) | ✅ Sprint 5 |
+| Concept Graph + RAG distillation (≥5× compression) | 🔜 Sprint 8 |
+| State-Space Replay engine | 🔜 Sprint 14 (frames stubbed Sprint 5) |
+| Seed Vault (weekly air-gapped archive) | 🔜 Sprint 15 |
+| Defcon-1 distributed kill switch | 🔜 Sprint 15 |
+| Compliance Auditor (PII/logging/retention/encryption/export) | 🔜 Sprint 12 |
+| Legal Kill-Switch (GPL/copyleft) | 🔜 Sprint 6 (scanner) + Sprint 12 (enforcement) |
+| GDPR erasure + redaction-aware attestation | 🔜 Sprint 12 |
+| Meta-Evolution Architect (Ouroboros) | 🔜 Sprint 17 |
+| Horizon Scanner | 🔜 Sprint 18 |
+| Gradual Autonomy Onboarding tiers | 🔜 Sprint 19 |
+| Edge Swarm (SLM web/iOS/Android) | 🔜 Sprint 20 |
+| Predictive Data Gravity (cache pre-warm) | 🔜 Sprint 20 |
+| Genesis pipeline | 🔜 Sprint 21 |
+| Observability (OpenTelemetry, Prom, Datadog/Sentry MCP) | 🔜 Sprint 9 |
+| Incident Commander + auto-hotfix | 🔜 Sprint 9 |
+| Zero-Downtime Migration Orchestrator | 🔜 Sprint 9 |
+| Synthetic Data Hydrator (profiles + cache) | 🔜 Sprint 14 |
+| Skill Quarantine | 🔜 Sprint 16 |
+| Token-optimisation via MEMORY.md file index | ✅ Sprint 5 (this commit) |
 
 ---
 
-## ⚠️ KNOWN GAPS (tech debt — fix before Sprint 10)
+## ⚠️ Known Gaps / Tech Debt
 
-- Flyway migration files not yet created — ConceptNode, ConceptEdge, AnalysisJob tables not migrated
-- GitHub OAuth not fully wired — routes exist but callback + token exchange not complete
-- All Sprint 4 web pages show static/mock data — need real API connections from Sprint 6 onward
-- `.entiresystem/` canonical store directory not created yet — needed for Sprint 6
-- Ollama proxy in middleware not routed through Token Gateway — fix in Sprint 5 Task 5.1
-- packages/db Drizzle schema stubs need real table definitions — align with Java JPA entities
+- ✅ `docker-compose.yml` lands Sprint 5.
+- ✅ Flyway V5 migration ships Sprint 5; Java backend now boots tables cleanly.
+- ✅ pgvector extension enabled Sprint 5; embedding column reserved on concept_nodes.
+- ✅ Ollama routed through Token Gateway Sprint 5.
+- GitHub OAuth callback + token exchange revisit pending (kept Sprint 4 baseline; revisit during Sprint 6/12).
+- `.entiresystem/` canonical store partial (only ADRs/ created Sprint 5; full layout Sprint 7).
+- `packages/db` Drizzle schemas vs Java JPA entities are aligned for Sprint 5 tables; broader audit still owed Sprint 7.
+- Sprint 1-4 ADRs to be backfilled retroactively in Sprint 7 (Sprint 5 ADRs 0001-0003 already live).
+- Spring full-context test `AriaBackendApplicationTests` `@Disabled` until Sprint 14 wires Testcontainers.
+
+## 🐛 Open Bugs / Debt (running list)
+
+_None tracked yet — populated as bugs are filed._
+
+## 🔐 Open Security Findings
+
+_None tracked yet — populated by Red Team (Sprint 6) and audits._
+
+## 📐 Open ADRs Awaiting Decision
+
+_None tracked yet — first batch (ADR-0001 through ADR-0003) lands in Sprint 5._
+
+## 🧪 Test Coverage Snapshot
+
+| Package | Lines | Branches | Critical paths | Notes |
+|---|---|---|---|---|
+| apps/web | tbd | tbd | tbd | E2E covered Sprints 1–4 |
+| apps/middleware | tbd | tbd | tbd | Vitest scaffolding to add Sprint 5 |
+| apps/backend | tbd | tbd | tbd | JUnit 5 scaffolding to add Sprint 5 |
+| apps/e2e | n/a | n/a | n/a | 19 specs across Sprints 1–4 |
+
+Coverage table is auto-refreshed at the end of every sprint after `pnpm test --coverage` and `mvn jacoco:report`.
 
 ---
 
-## 🔐 SECURITY CHECKLIST (run before every PR merge)
+## 📝 Session Notes
 
-- [ ] No HS256 tokens (RS256 only)
-- [ ] All new endpoints have Zod validation
-- [ ] All user-scoped queries filter by userId from JWT
-- [ ] No secrets or API keys in code
-- [ ] Helmet + CORS applied to all new routes
-- [ ] Rate limiting on any new auth-adjacent endpoints
-- [ ] E2E security spec still passes
+- **2026-05-16 (afternoon)** — Sprint 5 closed. Full Token Gateway + Java Orchestrator + WebSocket hub + Flyway
+  V5 migration + docker-compose stack + pgvector + Ollama wiring + Anthropic stub. Middleware typecheck/test/build
+  green, Java tests green, web typecheck green. Three ADRs committed under `.entiresystem/ADRs/`. Existing
+  Sprint 1-4 schema/build tech debt (drizzle `timestamptz`, duplicate `SecurityConfig`, missing `Select` UI
+  primitive, missing default export on health route) fixed in-flight so the entire monorepo now typechecks
+  and builds clean.
+- **2026-05-16 (morning)** — Architect planning session. Wrote master plan + MEMORY.md + restructured
+  PROGRESS.md. Decisions locked: full-depth 17-phase plan; local-first docker-compose; Ollama-first with
+  Anthropic for governance (gated by `ANTHROPIC_API_KEY`); Postgres + pgvector for all storage; Sprint 5–21 =
+  one sprint per spec phase. See `IMPLEMENTATION.md` §0 and `MEMORY.md §A`.

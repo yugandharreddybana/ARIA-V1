@@ -1,6 +1,8 @@
-import { pgTable, uuid, text, boolean, timestamptz } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { users } from './users';
+
+const tstz = (name: string) => timestamp(name, { withTimezone: true });
 
 /**
  * Hashed refresh tokens — raw token is NEVER stored.
@@ -13,8 +15,8 @@ export const refreshTokens = pgTable('refresh_tokens', {
   tokenHash:  text('token_hash').notNull().unique(),
   jti:        text('jti').notNull().unique(),
   isRevoked:  boolean('is_revoked').notNull().default(false),
-  expiresAt:  timestamptz('expires_at').notNull(),
-  createdAt:  timestamptz('created_at').notNull().defaultNow(),
+  expiresAt:  tstz('expires_at').notNull(),
+  createdAt:  tstz('created_at').notNull().defaultNow(),
 });
 
 export const refreshTokensRelations = relations(refreshTokens, ({ one }) => ({
