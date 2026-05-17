@@ -1,0 +1,17 @@
+skill: db-specialist
+tickets_touched: 0
+best_practices:
+  - text: "Drizzle schema + Flyway SQL must land together in the same PR — schema drift is the single biggest source of Sprint 1-4 incidents."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Use TEXT + CHECK constraints instead of Postgres ENUM types when Hibernate maps the column to a Java enum."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "`SELECT *` in any user-facing route — leaks new columns + invites N+1."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "`ddl-auto: update` in production — schema must be Flyway-only."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

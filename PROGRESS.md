@@ -25,9 +25,11 @@ What was built:
 - **EXPERIENCE.md** — cross-cutting lessons file + 3 per-persona files (`frontend-web`, `backend-api`,
   `security`). Every entry tagged with a Knowledge Veracity tag.
 - **ANTI_PATTERNS** — `auth`, `database`, `ux` domain catalogues.
-- **Per-skill SKILL.md + experience.yml** for 5 personas: backend-api-specialist,
-  frontend-web-specialist, security-engineer, qa-e2e, devops-engineer. Each SKILL.md carries the
-  V27.9 §9 frontmatter + Transparency Card.
+- **Per-skill SKILL.md + experience.yml** for **12 personas**: backend-api-specialist,
+  frontend-web-specialist, db-specialist, devops-engineer, qa-e2e, security-engineer,
+  compliance-auditor, finops-oracle, historian, ux-defender, integration-engineer,
+  knowledge-graph-architect. Each SKILL.md carries the V27.9 §9 frontmatter + Transparency Card.
+- **`.entiresystem/README.md`** — full layout reference + per-directory rules.
 - **`ExperienceService`** (`apps/middleware/src/services/experience.service.ts`) — dep-free YAML
   reader/writer for skill experience profiles. Idempotent `append*` helpers; `incrementTicketsTouched`;
   `listSkills`; `read`.
@@ -38,7 +40,9 @@ What was built:
   prompts/*.md}`. **No LLM, no network**.
 - **Routes** (`/api/experience`): `GET /`, `GET /:slug`, `GET /:slug/audit`, `POST /entries`,
   `POST /failure-stories`, `POST /model-transfer`. All authenticated + Zod-strict.
-- **Scripts**: `scripts/knowledge-audit.ts` + `scripts/model-transfer.ts` CLIs.
+- **Scripts**: `scripts/knowledge-audit.ts` + `scripts/model-transfer.ts` CLIs, wired into root
+  `package.json` as `pnpm knowledge-audit`, `pnpm model-transfer`, `pnpm anti-slop`,
+  `pnpm anti-test-dodging`.
 - **Shadow Learning** (`.github/workflows/shadow-learning.yml`) — on PR merge, extracts a draft entry
   (heuristic only — Sprint 17 wires the real Ollama call through the Token Gateway) and opens a
   follow-up PR tagged `veracity: ai-only`.

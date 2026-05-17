@@ -1,0 +1,11 @@
+skill: compliance-auditor
+tickets_touched: 0
+best_practices:
+  - text: "Every PR touching `users`, `refresh_tokens`, or any logging path needs an explicit compliance note in the PR body."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "Stuffing raw PII into log lines — must be `[REDACTED]` with a metadata side-channel only."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

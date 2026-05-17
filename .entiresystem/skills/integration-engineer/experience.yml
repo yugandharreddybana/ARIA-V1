@@ -1,0 +1,11 @@
+skill: integration-engineer
+tickets_touched: 0
+best_practices:
+  - text: "Contract first — OpenAPI lock-in must land BEFORE backend or frontend implementation begins (V27.9 §16)."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "Backwards-incompatible contract changes without a deprecation window + version bump."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

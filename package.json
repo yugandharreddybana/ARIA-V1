@@ -19,7 +19,11 @@
     "dev:down": "bash scripts/dev-down.sh",
     "dev:reset": "bash scripts/dev-down.sh --wipe && bash scripts/dev-up.sh",
     "db:migrate": "bash scripts/db-migrate.sh",
-    "test:e2e": "pnpm -F @aria/e2e test"
+    "test:e2e": "pnpm -F @aria/e2e test",
+    "knowledge-audit": "pnpm -F @aria/middleware exec tsx ../../scripts/knowledge-audit.ts",
+    "model-transfer": "pnpm -F @aria/middleware exec tsx ../../scripts/model-transfer.ts",
+    "anti-slop": "pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts",
+    "anti-test-dodging": "pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts"
   },
   "devDependencies": {
     "turbo": "^2.0.4",

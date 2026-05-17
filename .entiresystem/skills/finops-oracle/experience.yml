@@ -1,0 +1,14 @@
+skill: finops-oracle
+tickets_touched: 0
+best_practices:
+  - text: "Reserve estimated tokens BEFORE dispatch; reconcile to actual after — prevents overshoot on parallel fan-out."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Surface cost warnings at 80% and hard-stop at 95% via the WebSocket hub so dashboards react in real time."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "Direct provider calls bypass the ledger — every LLM call must route through the Token Gateway."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

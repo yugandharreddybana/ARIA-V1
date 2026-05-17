@@ -92,7 +92,8 @@
 - **`.entiresystem/CORE_VALUES.yml`/`DESIGN.md`/`DOMAIN_BOUNDARIES.json`/`SKILL.md`** | sha:`HEAD@S6+` | FIM-signed brain files.
 - **`.entiresystem/EXPERIENCE/{EXPERIENCE,frontend-web_EXPERIENCE,backend-api_EXPERIENCE,security_EXPERIENCE}.md`** | sha:`HEAD@S7` | cross-cutting + per-persona lessons, every entry tagged with a Veracity tag.
 - **`.entiresystem/ANTI_PATTERNS/{auth,database,ux}_ANTI_PATTERNS.md`** | sha:`HEAD@S7` | per-domain forbidden patterns.
-- **`.entiresystem/skills/<slug>/{SKILL.md,experience.yml}`** | sha:`HEAD@S7` | 5 personas wired up: backend-api-specialist, frontend-web-specialist, security-engineer, qa-e2e, devops-engineer.
+- **`.entiresystem/skills/<slug>/{SKILL.md,experience.yml}`** | sha:`HEAD@S7` | **12 personas** wired up: backend-api-specialist, frontend-web-specialist, db-specialist, devops-engineer, qa-e2e, security-engineer, compliance-auditor, finops-oracle, historian, ux-defender, integration-engineer, knowledge-graph-architect.
+- **`.entiresystem/README.md`** | sha:`HEAD@S7` | Full layout reference + per-directory rules + `pnpm knowledge-audit` / `pnpm model-transfer` quickstart.
 - **`.entiresystem/ADRs/ADR-{0007,0008}-*.md`** | sha:`HEAD@S7` | canonical layout + Knowledge Veracity scoring.
 - **`packages/db/flyway/migrations/V7__sprint7_experience_memory.sql`** | sha:`HEAD@S7` | `skill_experience_profiles`, `knowledge_veracity_audits`, `shadow_learning_runs`, `backend_workspaces`.
 - **`apps/middleware/src/services/experience.service.ts`** | sha:`HEAD@S7` | Dep-free YAML reader/writer for skill experience profiles. Knowledge Veracity tags enforced at the helper level (defaults `ai-only`).
