@@ -7,13 +7,52 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 8 — Phase 3: Advanced Retrieval (Concept Graph + Distillation)**  *(queued)*
-- Spec anchors: §6 (Memory), §18N (Advanced RAG + Distillation), §7 (Context Management).
-- DoD checklist: see IMPLEMENTATION.md §5.
+**Sprint 9 — Phase 4: Telemetry & Incidents**  *(queued)*
+- Spec anchors: §17 (Telemetry, Incidents, Migrations).
+- DoD checklist: see IMPLEMENTATION.md §6.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 8 — Phase 3: Advanced Retrieval (Concept Graph + Distillation)  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §6, §18N, §7
+
+What was built:
+- **Java `com.aria.graph`** package: `SemanticChunk` JPA entity, `ChunkType` + `GraphLevel` enums,
+  `SemanticChunkRepository` (with native HNSW query for nearest neighbours + native UPDATE for
+  pgvector writes), `SemanticChunker` (regex-based per ADR-0009 — TS/JS/Java/Python/SQL/Markdown,
+  whole-file fallback for unknown languages), `EmbeddingClient` (routes through the middleware
+  Token Gateway — no direct provider calls), `ConceptGraphBuilder` (idempotent per `version_hash`,
+  upserts Level-1 chunks + summary + embedding), `DistillationEngine` (intent extraction → ranking
+  per ADR-0010 → bucketed payload with `rawTokens / totalTokens / compressionRatio` accounting).
+- **REST contracts** (`com.aria.graph.controller.DistillationController`):
+  `POST /api/distill`, `POST /api/graph/rebuild`, `GET /api/graph/coverage/{projectId}`.
+- **Middleware proxy** (`apps/middleware/src/services/distill.service.ts`):
+  `distill()` forwards to the Java engine and merges in `experienceNotes` + `antiPatterns` from
+  `ExperienceService` (top-3 per veracity rank), `preFlight()` computes a running compression-ratio
+  estimate (20-sample moving average per `(project, agent)`) over `distillation_runs`. Both wired
+  to `/api/distill` and `/api/distill/preflight` (auth, Zod-strict, rate-limited).
+- **Flyway V8** — `semantic_chunks` (768-dim pgvector + HNSW index), `distillation_runs` audit log,
+  `concept_graph_coverage` materialised view, deferred HNSW index on `concept_nodes.embedding`.
+- **Web dashboard graph page** — added a 4-level switcher (`graph-level-{1..4}`) for Symbol /
+  Module / Domain / Decision filtering.
+- **CLIs** — `scripts/knowledge-review.ts` (read-only coverage report) wired as `pnpm knowledge-review`.
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit: 5 `SemanticChunkerTest` cases + 5 `DistillationEngineTest` cases.
+  - Middleware Vitest: 5 `distill.test.ts` cases (schemas + preflight fallback).
+  - Playwright: `sprint8-distillation.spec.ts` (4 cases), `sprint8-graph-levels.spec.ts` (1 case).
+- **ADRs**: 0009 SemanticChunker strategy, 0010 Distillation ranking weights + 5× target.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm`/`mvn`/`tsx`/`node`/`playwright` executed this session.
+- The Java side still needs `Jdbc` config on Sprint 14 (Testcontainers) before the integration
+  test can boot a real Postgres.
+- EmbeddingClient currently calls `/api/llm/invoke` with a placeholder `embeddingOnly: true`
+  flag; the Token Gateway already routes to Ollama, but the embedding-vs-chat dispatch path will
+  be tightened in Sprint 9 (telemetry will expose the timing per call).
+
+---
 
 ### Sprint 7 — Phase 2: Experience & Memory  *(code-complete, unverified — NO-RUN MODE)*
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §2.2, §6, §9
@@ -230,7 +269,7 @@ Known state:
 | 5 | Phase 0 | ✅ Core Foundation closeout — Token Gateway, Orchestrator, WebSocket, Flyway, docker-compose, pgvector |
 | 6 | Phase 1 | ✅ Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
 | 7 | Phase 2 | ✅ Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer *(code-complete, unverified)* |
-| 8 | Phase 3 | Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading |
+| 8 | Phase 3 | ✅ Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading *(code-complete, unverified)* |
 | 9 | Phase 4 | Telemetry & Incidents — OpenTelemetry, Incident Commander, Migration Orchestrator, Semantic Tripwires |
 | 10 | Phase 5 | Fleet & Speculation — Pub/Sub mesh, FleetOutcome, healing cascade guardrail, Deadlock Breaker |
 | 11 | Phase 6 | IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context |
@@ -269,7 +308,7 @@ Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 | SWE-bench Lite CI gate | 🔜 Sprint 14 |
 | SWE-bench Verified + WebArena weekly | 🔜 Sprint 14 |
 | Token Gateway (queue, reservations, replay frames) | ✅ Sprint 5 |
-| Concept Graph + RAG distillation (≥5× compression) | 🔜 Sprint 8 |
+| Concept Graph + RAG distillation (≥5× compression) | ✅ Sprint 8 *(code-complete, unverified)* |
 | State-Space Replay engine | 🔜 Sprint 14 (frames stubbed Sprint 5) |
 | Seed Vault (weekly air-gapped archive) | 🔜 Sprint 15 |
 | Defcon-1 distributed kill switch | 🔜 Sprint 15 |
@@ -330,6 +369,15 @@ Coverage table is auto-refreshed at the end of every sprint after `pnpm test --c
 
 ## 📝 Session Notes
 
+- **2026-05-16 (late night)** — Sprint 8 **code-complete, unverified** (NO-RUN MODE). Built the 4-level
+  Concept Graph + Distillation Engine end-to-end: Java `com.aria.graph` package
+  (SemanticChunk JPA + repo with native HNSW query, SemanticChunker regex-based per ADR-0009,
+  EmbeddingClient routed through the Token Gateway, ConceptGraphBuilder idempotent per version_hash,
+  DistillationEngine with ranking per ADR-0010 — ≥5× compression target). Middleware proxy at
+  `/api/distill` + Pre-Flight Estimator at `/api/distill/preflight` (20-sample moving average over
+  `distillation_runs`). Web graph page gained a 4-level switcher (Symbol / Module / Domain / Decision).
+  Flyway V8 schema, `knowledge-review` CLI, 10 new Java tests + 5 new Vitest cases + 5 new Playwright
+  cases (all unrun). ADRs 0009 + 0010. Sprint marked `code-complete (unverified)`.
 - **2026-05-16 (night)** — Sprint 7 **code-complete, unverified** (NO-RUN MODE per user directive).
   Shipped `.entiresystem/` canonical layout (5 skill subtrees, 3 EXPERIENCE files, 3 ANTI_PATTERNS files),
   ExperienceService + VeracityService + ModelTransferService, `/api/experience` routes, `knowledge-audit`

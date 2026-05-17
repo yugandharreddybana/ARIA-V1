@@ -138,6 +138,7 @@ export default function GraphPage() {
   const [error,    setError]    = useState('');
   const [selected, setSelected] = useState<ConceptNode | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [activeLevel, setActiveLevel] = useState<1 | 2 | 3 | 4>(1);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -199,6 +200,29 @@ export default function GraphPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <div data-testid="graph-level-switcher" className="flex items-center gap-1 mr-2 text-xs">
+            {[
+              { lvl: 1, label: 'Symbol' },
+              { lvl: 2, label: 'Module' },
+              { lvl: 3, label: 'Domain' },
+              { lvl: 4, label: 'Decision' },
+            ].map(({ lvl, label }) => (
+              <button
+                key={lvl}
+                data-testid={`graph-level-${lvl}`}
+                aria-pressed={activeLevel === lvl}
+                onClick={() => setActiveLevel(lvl)}
+                className={
+                  'rounded-md border px-2 py-1 transition-colors ' +
+                  (activeLevel === lvl
+                    ? 'border-aria-500 text-aria-300 bg-aria-900/40'
+                    : 'border-border/60 text-muted-foreground hover:text-foreground')
+                }
+              >
+                L{lvl} {label}
+              </button>
+            ))}
+          </div>
           <Button variant="ghost" size="sm" onClick={fetchGraph} disabled={loading}>
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh

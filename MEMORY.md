@@ -8,6 +8,28 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-16 (late night) — Sprint 8 code-complete (NO-RUN MODE)
+- Built the V27.9 §18N stack end-to-end without running any code (still in NO-RUN MODE).
+- Java `com.aria.graph.*`: `SemanticChunk` JPA entity (TEXT chunk_type with DB CHECK, raw String
+  projection of the pgvector column + native UPDATE in the repository for vector writes),
+  `SemanticChunker` regex per ADR-0009 (TS/JS/Java/Python/SQL/Markdown), `EmbeddingClient`
+  routing through the middleware Token Gateway, `ConceptGraphBuilder` idempotent per version_hash,
+  `DistillationEngine` with ranking per ADR-0010 (3.0 symbol / 2.0 summary / 1.0 path / 0.5 recency
+  bump, default bucket caps 8/5/5/3, ≥5× compression target). `DistillationController` exposes
+  `/api/distill`, `/api/graph/rebuild`, `/api/graph/coverage/{projectId}`.
+- Middleware: `distill.service.ts` proxies to Java + merges in `experienceNotes` / `antiPatterns`
+  from `ExperienceService` (top-3 by veracity); `preFlight()` computes a 20-sample moving average
+  of `compression_ratio` per (project, agent) over `distillation_runs`. Routes
+  `/api/distill` + `/api/distill/preflight` (auth, Zod-strict, rate-limited).
+- Flyway **V8**: `semantic_chunks` (768-dim pgvector + HNSW), `distillation_runs`,
+  `concept_graph_coverage`, deferred HNSW index on `concept_nodes.embedding`.
+- Web graph page gained a 4-level switcher (`data-testid="graph-level-{1..4}"`).
+- CLIs: `scripts/knowledge-review.ts` wired as `pnpm knowledge-review`.
+- Tests: 5 SemanticChunkerTest + 5 DistillationEngineTest (JUnit); 5 distill.test.ts cases
+  (Vitest); 4 sprint8-distillation + 1 sprint8-graph-levels (Playwright). **Not executed.**
+- ADRs: 0009 (regex chunker, tree-sitter deferred to Sprint 14), 0010 (ranking weights + 5× target +
+  Pre-Flight Estimator window).
+
 ### 2026-05-16 (night) — Sprint 7 code-complete (NO-RUN MODE)
 - Honoured a user "do not run any code" directive: zero `pnpm`/`mvn`/`tsx`/`node`/`playwright`
   invocations this session. Mentally typechecked every file before commit.
@@ -92,6 +114,17 @@
 - **`.entiresystem/CORE_VALUES.yml`/`DESIGN.md`/`DOMAIN_BOUNDARIES.json`/`SKILL.md`** | sha:`HEAD@S6+` | FIM-signed brain files.
 - **`.entiresystem/EXPERIENCE/{EXPERIENCE,frontend-web_EXPERIENCE,backend-api_EXPERIENCE,security_EXPERIENCE}.md`** | sha:`HEAD@S7` | cross-cutting + per-persona lessons, every entry tagged with a Veracity tag.
 - **`.entiresystem/ANTI_PATTERNS/{auth,database,ux}_ANTI_PATTERNS.md`** | sha:`HEAD@S7` | per-domain forbidden patterns.
+- **`packages/db/flyway/migrations/V8__sprint8_concept_graph_distillation.sql`** | sha:`HEAD@S8` | `semantic_chunks` (768-dim pgvector + HNSW), `distillation_runs`, `concept_graph_coverage`; deferred HNSW index on `concept_nodes.embedding` materialised here.
+- **`apps/backend/src/main/java/com/aria/graph/**`** | sha:`HEAD@S8` | `model/{ChunkType,GraphLevel,SemanticChunk}`, `repository/SemanticChunkRepository` (native HNSW + UPDATE), `service/{SemanticChunker,EmbeddingClient,ConceptGraphBuilder,DistillationEngine}`, `dto/{DistillRequest,DistilledContextPayload}`, `controller/DistillationController` (POST /api/distill, POST /api/graph/rebuild, GET /api/graph/coverage/{projectId}).
+- **`apps/middleware/src/services/distill.service.ts`** | sha:`HEAD@S8` | Java proxy + ExperienceService merge + 20-sample moving-average Pre-Flight Estimator.
+- **`apps/middleware/src/{schemas/distill,controllers/distill,routes/distill}.ts`** | sha:`HEAD@S8` | Strict Zod schemas; `/api/distill` and `/api/distill/preflight` mounted in `app.ts`.
+- **`apps/middleware/src/__tests__/distill.test.ts`** | sha:`HEAD@S8` | 5 Vitest cases (NOT executed).
+- **`apps/backend/src/test/java/com/aria/graph/{SemanticChunkerTest,DistillationEngineTest}.java`** | sha:`HEAD@S8` | 10 JUnit/AssertJ cases (NOT executed).
+- **`apps/e2e/tests/sprint8-{distillation,graph-levels}.spec.ts`** | sha:`HEAD@S8` | 5 Playwright cases (NOT executed).
+- **`scripts/knowledge-review.ts`** | sha:`HEAD@S8` | read-only coverage report against `/api/graph/coverage/{projectId}`.
+- **`.entiresystem/ADRs/ADR-{0009,0010}-*.md`** | sha:`HEAD@S8` | regex SemanticChunker strategy + Distillation ranking weights & 5× target.
+- **`apps/web/src/app/(dashboard)/projects/[id]/graph/page.tsx`** | sha:`HEAD@S8` | Added 4-level switcher.
+
 - **`.entiresystem/skills/<slug>/{SKILL.md,experience.yml}`** | sha:`HEAD@S7` | **12 personas** wired up: backend-api-specialist, frontend-web-specialist, db-specialist, devops-engineer, qa-e2e, security-engineer, compliance-auditor, finops-oracle, historian, ux-defender, integration-engineer, knowledge-graph-architect.
 - **`.entiresystem/README.md`** | sha:`HEAD@S7` | Full layout reference + per-directory rules + `pnpm knowledge-audit` / `pnpm model-transfer` quickstart.
 - **`.entiresystem/ADRs/ADR-{0007,0008}-*.md`** | sha:`HEAD@S7` | canonical layout + Knowledge Veracity scoring.
@@ -399,6 +432,12 @@
 - **DEC-010 — NO-RUN MODE protocol** (2026-05-16, Sprint 7, CLAUDE.md §5a). When user says "do not run any
   code", do not execute pnpm/mvn/tsx/node/playwright; mentally typecheck; mark sprint
   `code-complete (unverified)`. Stay in NO-RUN MODE for the rest of the session unless lifted.
+- **DEC-011 — Regex SemanticChunker, tree-sitter deferred** (2026-05-16, Sprint 8, ADR-0009). Daemon image
+  stays native-binding-free until Sprint 14 (Chaos Sandbox image carries the libs); regex covers every Sprint 1-7
+  file shape we actually ship.
+- **DEC-012 — Distillation ranking + 5× target** (2026-05-16, Sprint 8, ADR-0010). Score = 3·symbol +
+  2·summary + 1·path + 0.5 if updated <24h. Bucket caps 8/5/5/3. Pre-Flight Estimator uses a 20-sample
+  moving average per (project, agent) over `distillation_runs`. Cold-start default ratio 1.0 (safe upper bound).
 
 ---
 

@@ -21,6 +21,7 @@
     "db:migrate": "bash scripts/db-migrate.sh",
     "test:e2e": "pnpm -F @aria/e2e test",
     "knowledge-audit": "pnpm -F @aria/middleware exec tsx ../../scripts/knowledge-audit.ts",
+    "knowledge-review": "pnpm -F @aria/middleware exec tsx ../../scripts/knowledge-review.ts",
     "model-transfer": "pnpm -F @aria/middleware exec tsx ../../scripts/model-transfer.ts",
     "anti-slop": "pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts",
     "anti-test-dodging": "pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts"
