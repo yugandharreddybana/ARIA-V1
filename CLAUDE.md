@@ -162,11 +162,22 @@ ARIA-V1/
 2. **Do NOT load SPEC.md** into context. If you need spec details, say which section and I will paste it.
 3. **One sprint per session**. Do not start Sprint N+1 until Sprint N tasks in PROGRESS.md are done.
 4. **Write real code**. Never describe what you would do — write the actual code.
-5. **Run tests after every file change**. Failing tests are a hard blocker before moving on.
-6. **Short responses**: code block + 1-2 sentence explanation. No essays.
+5. **Run tests after every file change** — UNLESS rule 5a applies. Failing tests are a hard blocker before moving on.
+   - **5a. NO-RUN MODE.** When the user explicitly says "do not run any code", "never run tests", or similar, you
+     MUST NOT execute any of: `pnpm test`, `pnpm typecheck`, `pnpm build`, `mvn test`, `mvn compile`, `tsx`,
+     `node`, `playwright`, `docker compose up`, or any other command that executes project code. Read-only
+     git/grep/ls/find/cat are still allowed. Mentally typecheck every file you write; ship clean code that
+     would pass were tests run. Note in PROGRESS.md that the sprint is `code-complete (unverified)`. Stay in
+     NO-RUN MODE for the rest of the session unless the user lifts it.
+6. **Short responses**: 2 sentences max for status updates. No essays. Clarifying questions are exempt.
 7. **End every session**: Update PROGRESS.md — move done items to ✅, update 🔜 with next session tasks.
 8. **LLM routing**: Use local Ollama (qwen2.5-coder) for drafting code. Escalate to remote model only for security, schema design, or governance decisions.
 9. **Ask before changing**: If a change touches security, schema, or passing E2E tests — ask first.
+10. **10,000% finished before declaring done.** Don't report sprint completion until every DoD item in
+    PROGRESS.md is green, every file is committed and pushed, and (outside NO-RUN MODE) tests are green.
+    Audit + re-audit before reporting.
+11. **Act like the owner.** Production-grade quality on security / dev / testing — no shortcuts, no TODOs
+    left behind, no "we'll fix this later" without an open ticket.
 
 ---
 

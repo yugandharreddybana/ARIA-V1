@@ -1,0 +1,23 @@
+skill: backend-api-specialist
+tickets_touched: 0
+
+best_practices:
+  - text: "Always include a Flyway migration with a Drizzle schema change in the same PR."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Zod schemas use `.strict()` to reject unknown keys (mass-assignment defence)."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "User-scoped routes use `loadOwned(id, userId)` so IDOR is impossible at the service layer."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+
+anti_patterns:
+  - text: "Direct `fetch` to Ollama or Anthropic — bypasses Token Gateway."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Returning `SELECT *` rows to clients."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+failure_stories: []

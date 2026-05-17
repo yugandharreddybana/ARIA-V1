@@ -7,13 +7,59 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 7 — Phase 2: Experience & Memory**  *(queued — start after user review of Sprint 6)*
-- Spec anchors: §2.2 (State Stores), §6 (Memory layers), §9 (Skill Experience).
-- DoD checklist: see IMPLEMENTATION.md §4.
+**Sprint 8 — Phase 3: Advanced Retrieval (Concept Graph + Distillation)**  *(queued)*
+- Spec anchors: §6 (Memory), §18N (Advanced RAG + Distillation), §7 (Context Management).
+- DoD checklist: see IMPLEMENTATION.md §5.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 7 — Phase 2: Experience & Memory  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §2.2, §6, §9
+
+What was built:
+- **Canonical `.entiresystem/` layout** locked down per ADR-0007: CORE_VALUES, DESIGN, DOMAIN_BOUNDARIES,
+  SKILL.md (top-level index), EXPERIENCE/, ANTI_PATTERNS/, skills/ subtree, ADRs/, ui_discovery/ stubs for
+  Sprint 8+ subtrees.
+- **EXPERIENCE.md** — cross-cutting lessons file + 3 per-persona files (`frontend-web`, `backend-api`,
+  `security`). Every entry tagged with a Knowledge Veracity tag.
+- **ANTI_PATTERNS** — `auth`, `database`, `ux` domain catalogues.
+- **Per-skill SKILL.md + experience.yml** for 5 personas: backend-api-specialist,
+  frontend-web-specialist, security-engineer, qa-e2e, devops-engineer. Each SKILL.md carries the
+  V27.9 §9 frontmatter + Transparency Card.
+- **`ExperienceService`** (`apps/middleware/src/services/experience.service.ts`) — dep-free YAML
+  reader/writer for skill experience profiles. Idempotent `append*` helpers; `incrementTicketsTouched`;
+  `listSkills`; `read`.
+- **`VeracityService`** (`apps/middleware/src/services/veracity.service.ts`) — ADR-0008 scoring
+  (`weight × 0.5^(age/half_life)`), `rank`, `auditSkill` with stale-entry thresholds.
+- **`ModelTransferService`** (`apps/middleware/src/services/modelTransfer.service.ts`) — `/model-transfer`
+  zero-token tool that writes `.backend/<workspace>/{file_index.json, skill_headers.json, experience.json,
+  prompts/*.md}`. **No LLM, no network**.
+- **Routes** (`/api/experience`): `GET /`, `GET /:slug`, `GET /:slug/audit`, `POST /entries`,
+  `POST /failure-stories`, `POST /model-transfer`. All authenticated + Zod-strict.
+- **Scripts**: `scripts/knowledge-audit.ts` + `scripts/model-transfer.ts` CLIs.
+- **Shadow Learning** (`.github/workflows/shadow-learning.yml`) — on PR merge, extracts a draft entry
+  (heuristic only — Sprint 17 wires the real Ollama call through the Token Gateway) and opens a
+  follow-up PR tagged `veracity: ai-only`.
+- **Flyway V7** (`packages/db/flyway/migrations/V7__sprint7_experience_memory.sql`) —
+  `skill_experience_profiles`, `knowledge_veracity_audits`, `shadow_learning_runs`, `backend_workspaces`.
+- **Tests** (NOT executed — NO-RUN MODE): 6 ExperienceService Vitest cases, 5 Veracity cases, 4
+  ModelTransfer cases (15 new middleware tests); 2 new Playwright specs
+  (`sprint7-experience.spec.ts`, `sprint7-model-transfer.spec.ts`).
+- **ADRs**: 0007 `.entiresystem/` canonical layout; 0008 Knowledge Veracity scoring.
+- **CLAUDE.md**: §5 extended with **5a. NO-RUN MODE** rule so future sessions know how to honour the
+  "do not run any code" directive.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked but no `pnpm test` / `pnpm typecheck` / `mvn test` were executed this
+  session. Sprint promoted to `code-complete (unverified)` per CLAUDE.md §5a. First post-NO-RUN session
+  should run the full verification matrix (middleware typecheck + test + build, Java test, web typecheck)
+  before opening the next sprint.
+- Sanitizer / FIM / Token Gateway from Sprints 5+6 still pass; Sprint 7 work does not touch them.
+- Shadow Learning is heuristic-only — no LLM call until Sprint 17 wires the Token Gateway through.
+
+---
 
 ### Sprint 6 — Phase 1: Safety & Quality
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §12, §13, §14
@@ -179,7 +225,7 @@ Known state:
 |---|---|---|
 | 5 | Phase 0 | ✅ Core Foundation closeout — Token Gateway, Orchestrator, WebSocket, Flyway, docker-compose, pgvector |
 | 6 | Phase 1 | ✅ Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
-| 7 | Phase 2 | Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer |
+| 7 | Phase 2 | ✅ Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer *(code-complete, unverified)* |
 | 8 | Phase 3 | Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading |
 | 9 | Phase 4 | Telemetry & Incidents — OpenTelemetry, Incident Commander, Migration Orchestrator, Semantic Tripwires |
 | 10 | Phase 5 | Fleet & Speculation — Pub/Sub mesh, FleetOutcome, healing cascade guardrail, Deadlock Breaker |
@@ -280,6 +326,12 @@ Coverage table is auto-refreshed at the end of every sprint after `pnpm test --c
 
 ## 📝 Session Notes
 
+- **2026-05-16 (night)** — Sprint 7 **code-complete, unverified** (NO-RUN MODE per user directive).
+  Shipped `.entiresystem/` canonical layout (5 skill subtrees, 3 EXPERIENCE files, 3 ANTI_PATTERNS files),
+  ExperienceService + VeracityService + ModelTransferService, `/api/experience` routes, `knowledge-audit`
+  and `model-transfer` CLIs, Shadow Learning GitHub Action, Flyway V7 schema, 15 new Vitest tests + 2 new
+  Playwright specs (none executed this session), and ADRs 0007 + 0008. CLAUDE.md §5a documents the
+  NO-RUN MODE protocol so future sessions handle the same directive consistently.
 - **2026-05-16 (evening)** — Sprint 6 closed. Shipped sanitizer + FIM + plagiarism + Red Team + Anti-Slop +
   Anti-Test-Dodging + Turn-1 Discovery Form + device-matrix Playwright + Flyway V6 + CI workflow + signed
   `.entiresystem/` brain files. 29 middleware tests green, 5 Java tests green, web typecheck green. Three

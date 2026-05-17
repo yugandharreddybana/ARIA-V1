@@ -8,6 +8,27 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-16 (night) — Sprint 7 code-complete (NO-RUN MODE)
+- Honoured a user "do not run any code" directive: zero `pnpm`/`mvn`/`tsx`/`node`/`playwright`
+  invocations this session. Mentally typechecked every file before commit.
+- Shipped V27.9 §6 Experience & Memory layer: `.entiresystem/` locked down per **ADR-0007**;
+  Knowledge Veracity scoring per **ADR-0008** (`weight × 0.5^(age/half_life)`).
+- Services: `ExperienceService` (YAML reader/writer for `.entiresystem/skills/<slug>/experience.yml`,
+  idempotent append + dedupe), `VeracityService` (`score`, `rank`, `auditSkill`),
+  `ModelTransferService` (writes `.backend/<workspace>/{file_index,skill_headers,experience}.json` +
+  `prompts/*.md` — NO LLM, NO NETWORK).
+- Routes: `/api/experience` (list / read / audit / append entry / append failure story /
+  model-transfer). Authenticated + Zod-strict.
+- CLIs: `scripts/knowledge-audit.ts` + `scripts/model-transfer.ts`.
+- Shadow Learning GitHub Action drafts an `ai-only` entry on every merged PR and opens a follow-up PR
+  for human promotion. Real Ollama scoring deferred to Sprint 17.
+- Flyway **V7** — `skill_experience_profiles`, `knowledge_veracity_audits`,
+  `shadow_learning_runs`, `backend_workspaces`.
+- Tests authored but **not executed**: 15 new Vitest cases (experience / veracity / modelTransfer) +
+  2 new Playwright specs.
+- CLAUDE.md §5 extended with rule **5a NO-RUN MODE** so future sessions handle the same directive
+  consistently. Status reported in two sentences per the user's response-style rule.
+
 ### 2026-05-16 (evening) — Sprint 6 closed
 - Shipped the V27.9 §12–§14 safety layer: two-stage **sanitizer** with rate-limited defensive posture,
   Ed25519-signed **FIM** over CORE_VALUES / DESIGN / DOMAIN_BOUNDARIES / SKILL, copyleft-aware
@@ -68,6 +89,21 @@
 - **`.entiresystem/ADRs/ADR-0001-pgvector.md`** | pgvector for all embeddings/graph | sha:`HEAD@S5` |
   **`ADR-0002-socket-io.md`** | socket.io over native ws | sha:`HEAD@S5` |
   **`ADR-0003-token-gateway-in-middleware.md`** | Token Gateway lives in Node middleware | sha:`HEAD@S5` |
+- **`.entiresystem/CORE_VALUES.yml`/`DESIGN.md`/`DOMAIN_BOUNDARIES.json`/`SKILL.md`** | sha:`HEAD@S6+` | FIM-signed brain files.
+- **`.entiresystem/EXPERIENCE/{EXPERIENCE,frontend-web_EXPERIENCE,backend-api_EXPERIENCE,security_EXPERIENCE}.md`** | sha:`HEAD@S7` | cross-cutting + per-persona lessons, every entry tagged with a Veracity tag.
+- **`.entiresystem/ANTI_PATTERNS/{auth,database,ux}_ANTI_PATTERNS.md`** | sha:`HEAD@S7` | per-domain forbidden patterns.
+- **`.entiresystem/skills/<slug>/{SKILL.md,experience.yml}`** | sha:`HEAD@S7` | 5 personas wired up: backend-api-specialist, frontend-web-specialist, security-engineer, qa-e2e, devops-engineer.
+- **`.entiresystem/ADRs/ADR-{0007,0008}-*.md`** | sha:`HEAD@S7` | canonical layout + Knowledge Veracity scoring.
+- **`packages/db/flyway/migrations/V7__sprint7_experience_memory.sql`** | sha:`HEAD@S7` | `skill_experience_profiles`, `knowledge_veracity_audits`, `shadow_learning_runs`, `backend_workspaces`.
+- **`apps/middleware/src/services/experience.service.ts`** | sha:`HEAD@S7` | Dep-free YAML reader/writer for skill experience profiles. Knowledge Veracity tags enforced at the helper level (defaults `ai-only`).
+- **`apps/middleware/src/services/veracity.service.ts`** | sha:`HEAD@S7` | ADR-0008 scoring + `auditSkill` with stale-entry thresholds (`ai-only` < 0.10, `human-approved` < 0.50).
+- **`apps/middleware/src/services/modelTransfer.service.ts`** | sha:`HEAD@S7` | `/model-transfer` zero-token tool. Writes `file_index.json` (sha256), `skill_headers.json` (frontmatter), `experience.json` (ranked), and `prompts/<slug>.md`. NO LLM, NO NETWORK.
+- **`apps/middleware/src/{schemas/experience,controllers/experience,routes/experience}.ts`** | sha:`HEAD@S7` | Strict Zod schemas + `/api/experience/*` endpoints.
+- **`apps/middleware/src/__tests__/{experience,veracity,modelTransfer}.test.ts`** | sha:`HEAD@S7` | 15 Vitest cases (NOT executed — NO-RUN MODE).
+- **`scripts/{knowledge-audit,model-transfer}.ts`** | sha:`HEAD@S7` | CLIs.
+- **`.github/workflows/shadow-learning.yml`** | sha:`HEAD@S7` | On PR merge, drafts an `ai-only` entry and opens a follow-up PR.
+- **`apps/e2e/tests/sprint7-{experience,model-transfer}.spec.ts`** | sha:`HEAD@S7` | 6 Playwright cases (NOT executed — NO-RUN MODE).
+
 - **`packages/db/flyway/migrations/V5__sprint5_token_gateway.sql`** | sha:`HEAD@S5` |
   Enables pgvector. Extends `sessions` with workspace_id, user_id, mode, environment, mission_type,
   mission_risk_appetite, mission_scope, token_budget, time_budget_minutes, is_first_start, brief_summary;
@@ -353,6 +389,15 @@
   fallback transports, mature TS types. Cost: slightly heavier than `ws`. Acceptable for local-first.
 - **DEC-007 — MEMORY.md is the canonical token-optimisation index** (2026-05-16). Replaces ad-hoc file rereads.
   Update protocol in §H of this file.
+- **DEC-008 — `.entiresystem/` canonical layout locked** (2026-05-16, Sprint 7, ADR-0007). The committed tree
+  is the single source of truth for ARIA knowledge; `.backend/<workspace>/` is derived; `.aria/` is private
+  runtime.
+- **DEC-009 — Knowledge Veracity 3-tag taxonomy** (2026-05-16, Sprint 7, ADR-0008). `human-authored` ∞,
+  `human-approved` 365d half-life, `ai-only` 30d. Score = `weight × 0.5^(age/half_life)`. Defaults to
+  `ai-only` everywhere agents write — only humans promote.
+- **DEC-010 — NO-RUN MODE protocol** (2026-05-16, Sprint 7, CLAUDE.md §5a). When user says "do not run any
+  code", do not execute pnpm/mvn/tsx/node/playwright; mentally typecheck; mark sprint
+  `code-complete (unverified)`. Stay in NO-RUN MODE for the rest of the session unless lifted.
 
 ---
 
