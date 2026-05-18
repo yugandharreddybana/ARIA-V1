@@ -5,6 +5,7 @@ import { validateEnv } from './config/env';
 import { logger } from './config/logger';
 import { createWsServer } from './ws';
 import { closePgPool } from './services/db.client';
+import { startSystemAlertsConsumer, stopSystemAlertsConsumer } from './services/systemAlerts.consumer';
 
 const env = validateEnv();
 const PORT = env.MIDDLEWARE_PORT;
@@ -19,8 +20,12 @@ server.listen(PORT, () => {
   logger.info(`Environment: ${env.NODE_ENV}`);
 });
 
+// V27.9 §17 — consume `system.alerts` from Redis and forward to the IncidentCommander.
+startSystemAlertsConsumer();
+
 async function shutdown(signal: string): Promise<void> {
   logger.info(`${signal} received. Shutting down gracefully...`);
+  stopSystemAlertsConsumer();
   io.close();
   server.close(async () => {
     await closePgPool();

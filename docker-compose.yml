@@ -188,10 +188,70 @@ services:
     networks:
       - aria-net
 
+  # ── Observability stack (opt-in via `--profile observability`) ─────────
+  # Sprint 9 ships the schema + dashboards; full OpenTelemetry traces land in Sprint 14 when
+  # the Chaos Sandbox image carries the OTel collector. Start with:
+  #   docker compose --profile observability up -d
+  otel-collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    container_name: aria-otel
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./infra/otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks: [aria-net]
+
+  tempo:
+    profiles: ["observability"]
+    image: grafana/tempo:2.5.0
+    container_name: aria-tempo
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./infra/tempo.yaml:/etc/tempo.yaml:ro
+      - aria-tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+    networks: [aria-net]
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.54.1
+    container_name: aria-prom
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - aria-prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [aria-net]
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:11.2.0
+    container_name: aria-grafana
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+    ports:
+      - "3030:3000"
+    volumes:
+      - aria-grafana-data:/var/lib/grafana
+    networks: [aria-net]
+
 volumes:
   aria-pg-data:
   aria-redis-data:
   aria-ollama-models:
+  aria-tempo-data:
+  aria-prom-data:
+  aria-grafana-data:
 
 networks:
   aria-net:
