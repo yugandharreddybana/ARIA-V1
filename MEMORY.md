@@ -8,6 +8,22 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-17 (later) — Sprint 9 audit gap-fill (NO-RUN MODE) — commits `466bb48` + `80fe3e3`
+- Self-audit closed 7 §6 DoD gaps:
+  - **`SystemAlertsConsumer`** (middleware/ts): Redis `XREADGROUP` on `system.alerts` →
+    `POST /api/incidents` with internal service token; started in `index.ts`.
+  - **`IncidentResponder`** orchestrates Precision-session spawn (P0/P1 only) + Concept Graph
+    correlation + Jira stub. `IncidentController.declare()` now returns `{incident, escalation}`.
+  - **`SemanticCorrelator`** ranks `semantic_chunks` against incident text (ADR-0010 weights).
+  - **`JiraMcpStub`** logs `ARIA-<sha8>` keys (Sprint 17 swaps for real MCP behind same API).
+  - **`SemanticTripwireService`** + entity + repo: `install(table, column)` returns a unique
+    `__aria_tripwire_<hex>__` honeypot; `checkAccess()` auto-declares P1 on first hit only.
+  - **`SloBootstrap` `@PostConstruct`** reads `.entiresystem/slos.yml` and upserts
+    `slo_definitions` (`SloDefinition` entity + repo).
+  - **Observability profile** in docker-compose: `otel-collector` + `tempo` + `prometheus` +
+    `grafana` under `--profile observability`. Configs at `infra/`.
+- 8 unrun tests (`SemanticTripwireServiceTest` 3, `IncidentResponderTest` 3, `SloBootstrapTest` 2).
+
 ### 2026-05-17 — Sprint 8 gap-fill + Sprint 9 code-complete (NO-RUN MODE)
 - Sprint 8 audit revealed three gaps and closed them: `OllamaDispatcher.embed()` against
   Ollama `/api/embeddings`; `POST /api/llm/embed` route; Token Gateway honours an optional
