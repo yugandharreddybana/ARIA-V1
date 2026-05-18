@@ -8,6 +8,24 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-17 — Sprint 8 gap-fill + Sprint 9 code-complete (NO-RUN MODE)
+- Sprint 8 audit revealed three gaps and closed them: `OllamaDispatcher.embed()` against
+  Ollama `/api/embeddings`; `POST /api/llm/embed` route; Token Gateway honours an optional
+  `expectedCompressionRatio` so budget projection uses `promptTokensEstimated / ratio`
+  (the Pre-Flight Estimator wiring task #7 from §5). Java `EmbeddingClient` retargeted to
+  `/api/llm/embed`; `ARIA_INTERNAL_SERVICE_TOKEN` env + `aria.middleware.url` /
+  `aria.internal.service-token` Spring properties added.
+- Sprint 9 shipped V27.9 §17 end-to-end: `.entiresystem/slos.yml` (ADR-0011), Flyway V9
+  (`slo_definitions`, `slo_breaches`, `incidents`, `migration_playbooks`,
+  `migration_phase_runs`, `semantic_tripwires`). Java `com.aria.incident.*`,
+  `com.aria.migration.*` (NEVER auto-rolls back `stateful_dangerous`/`irreversible` per
+  ADR-0012), `com.aria.telemetry.*` Prometheus registry + `/metrics` endpoint. Middleware
+  telemetry registry + middleware + `/metrics` route + `/api/incidents` proxy. Web
+  `/(dashboard)/system-health` page.
+- Tests authored, **not executed**: 9 Java JUnit, 6 Vitest, 4 Playwright. Sprint 10 queued.
+- ADRs: 0011 (SLO catalogue + severity), 0012 (Migration playbook + rollback rules), 0013
+  (Tripwire isolation).
+
 ### 2026-05-16 (late night) — Sprint 8 code-complete (NO-RUN MODE)
 - Built the V27.9 §18N stack end-to-end without running any code (still in NO-RUN MODE).
 - Java `com.aria.graph.*`: `SemanticChunk` JPA entity (TEXT chunk_type with DB CHECK, raw String

@@ -270,7 +270,7 @@ Known state:
 | 6 | Phase 1 | ✅ Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
 | 7 | Phase 2 | ✅ Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer *(code-complete, unverified)* |
 | 8 | Phase 3 | ✅ Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading *(code-complete, unverified)* |
-| 9 | Phase 4 | Telemetry & Incidents — OpenTelemetry, Incident Commander, Migration Orchestrator, Semantic Tripwires |
+| 9 | Phase 4 | ✅ Telemetry & Incidents — OpenTelemetry (basic Prom format), Incident Commander, Migration Orchestrator, Semantic Tripwires *(code-complete, unverified)* |
 | 10 | Phase 5 | Fleet & Speculation — Pub/Sub mesh, FleetOutcome, healing cascade guardrail, Deadlock Breaker |
 | 11 | Phase 6 | IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context |
 | 12 | Phase 7 | Governance & Legal — Ed25519 agent identity, Compliance Auditor, GDPR erasure, /aria explain, audit export |
@@ -321,8 +321,10 @@ Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 | Edge Swarm (SLM web/iOS/Android) | 🔜 Sprint 20 |
 | Predictive Data Gravity (cache pre-warm) | 🔜 Sprint 20 |
 | Genesis pipeline | 🔜 Sprint 21 |
-| Observability (OpenTelemetry, Prom, Datadog/Sentry MCP) | 🔜 Sprint 9 |
-| Incident Commander + auto-hotfix | 🔜 Sprint 9 |
+| Observability (Prom `/metrics`, OpenTelemetry SDK in Sprint 14) | ✅ Sprint 9 *(code-complete, unverified)* |
+| Incident Commander + auto-hotfix | ✅ Sprint 9 *(state machine + REST; auto-hotfix in Sprint 14)* |
+| Zero-Downtime Migration Orchestrator | ✅ Sprint 9 *(code-complete, unverified)* |
+| Semantic Tripwires (honeypots) | ✅ Sprint 9 *(schema + ADR; install/check loop in Sprint 14)* |
 | Zero-Downtime Migration Orchestrator | 🔜 Sprint 9 |
 | Synthetic Data Hydrator (profiles + cache) | 🔜 Sprint 14 |
 | Skill Quarantine | 🔜 Sprint 16 |
@@ -369,6 +371,13 @@ Coverage table is auto-refreshed at the end of every sprint after `pnpm test --c
 
 ## 📝 Session Notes
 
+- **2026-05-17** — Sprint 8 gap-fill (added `/api/llm/embed`, Pre-Flight Estimator wired into the Token
+  Gateway via `expectedCompressionRatio`, EmbeddingClient retargeted) **+** Sprint 9 **code-complete,
+  unverified** (NO-RUN MODE): SLO catalogue (ADR-0011), Flyway V9, Java incident + migration packages
+  (IncidentCommanderService state machine, MigrationOrchestratorService that never auto-rolls back
+  stateful_dangerous/irreversible per ADR-0012), middleware telemetry registry + `/metrics`, incident
+  proxy + `/api/incidents`, web `/(dashboard)/system-health` page, ADRs 0011–0013. 16 unrun tests
+  (9 Java, 6 Vitest, 4 Playwright). Sprint 10 (Phase 5 — Fleet & Speculation) is queued.
 - **2026-05-16 (late night)** — Sprint 8 **code-complete, unverified** (NO-RUN MODE). Built the 4-level
   Concept Graph + Distillation Engine end-to-end: Java `com.aria.graph` package
   (SemanticChunk JPA + repo with native HNSW query, SemanticChunker regex-based per ADR-0009,

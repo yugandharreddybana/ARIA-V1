@@ -40,21 +40,13 @@ public class EmbeddingClient {
 
     /**
      * Returns a 768-dim float[] for the given text via Ollama `nomic-embed-text`. Empty array
-     * if the gateway is unreachable.
+     * if the gateway is unreachable. Hits the dedicated /api/llm/embed route added Sprint 8.
      */
     public float[] embed(String text) {
         try {
             Map<?, ?> response = client().post()
-                    .uri("/api/llm/invoke")
-                    .body(Map.of(
-                        "sessionId", "00000000-0000-0000-0000-000000000000",
-                        "agentId",   "concept-graph-builder",
-                        "targetBackend", "ollama-default",
-                        "priority", "low",
-                        "promptTokensEstimated", Math.max(1, text.length() / 4),
-                        "messages", List.of(Map.of("role", "user", "content", text)),
-                        "modelParameters", Map.of("embeddingOnly", true)
-                    ))
+                    .uri("/api/llm/embed")
+                    .body(Map.of("text", text))
                     .retrieve()
                     .body(Map.class);
             Object data = response != null ? response.get("data") : null;
@@ -96,6 +88,30 @@ public class EmbeddingClient {
         } catch (Exception ex) {
             log.warn("Summary call failed: {} — returning empty summary", ex.getMessage());
             return "";
+        }
+    }
+
+    /**
+     * Convenience for callers that already know which embedding model to ask for (Sprint 14
+     * Synthetic Data Hydrator uses this with a smaller model on hot paths).
+     */
+    public float[] embed(String text, String model) {
+        try {
+            Map<?, ?> response = client().post()
+                    .uri("/api/llm/embed")
+                    .body(Map.of("text", text, "model", model))
+                    .retrieve()
+                    .body(Map.class);
+            Object data = response != null ? response.get("data") : null;
+            if (data instanceof Map<?, ?> m && m.get("embedding") instanceof List<?> raw) {
+                float[] out = new float[raw.size()];
+                for (int i = 0; i < raw.size(); i++) out[i] = ((Number) raw.get(i)).floatValue();
+                return out;
+            }
+            return new float[0];
+        } catch (Exception ex) {
+            log.warn("Embedding call failed: {} — returning empty vector", ex.getMessage());
+            return new float[0];
         }
     }
 

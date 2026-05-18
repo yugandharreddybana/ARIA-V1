@@ -29,6 +29,10 @@ server:
 aria:
   jwt:
     public-key: ${JWT_PUBLIC_KEY}
+  middleware:
+    url: ${MIDDLEWARE_URL:http://localhost:3001}
+  internal:
+    service-token: ${ARIA_INTERNAL_SERVICE_TOKEN:}
 
 management:
   endpoints:
