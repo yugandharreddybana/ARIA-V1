@@ -7,13 +7,63 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 9 — Phase 4: Telemetry & Incidents**  *(queued)*
-- Spec anchors: §17 (Telemetry, Incidents, Migrations).
-- DoD checklist: see IMPLEMENTATION.md §6.
+**Sprint 10 — Phase 5: Fleet & Speculation**  *(queued)*
+- Spec anchors: §17.4 (Fleet Commander, healing guardrail), §18I (Deadlock Breaker), §8 (Sandboxes / Speculation).
+- DoD checklist: see IMPLEMENTATION.md §7.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 9 (gap-fill) — close all 7 §6 DoD audit gaps  *(NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Commit**: `466bb48`
+
+Self-audit caught seven Sprint 9 §6 gaps; all closed in `466bb48`:
+
+1. **Redis `system.alerts` consumer** — `apps/middleware/src/services/systemAlerts.consumer.ts`
+   subscribes via `XREADGROUP`, forwards payloads to `POST /api/incidents` with the internal
+   service token. Started in `index.ts`, stopped on `SIGTERM` / `SIGINT`.
+2. **Auto-Precision session on P0/P1** — `IncidentResponder` orchestrates the escalation path;
+   `IncidentController.declare()` returns `{ incident, escalation }` in one response.
+3. **Concept Graph correlation** — `SemanticCorrelator` ranks `semantic_chunks` against incident
+   text (ADR-0010 weights) and returns top-N file paths.
+4. **Jira MCP stub** — `JiraMcpStub.createIncidentTicket()` logs deterministic `ARIA-<sha8>` keys.
+5. **Semantic Tripwire generator** — `SemanticTripwire` entity + repo + service with
+   `install(table, column)` and `checkAccess(value, ctx)` that auto-declares P1 incidents on
+   first hit.
+6. **SLO file → DB sync** — `SloDefinition` entity + `SloBootstrap @PostConstruct` reads
+   `.entiresystem/slos.yml` and upserts `slo_definitions`.
+7. **Observability profile** — `otel-collector`, `tempo`, `prometheus`, `grafana` services added
+   under `--profile observability`. Config files at `infra/{prometheus.yml,otel-collector.yaml,tempo.yaml}`.
+
+New tests (authored, NOT executed — NO-RUN MODE): `SemanticTripwireServiceTest` (3),
+`IncidentResponderTest` (3), `SloBootstrapTest` (2).
+
+---
+
+### Sprint 9 — Phase 4: Telemetry & Incidents  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Commit**: `69adb98` | **Spec**: §17
+
+What was built:
+- **`.entiresystem/slos.yml`** — canonical SLO catalogue (ADR-0011).
+- **Flyway V9** — `slo_definitions`, `slo_breaches`, `incidents`, `migration_playbooks`,
+  `migration_phase_runs`, `semantic_tripwires`.
+- **Java `com.aria.incident`** — `Incident` JPA entity, `IncidentCommanderService` (state machine
+  with explicit valid transitions), `IncidentController` (`/api/incidents`).
+- **Java `com.aria.migration`** — `MigrationPlaybook` + `MigrationPhaseRun` entities,
+  `MigrationOrchestratorService` (dep-free YAML parser, signed-hash registration, sequential
+  runner that **NEVER auto-rolls back** `stateful_dangerous` or `irreversible` phases per
+  ADR-0012), `MigrationController`.
+- **Java `com.aria.telemetry`** — `PrometheusMetrics` registry + `MetricsController` (`/metrics`).
+- **Middleware telemetry** — counter / gauge / histogram registry, request middleware,
+  `/metrics` route, `/api/incidents` proxy (auth + Zod).
+- **Web `/(dashboard)/system-health`** — Token Gateway queue card + recent incidents list with
+  severity badges.
+- 13 unrun tests (9 Java JUnit, 4 Vitest, 4 Playwright).
+- ADRs **0011** (SLO catalogue + breach severity), **0012** (Migration playbook + rollback rules),
+  **0013** (Tripwire isolation rules).
+
+---
 
 ### Sprint 8 — Phase 3: Advanced Retrieval (Concept Graph + Distillation)  *(code-complete, unverified — NO-RUN MODE)*
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §6, §18N, §7
@@ -325,7 +375,8 @@ Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 | Incident Commander + auto-hotfix | ✅ Sprint 9 *(state machine + REST; auto-hotfix in Sprint 14)* |
 | Zero-Downtime Migration Orchestrator | ✅ Sprint 9 *(code-complete, unverified)* |
 | Semantic Tripwires (honeypots) | ✅ Sprint 9 *(schema + ADR; install/check loop in Sprint 14)* |
-| Zero-Downtime Migration Orchestrator | 🔜 Sprint 9 |
+| Auto Precision-session on P0/P1 incident | ✅ Sprint 9 *(gap-fill)* |
+| Jira MCP integration | ⚠️ Stub Sprint 9; real MCP Sprint 17 |
 | Synthetic Data Hydrator (profiles + cache) | 🔜 Sprint 14 |
 | Skill Quarantine | 🔜 Sprint 16 |
 | Token-optimisation via MEMORY.md file index | ✅ Sprint 5 (this commit) |
