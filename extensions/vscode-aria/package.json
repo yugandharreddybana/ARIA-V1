@@ -1,0 +1,55 @@
+{
+  "name": "vscode-aria",
+  "displayName": "ARIA (Autonomous Repository Intelligence Agent)",
+  "description": "Hover summaries, ghost-text diffs, and inline /fix /test /explain /red-team commands powered by the ARIA daemon.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "aria-dev",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "ARIA",
+      "properties": {
+        "aria.middlewareUrl": {
+          "type": "string",
+          "default": "http://localhost:3001",
+          "description": "Base URL of the ARIA middleware. Sets ARIA_MIDDLEWARE_URL when launching the LSP server."
+        },
+        "aria.agentId": {
+          "type": "string",
+          "default": "lsp-editor",
+          "description": "Agent identity reported by this editor session."
+        },
+        "aria.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "Active ARIA project UUID. Required for hover + dispatch."
+        }
+      }
+    },
+    "commands": [
+      { "command": "aria.dispatch.fix",        "title": "ARIA: /fix at cursor" },
+      { "command": "aria.dispatch.test",       "title": "ARIA: /test for current file" },
+      { "command": "aria.dispatch.explain",    "title": "ARIA: /explain symbol" },
+      { "command": "aria.dispatch.redTeam",    "title": "ARIA: /red-team function" },
+      { "command": "aria.dispatch.compliance", "title": "ARIA: /compliance review" },
+      { "command": "aria.dispatch.designCheck","title": "ARIA: /design-check" }
+    ]
+  },
+  "scripts": {
+    "build":     "tsc -p tsconfig.json",
+    "package":   "vsce package --out aria.vsix",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node":   "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "typescript":    "^5.4.5"
+  }
+}

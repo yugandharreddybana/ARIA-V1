@@ -1,5 +1,6 @@
 import type { Response, NextFunction } from 'express';
 import { fleetProxy } from '../services/fleet.proxy';
+import { getFleetEvents } from '../services/fleet.events';
 import { registerAgentSchema, publishEventSchema, heartbeatSchema, shadowBranchSchema } from '../schemas/fleet.schemas';
 import type { AriaRequest } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/error.middleware';
@@ -21,7 +22,15 @@ export async function registerAgent(req: AriaRequest, res: Response, next: NextF
 export async function publishEvent(req: AriaRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const parsed = publishEventSchema.parse(req.body);
-    res.status(201).json({ success: true, data: await fleetProxy.publish(parsed, bearer(req)) });
+    const stored = await fleetProxy.publish(parsed, bearer(req));
+    // Fan out to the WebSocket hub so `fleet.<epicId>` + `system.health` subscribers see it live.
+    getFleetEvents().emit('fleet.publish', {
+      epicId:  parsed.epicId,
+      topic:   parsed.topic,
+      agentId: parsed.agentId,
+      payload: parsed.payload,
+    });
+    res.status(201).json({ success: true, data: stored });
   } catch (err) { next(err); }
 }
 

@@ -1,0 +1,78 @@
+name: autonomous-rebase
+
+# V27.9 §18M — Autonomous Rebase Loop.
+# On every push to a feature branch, attempt to rebase against the default branch.  We ONLY
+# auto-resolve trivial conflicts (lockfiles, formatting). Anything substantive escalates with
+# a comment + label so a human picks it up.
+#
+# Only runs on branches matching feat/*, fix/*, hotfix/*, or claude/* to keep noise low.
+
+on:
+  push:
+    branches: ['feat/**', 'fix/**', 'hotfix/**', 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Identify default branch
+        id: defbranch
+        run: |
+          BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+          echo "default_branch=$BRANCH" >> $GITHUB_OUTPUT
+        env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+
+      - name: Configure git
+        run: |
+          git config user.name  'aria-autonomous-rebase'
+          git config user.email 'aria-bot@users.noreply.github.com'
+
+      - name: Attempt rebase
+        id: rebase
+        continue-on-error: true
+        run: |
+          BASE='origin/${{ steps.defbranch.outputs.default_branch }}'
+          git fetch origin '${{ steps.defbranch.outputs.default_branch }}':"$BASE" 2>/dev/null || true
+          if git rebase "$BASE"; then
+            echo "result=success" >> $GITHUB_OUTPUT
+          else
+            CONFLICTS=$(git diff --name-only --diff-filter=U || true)
+            echo "result=conflict" >> $GITHUB_OUTPUT
+            echo "conflicts<<EOF" >> $GITHUB_OUTPUT
+            echo "$CONFLICTS"     >> $GITHUB_OUTPUT
+            echo "EOF"            >> $GITHUB_OUTPUT
+            # Auto-resolve trivial conflicts only.
+            SAFE='^(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|.+\.prettierrc.*|.+\.eslintrc.*)$'
+            UNSAFE=$(echo "$CONFLICTS" | grep -Ev "$SAFE" || true)
+            if [ -z "$UNSAFE" ] && [ -n "$CONFLICTS" ]; then
+              # Take the incoming (base) version of every lockfile / formatter config.
+              echo "$CONFLICTS" | xargs -r -I{} git checkout --theirs '{}'
+              echo "$CONFLICTS" | xargs -r git add
+              git rebase --continue || true
+              echo "result=auto-resolved" >> $GITHUB_OUTPUT
+            else
+              git rebase --abort
+            fi
+          fi
+
+      - name: Push rebased branch
+        if: steps.rebase.outputs.result == 'success' || steps.rebase.outputs.result == 'auto-resolved'
+        run: git push --force-with-lease
+
+      - name: Comment on PR for human-required conflicts
+        if: steps.rebase.outputs.result == 'conflict'
+        env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+        run: |
+          PR=$(gh pr list --head "${GITHUB_REF#refs/heads/}" --json number --jq '.[0].number' || true)
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --body $'Autonomous rebase aborted — manual conflict resolution required:\n\n```\n${{ steps.rebase.outputs.conflicts }}\n```'
+            gh pr edit "$PR" --add-label 'rebase-needed' || true
+          fi

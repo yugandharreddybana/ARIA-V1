@@ -7,13 +7,54 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 11 — Phase 6: IDE / LSP Integration**  *(queued)*
-- Spec anchors: §18M (Deep Native IDE/LSP Integration).
-- DoD checklist: see IMPLEMENTATION.md §8.
+**Sprint 12 — Phase 7: Governance & Legal**  *(queued)*
+- Spec anchors: §12 (Security / FIM / Auth identity), §13.7 (Legal / Compliance), §20 (Decision Explainer).
+- DoD checklist: see IMPLEMENTATION.md §9.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 11 — Phase 6: IDE / LSP Integration  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §18M
+
+What was built:
+- **Flyway V11** — `file_locks` (Redis mirror + TTL audit) and `lsp_diff_decisions` (append-only
+  ghost-text accept/reject log).
+- **`apps/middleware/src/services/fileLock.service.ts`** — Redis-backed `acquire` (`SET NX EX`),
+  `release` (holder-verified), `refresh`, `inspect`. Postgres mirror is best-effort; Redis is
+  authoritative.
+- **`apps/middleware/src/{schemas,controllers,routes}/lsp.*.ts`** — Zod-strict `/api/lsp/*`
+  surface: locks (acquire/release/refresh/inspect), hover (proxies the Concept Graph
+  distillation), diff decision log, inline task dispatch. Auth-gated + per-route rate-limited.
+- **`apps/lsp-server/`** — new TypeScript LSP server package. Hover provider hits
+  `/api/lsp/hover`. Six `executeCommand` actions (`aria.dispatch.{fix,test,explain,redTeam,
+  compliance,designCheck}`) plus diff and lock helpers. stdio transport in Sprint 11;
+  WebSocket in Sprint 14.
+- **`extensions/vscode-aria/`** — VS Code extension scaffold that boots the bundled LSP server,
+  forwards config (`aria.middlewareUrl`, `aria.agentId`, `aria.projectId`), and registers the
+  six command palette entries.
+- **`.github/workflows/autonomous-rebase.yml`** — Autonomous Rebase Loop that auto-resolves
+  only lockfile / formatter conflicts and labels everything else `rebase-needed`.
+- **Sprint 10 gap-fill (rolled in)**: `@EnableScheduling` on `AriaBackendApplication`,
+  `FleetScheduler` (`@Scheduled` heal scan @ 30 s + deadlock sweep @ 60 s), `JiraWebhookController`
+  (HMAC-SHA256-verified `/api/fleet/jira-webhook` that opens shadow branches), middleware
+  `services/fleet.events.ts` in-process bus + WebSocket bridge for `fleet.<epicId>` and
+  `system.health` rooms.
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit: `JiraWebhookControllerTest` (4).
+  - Middleware Vitest: `fileLock.test.ts` (7 schema cases).
+  - LSP package Vitest: `apps/lsp-server/src/__tests__/server.test.ts` (2 hover-render cases).
+  - Playwright: `sprint11-lsp.spec.ts` (4 surface cases).
+- **ADRs**: 0016 LSP protocol extensions + perf budgets, 0017 File lock TTL + holder enforcement.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm` / `mvn` / `tsx` / `node` / `playwright` invoked.
+- Diagnostics streaming, `aria/lockState` notification, and the WebSocket LSP transport are
+  Sprint 14 work (the API surface is reserved in ADR-0016 to avoid future breakage).
+- VS Code extension `.vsix` packaging needs `vsce`; `pnpm dlx @vscode/vsce` once NO-RUN lifts.
+
+---
 
 ### Sprint 10 — Phase 5: Fleet & Speculation  *(code-complete, unverified — NO-RUN MODE)*
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §17.4 + §18I + §8
@@ -373,7 +414,7 @@ Known state:
 | 8 | Phase 3 | ✅ Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading *(code-complete, unverified)* |
 | 9 | Phase 4 | ✅ Telemetry & Incidents — OpenTelemetry (basic Prom format), Incident Commander, Migration Orchestrator, Semantic Tripwires *(code-complete, unverified)* |
 | 10 | Phase 5 | ✅ Fleet & Speculation — Ed25519-signed envelopes, FleetOutcome log, healing cascade DFS, Deadlock Breaker, shadow branches *(code-complete, unverified)* |
-| 11 | Phase 6 | IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context |
+| 11 | Phase 6 | ✅ IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context, Redis file locks, autonomous-rebase workflow *(code-complete, unverified)* |
 | 12 | Phase 7 | Governance & Legal — Ed25519 agent identity, Compliance Auditor, GDPR erasure, /aria explain, audit export |
 | 13 | Phase 8 | Finance & Procurement — FinOps Oracle, Procurement Scout, Stripe Issuing stub, Arbitrage Engine |
 | 14 | Phase 9 | Security Protocol & Benchmarking — Chaos Sandbox, Synthetic Hydrator, Replay Engine, SWE-bench Lite gate, Golden Dataset |

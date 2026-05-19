@@ -26,6 +26,7 @@ import distillRoutes from './routes/distill.routes';
 import incidentsRoutes from './routes/incidents.routes';
 import metricsRoutes from './routes/metrics.routes';
 import fleetRoutes from './routes/fleet.routes';
+import lspRoutes from './routes/lsp.routes';
 
 /**
  * Build the Express app. Factory pattern so tests (and the WS attach step
@@ -65,6 +66,7 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/distill',       distillRoutes);
   app.use('/api/incidents',     incidentsRoutes);
   app.use('/api/fleet',         fleetRoutes);
+  app.use('/api/lsp',           lspRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

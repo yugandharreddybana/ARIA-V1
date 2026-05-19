@@ -8,6 +8,22 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-17 (very late) — Sprint 10 audit gap-fill + Sprint 11 code-complete (NO-RUN MODE)
+- Sprint 10 audit found three real gaps; all closed in this commit: `@EnableScheduling` +
+  `FleetScheduler` (`@Scheduled` heal scan @ 30 s + deadlock sweep @ 60 s, env-toggleable via
+  `aria.fleet.scheduler.*`); HMAC-verified `JiraWebhookController` at `/api/fleet/jira-webhook`
+  that opens shadow branches on Jira issue events; in-process `fleet.events` EventEmitter +
+  WebSocket bridge for live dashboard updates (`fleet.<epicId>`, `system.health`).
+- Sprint 11 shipped V27.9 §18M end-to-end: Flyway V11 (`file_locks` Redis mirror +
+  `lsp_diff_decisions`); middleware `services/fileLock.service.ts` (Redis `SET NX EX` with
+  holder-verified release + Postgres mirror); `/api/lsp/*` Zod-strict routes (locks / hover /
+  diff decisions / task dispatch); new `apps/lsp-server/` package (vscode-languageserver,
+  Hover provider over Concept Graph distillation, six `executeCommand` actions); VS Code
+  extension scaffold in `extensions/vscode-aria/`; `.github/workflows/autonomous-rebase.yml`
+  (auto-resolves only lockfile/formatter conflicts).
+- 17 unrun tests (4 Java JUnit, 9 Vitest across middleware + lsp-server, 4 Playwright). ADRs
+  0016 (LSP protocol extensions + perf budgets), 0017 (File lock TTL + holder enforcement).
+
 ### 2026-05-17 (late) — Sprint 10 code-complete (NO-RUN MODE)
 - Shipped V27.9 §17.4 + §18I end-to-end. **Flyway V10** introduces `agent_registry`,
   `fleet_outcomes`, `agent_heartbeats`, `contract_debts`, `shadow_branches`,

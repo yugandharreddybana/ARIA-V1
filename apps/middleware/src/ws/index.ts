@@ -12,6 +12,7 @@ import type { Server as HttpServer } from 'node:http';
 import jwt from 'jsonwebtoken';
 import { validateEnv } from '../config/env';
 import { getTokenGateway } from '../services/tokenGateway.factory';
+import { getFleetEvents } from '../services/fleet.events';
 
 export interface AriaSocketUser {
   userId: string;
@@ -67,6 +68,7 @@ export function createWsServer(httpServer: HttpServer): IOServer {
       if (!payload?.room) return;
       if (!payload.room.startsWith('session.') &&
           !payload.room.startsWith('agent.')   &&
+          !payload.room.startsWith('fleet.')   &&
           payload.room !== 'system.health') return;
       socket.join(payload.room);
     });
@@ -81,6 +83,15 @@ export function createWsServer(httpServer: HttpServer): IOServer {
   gateway.events.on('token.warn',      (e) => io.to(`session.${e.sessionId}`).emit('token.warn', e));
   gateway.events.on('token.hard_stop', (e) => io.to(`session.${e.sessionId}`).emit('token.hard_stop', e));
   gateway.events.on('queue.depth',     (e) => io.to('system.health').emit('queue.depth', e));
+
+  // ── Bridge fleet publish events (V27.9 §17.4) ──
+  // Producers call `getFleetEvents().emit('fleet.publish', { epicId, topic, payload, agentId })`
+  // after a successful POST to /api/fleet/events. The hub fans out to `fleet.<epicId>` so the
+  // System Health page can react in real time.
+  getFleetEvents().on('fleet.publish', (e: { epicId: string; topic: string; agentId: string; payload: unknown }) => {
+    io.to(`fleet.${e.epicId}`).emit('fleet.publish', e);
+    io.to('system.health').emit('fleet.publish', { epicId: e.epicId, topic: e.topic, agentId: e.agentId });
+  });
 
   return io;
 }
