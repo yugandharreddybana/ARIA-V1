@@ -8,6 +8,28 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-18 — Sprint 11 audit gap-fill + Sprint 12 code-complete (NO-RUN MODE) — commit `bd4487d`
+- Sprint 11 audit closed three real gaps in the same commit:
+  1. `pnpm-workspace.yaml` extended to `extensions/*` so the VS Code extension is in the
+     workspace.
+  2. `lsp.controller.ts` got a **256-entry / 5-min TTL LRU hover cache** to hit the ADR-0016
+     p95 < 100 ms hover budget; response now carries `cached: boolean`.
+  3. VS Code extension gained `aria.diff.acceptAndApply` (runs `workspace.applyEdit` then
+     records the decision via the LSP server) and a `CodeLensProvider` that surfaces the six
+     `aria.dispatch.*` actions inline. Two new test files (`fileLock.service.test.ts` with
+     stub ioredis/pg, `hoverCache.test.ts`) — 8 unrun cases.
+- Sprint 12 shipped V27.9 §12 + §13.7 + §20 end-to-end. Flyway V12 (`compliance_findings`,
+  `contracts` w/ pgvector HNSW, `gdpr_redactions` w/ hash chain, `audit_chain` BIGSERIAL
+  append-only, `audit_exports`, `decision_explanations`). Java `com.aria.governance.*` —
+  `ComplianceAuditorService` (regex rule pack + `decide()` transitions),
+  `AuditChainService` (sha256 chain + offline `verifyChainBetween`), `GdprRedactionService`
+  (ADR-0020 algorithm), `DecisionExplainerService` (`/aria explain <session>`, evidence-only
+  per V27.9 §20), `AuditExportService` (Ed25519-signed JSON bundle), `GovernanceController`
+  with 7 routes + `verify`. Middleware proxy + Zod-strict schemas + controller + routes at
+  `/api/governance`. 19 unrun tests (9 Java JUnit, 5 Vitest, 5 Playwright). ADRs **0018**
+  (agent identity custody), **0019** (audit chain + signed export), **0020** (GDPR redaction
+  algorithm).
+
 ### 2026-05-17 (very late) — Sprint 10 audit gap-fill + Sprint 11 code-complete (NO-RUN MODE)
 - Sprint 10 audit found three real gaps; all closed in this commit: `@EnableScheduling` +
   `FleetScheduler` (`@Scheduled` heal scan @ 30 s + deadlock sweep @ 60 s, env-toggleable via
