@@ -7,13 +7,64 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 10 — Phase 5: Fleet & Speculation**  *(queued)*
-- Spec anchors: §17.4 (Fleet Commander, healing guardrail), §18I (Deadlock Breaker), §8 (Sandboxes / Speculation).
-- DoD checklist: see IMPLEMENTATION.md §7.
+**Sprint 11 — Phase 6: IDE / LSP Integration**  *(queued)*
+- Spec anchors: §18M (Deep Native IDE/LSP Integration).
+- DoD checklist: see IMPLEMENTATION.md §8.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 10 — Phase 5: Fleet & Speculation  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §17.4 + §18I + §8
+
+What was built:
+- **Flyway V10** — `agent_registry` (Ed25519 pubkey + fingerprint), `fleet_outcomes` (signed
+  envelope log), `agent_heartbeats`, `contract_debts`, `shadow_branches`, `fleet_circuit_breakers`.
+- **Java `com.aria.fleet`**:
+  - `model/*` — `AgentRegistration`, `FleetOutcome`, `AgentHeartbeat`, `ContractDebt`,
+    `FleetCircuitBreaker`.
+  - `repository/*` — 5 Spring Data JPA repositories with a native `latestPerAgentSince()` query.
+  - `service/AgentRegistryService` — generates Ed25519 keypair on register (per ADR-0014),
+    stores SPKI pubkey + SHA-256 fingerprint, returns PKCS8 private key once.
+  - `service/FleetEnvelopeSigner` — Ed25519 sign + verify over the canonical input
+    `epicId|topic|payload|agentId`.
+  - `service/FleetCommanderService` — verifies envelope signature, persists `fleet_outcomes`,
+    enforces `CANONICAL_TOPICS` (advisory log, not hard-fail).
+  - `service/HealingGuardrailService` — DFS over the heartbeat wait-graph; pure-function
+    `detectCycles()` exposed for testing; persists `fleet_circuit_breakers` per detected cycle.
+  - `service/DeadlockBreakerService` — sweeps every 2-min heartbeat window; agents waiting
+    ≥ 3 min (ADR-0015) trigger a forced V1 contract via `ContractDebt`. LLM-driven prompt
+    deferred to Sprint 17.
+  - `service/ShadowBranchService` — opens `aria-shadow/<ticket>` rows with deterministic
+    branch names; revert helper for ticket re-prioritisation.
+  - `dto/FleetDtos` + `controller/FleetController` — `/api/fleet/{agents,events,heartbeats,
+    heal/scan,deadlock/sweep,shadow,debts,breakers}`.
+- **Middleware proxy** — `services/fleet.proxy.ts` + Zod-strict schemas + controller + routes
+  mounted at `/api/fleet` (auth + per-endpoint rate limit). Heartbeats get a 600/min cap so
+  many agents can beat without hitting the global rate limiter.
+- **`apps/middleware/src/app.ts` rebuilt** with the full route list (telemetry middleware +
+  `/metrics` + `/api/incidents` + `/api/fleet` — previous incremental Edits had silently lost
+  the Sprint 9 mounts).
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit / Mockito: `FleetEnvelopeSignerTest` (4 cases — round-trip, tampered payload,
+    unknown agent, tampered topic), `HealingGuardrailServiceTest` (4 cases — 2-cycle, 3-cycle,
+    acyclic chain, disconnected components), `AgentRegistryServiceTest` (3 cases — keygen,
+    duplicate reject, end-to-end sign-then-verify round-trip).
+  - Middleware Vitest: `fleet.test.ts` (5 schema cases).
+  - Playwright: `sprint10-fleet.spec.ts` (3), `sprint10-deadlock.spec.ts` (2).
+- **ADRs**: 0014 Fleet envelope format + signing, 0015 Deadlock Breaker timeout + producer
+  election.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm` / `mvn` / `tsx` / `node` / `playwright` executed.
+- Pre-Cog speculative execution: the `aria-shadow/*` row infrastructure ships in Sprint 10;
+  the actual git operations + Jira webhook listener wire in Sprint 14 alongside the Chaos
+  Sandbox.
+- Healing scan + deadlock sweep are explicit POST endpoints in Sprint 10; Sprint 14 adds a
+  cron (`@Scheduled`) to run them every 30 s and 60 s respectively.
+
+---
 
 ### Sprint 9 (gap-fill) — close all 7 §6 DoD audit gaps  *(NO-RUN MODE)*
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Commit**: `466bb48`
@@ -321,7 +372,7 @@ Known state:
 | 7 | Phase 2 | ✅ Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer *(code-complete, unverified)* |
 | 8 | Phase 3 | ✅ Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading *(code-complete, unverified)* |
 | 9 | Phase 4 | ✅ Telemetry & Incidents — OpenTelemetry (basic Prom format), Incident Commander, Migration Orchestrator, Semantic Tripwires *(code-complete, unverified)* |
-| 10 | Phase 5 | Fleet & Speculation — Pub/Sub mesh, FleetOutcome, healing cascade guardrail, Deadlock Breaker |
+| 10 | Phase 5 | ✅ Fleet & Speculation — Ed25519-signed envelopes, FleetOutcome log, healing cascade DFS, Deadlock Breaker, shadow branches *(code-complete, unverified)* |
 | 11 | Phase 6 | IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context |
 | 12 | Phase 7 | Governance & Legal — Ed25519 agent identity, Compliance Auditor, GDPR erasure, /aria explain, audit export |
 | 13 | Phase 8 | Finance & Procurement — FinOps Oracle, Procurement Scout, Stripe Issuing stub, Arbitrage Engine |

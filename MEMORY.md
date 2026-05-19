@@ -8,6 +8,24 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-17 (late) — Sprint 10 code-complete (NO-RUN MODE)
+- Shipped V27.9 §17.4 + §18I end-to-end. **Flyway V10** introduces `agent_registry`,
+  `fleet_outcomes`, `agent_heartbeats`, `contract_debts`, `shadow_branches`,
+  `fleet_circuit_breakers`. Java `com.aria.fleet.*`: 5 entities, 5 repositories (incl. native
+  `latestPerAgentSince()` heartbeat query), `AgentRegistryService` (Ed25519 keypair on register,
+  PKCS8 private key returned once), `FleetEnvelopeSigner` (canonical `epicId|topic|payload|agentId`
+  + Ed25519), `FleetCommanderService` (signature-verify-before-persist), `HealingGuardrailService`
+  (pure-function DFS + circuit-breaker row), `DeadlockBreakerService` (3-minute timeout per
+  ADR-0015 → ContractDebt), `ShadowBranchService` (`aria-shadow/<ticket>` row with deterministic
+  naming), `FleetController` (10 REST routes).
+- Middleware `services/fleet.proxy.ts` + Zod-strict schemas + controller + routes mounted at
+  `/api/fleet`. **`apps/middleware/src/app.ts` fully rebuilt** to include every route registered
+  across Sprints 5–10 (telemetry middleware + `/metrics` + `/api/incidents` + `/api/fleet`).
+  Earlier incremental Edits had silently dropped the Sprint 9 mounts — caught in this audit.
+- Tests authored (NOT executed in NO-RUN MODE): 11 JUnit/Mockito, 5 Vitest, 5 Playwright.
+- New ADRs: **0014** Fleet envelope format + signing rules, **0015** Deadlock Breaker timeout +
+  producer election heuristic.
+
 ### 2026-05-17 (later) — Sprint 9 audit gap-fill (NO-RUN MODE) — commits `466bb48` + `80fe3e3`
 - Self-audit closed 7 §6 DoD gaps:
   - **`SystemAlertsConsumer`** (middleware/ts): Redis `XREADGROUP` on `system.alerts` →

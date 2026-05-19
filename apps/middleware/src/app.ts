@@ -7,6 +7,7 @@ import { validateEnv, type ValidatedEnv } from './config/env';
 import { requestLogger } from './middleware/request-logger.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { notFound } from './middleware/not-found.middleware';
+import { telemetryMiddleware } from './middleware/telemetry.middleware';
 import authRouter from './routes/auth.routes';
 import projectsRoutes from './routes/projects.routes';
 import analysisRoutes from './routes/analysis.routes';
@@ -22,6 +23,9 @@ import orchestratorRoutes from './routes/orchestrator.routes';
 import uiDiscoveryRoutes from './routes/uiDiscovery.routes';
 import experienceRoutes from './routes/experience.routes';
 import distillRoutes from './routes/distill.routes';
+import incidentsRoutes from './routes/incidents.routes';
+import metricsRoutes from './routes/metrics.routes';
+import fleetRoutes from './routes/fleet.routes';
 
 /**
  * Build the Express app. Factory pattern so tests (and the WS attach step
@@ -41,7 +45,9 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
     standardHeaders: true,
     legacyHeaders: false,
   }));
+  app.use(telemetryMiddleware);
 
+  app.use('/metrics',           metricsRoutes);
   app.use('/api/health',        healthRoutes);
   app.use('/api/auth',          authRouter);
   app.use('/api/projects',      projectsRoutes);
@@ -57,6 +63,8 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/ui-discovery',  uiDiscoveryRoutes);
   app.use('/api/experience',    experienceRoutes);
   app.use('/api/distill',       distillRoutes);
+  app.use('/api/incidents',     incidentsRoutes);
+  app.use('/api/fleet',         fleetRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
