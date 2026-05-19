@@ -70,11 +70,37 @@ export async function inspectLock(req: AriaRequest, res: Response, next: NextFun
   } catch (err) { next(err); }
 }
 
+// In-memory LRU cache for hover responses (ADR-0016 p95 < 100 ms target). Keyed by
+// `${projectId}|${filePath}|${symbol}`. TTL 5 minutes; capacity 256 entries — every
+// keystroke that re-hovers the same symbol skips the distill round-trip.
+const HOVER_CACHE_TTL_MS = 5 * 60_000;
+const HOVER_CACHE_MAX    = 256;
+const hoverCache = new Map<string, { value: unknown; expires: number }>();
+function hoverCacheGet(key: string): unknown | null {
+  const hit = hoverCache.get(key);
+  if (!hit) return null;
+  if (hit.expires < Date.now()) { hoverCache.delete(key); return null; }
+  // LRU bump
+  hoverCache.delete(key);
+  hoverCache.set(key, hit);
+  return hit.value;
+}
+function hoverCacheSet(key: string, value: unknown): void {
+  if (hoverCache.size >= HOVER_CACHE_MAX) {
+    const oldest = hoverCache.keys().next().value;
+    if (oldest) hoverCache.delete(oldest);
+  }
+  hoverCache.set(key, { value, expires: Date.now() + HOVER_CACHE_TTL_MS });
+}
+export function _resetHoverCacheForTests(): void { hoverCache.clear(); }
+
 export async function hover(req: AriaRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const parsed = hoverSchema.parse(req.body);
-    // Hover = single-symbol distillation. Compose a task description that points the
-    // engine straight at the affected symbol so it ranks the right chunk top of bucket.
+    const cacheKey = `${parsed.projectId}|${parsed.filePath}|${parsed.symbol}`;
+    const cached = hoverCacheGet(cacheKey);
+    if (cached) { res.json({ success: true, data: cached, cached: true }); return; }
+
     const payload = await distill({
       projectId: parsed.projectId,
       agentId:   'lsp-hover',
@@ -84,7 +110,7 @@ export async function hover(req: AriaRequest, res: Response, next: NextFunction)
       maxDomainConcepts:  1,
       maxDecisions:       2,
     }, bearer(req));
-    res.json({ success: true, data: {
+    const data = {
       symbol:   parsed.symbol,
       filePath: parsed.filePath,
       summary:  payload.affectedSymbols[0]?.summary ?? null,
@@ -92,7 +118,9 @@ export async function hover(req: AriaRequest, res: Response, next: NextFunction)
       domain:   payload.domainConcepts[0]?.summary ?? null,
       decisions: payload.governingDecisions,
       latencyMs: payload.durationMs,
-    }});
+    };
+    hoverCacheSet(cacheKey, data);
+    res.json({ success: true, data, cached: false });
   } catch (err) { next(err); }
 }
 

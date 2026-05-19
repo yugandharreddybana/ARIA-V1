@@ -36,7 +36,8 @@
       { "command": "aria.dispatch.explain",    "title": "ARIA: /explain symbol" },
       { "command": "aria.dispatch.redTeam",    "title": "ARIA: /red-team function" },
       { "command": "aria.dispatch.compliance", "title": "ARIA: /compliance review" },
-      { "command": "aria.dispatch.designCheck","title": "ARIA: /design-check" }
+      { "command": "aria.dispatch.designCheck","title": "ARIA: /design-check" },
+      { "command": "aria.diff.acceptAndApply", "title": "ARIA: accept + apply ghost diff" }
     ]
   },
   "scripts": {

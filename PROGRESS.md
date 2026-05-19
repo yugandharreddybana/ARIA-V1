@@ -7,9 +7,72 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 12 — Phase 7: Governance & Legal**  *(queued)*
-- Spec anchors: §12 (Security / FIM / Auth identity), §13.7 (Legal / Compliance), §20 (Decision Explainer).
-- DoD checklist: see IMPLEMENTATION.md §9.
+**Sprint 13 — Phase 8: Finance & Procurement**  *(queued)*
+- Spec anchors: §11 (FinOps + Procurement), §17.6 (Infrastructure Arbitrage Engine).
+- DoD checklist: see IMPLEMENTATION.md §10.
+
+---
+
+## ✅ Completed Sprints
+
+### Sprint 11 (gap-fill) + Sprint 12 — Governance & Legal  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §12 + §13.7 + §20
+
+Sprint 11 audit gap-fill:
+- `pnpm-workspace.yaml` extended to include `extensions/*` so the VS Code extension is in the
+  pnpm workspace.
+- `lsp.controller.ts` gained an **LRU hover cache** (256 entries, 5-min TTL, LRU bump on hit)
+  to hit the ADR-0016 p95 < 100 ms hover budget; response now carries `cached: boolean`.
+- VS Code extension gained two missing affordances:
+  - `aria.diff.acceptAndApply` command that runs `vscode.workspace.applyEdit` then records
+    the decision via the LSP server (so accept actually lands the diff).
+  - A `CodeLensProvider` that surfaces the six `aria.dispatch.*` actions inline on every file
+    (Sprint 14 will narrow the range once symbol detection is wired).
+- `fileLock.service.test-stubs.ts` (stub ioredis + pg pool) + `fileLock.service.test.ts`
+  (6 cases) — first real-runtime coverage of acquire / release / refresh / inspect.
+- `hoverCache.test.ts` (2 cases) — verifies LRU hit-vs-miss accounting.
+
+Sprint 12 (Phase 7) — V27.9 §12 + §13.7 + §20:
+- **Flyway V12** — `compliance_findings`, `contracts` (with pgvector HNSW), `gdpr_redactions`
+  (with hash chain), `audit_chain` (BIGSERIAL append-only), `audit_exports`,
+  `decision_explanations`.
+- **Java `com.aria.governance`**:
+  - `model/ComplianceFinding` + `repository/ComplianceFindingRepository`.
+  - `service/ComplianceAuditorService` — regex rule pack covering PII / logging / retention /
+    encryption / data export / data residency; `decide()` transitions only to
+    accepted / rejected / mitigated; every transition writes to the audit chain.
+  - `service/AuditChainService` — append-only chain with `sha256(prev || canonical(payload))`,
+    `verifyChainBetween()` re-walks the chain offline.
+  - `service/GdprRedactionService` — ADR-0020 algorithm: original value hashed, never stored;
+    deterministic `[REDACTED:<sha8>]` token; second hash chain across redactions; every
+    redaction also lands in `audit_chain`.
+  - `service/DecisionExplainerService` — `/aria explain <session>` returns a markdown
+    why-trace stitched from ReplayFrames + audit events (no new LLM call per V27.9 §20).
+  - `service/AuditExportService` — `/aria export-audit-trail` writes a signed JSON bundle to
+    `.aria/audit-exports/` and records the Ed25519 signature + sha256 in `audit_exports`.
+  - `controller/GovernanceController` — 7 routes (`/api/governance/*`) plus a `verify`
+    endpoint that re-walks the chain.
+- **Middleware** — `services/governance.proxy.ts` + Zod-strict schemas + controller + routes
+  mounted at `/api/governance` (auth + rate-limit).
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit: `ComplianceAuditorServiceTest` (5 — PII / console.log / weak bcrypt / clean /
+    decide validation), `AuditChainServiceTest` (4 — canonical ordering, JSON escaping, sha256
+    determinism, null payload).
+  - Middleware Vitest: `governance.test.ts` (5 — schema accept + reject paths).
+  - Playwright: `sprint12-governance.spec.ts` (5 — auth gate, Zod strict, scope enum,
+    redaction enum, decide enum).
+- **ADRs**: 0018 Agent identity custody, 0019 Append-only audit chain + signed export,
+  0020 GDPR redaction algorithm.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm` / `mvn` / `tsx` invoked.
+- Decision Explainer is evidence-only in Sprint 12; Sprint 17 Meta-Evolution will optionally
+  layer a Claude summary on top (gated by `ANTHROPIC_ENABLED`).
+- Audit exports are local-first; Sprint 15 Seed Vault encrypts + archives them off-host.
+
+---
+
+### Sprint 11 — Phase 6: IDE / LSP Integration  *(code-complete, unverified — NO-RUN MODE)*
 
 ---
 

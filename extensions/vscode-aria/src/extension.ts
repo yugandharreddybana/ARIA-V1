@@ -72,6 +72,59 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }));
   }
+
+  // Ghost-text diff apply (V27.9 §18M, ADR-0016).
+  // The LSP server logs the accept; the extension applies the WorkspaceEdit to the document
+  // so the user sees the diff actually land. `aria.diff.acceptAndApply` is the editor-side
+  // command bound to the LSP code-action menu in Sprint 14; for now the command palette
+  // exposes it for explicit dispatch.
+  context.subscriptions.push(vscode.commands.registerCommand(
+    'aria.diff.acceptAndApply',
+    async (payload: { filePath: string; diffHash: string; replacement: string; range?: { startLine: number; startChar: number; endLine: number; endChar: number } }) => {
+      const uri = vscode.Uri.file(payload.filePath);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(0, 0, doc.lineCount, 0);
+      const range = payload.range
+        ? new vscode.Range(payload.range.startLine, payload.range.startChar, payload.range.endLine, payload.range.endChar)
+        : fullRange;
+      edit.replace(uri, range, payload.replacement);
+      const applied = await vscode.workspace.applyEdit(edit);
+      if (applied) await doc.save();
+      // Always record the decision — even if applyEdit returned false the LSP server keeps the audit row.
+      await client?.sendRequest('workspace/executeCommand', {
+        command: applied ? 'aria.diff.accept' : 'aria.diff.reject',
+        arguments: [{ agentId, filePath: payload.filePath, diffHash: payload.diffHash, decidedBy: 'user' }],
+      });
+      vscode.window.showInformationMessage(applied ? 'ARIA diff applied' : 'ARIA diff rejected by editor');
+    },
+  ));
+
+  // CodeLens — surfaces the six dispatch commands inline above the cursor's enclosing function
+  // or class. Sprint 14 wires real symbol detection via the language client; Sprint 11 keeps
+  // the lens at the top of every editable file so the affordance is visible.
+  context.subscriptions.push(vscode.languages.registerCodeLensProvider(
+    { scheme: 'file' },
+    {
+      provideCodeLenses(document) {
+        if (document.lineCount === 0) return [];
+        const range = new vscode.Range(0, 0, 0, 0);
+        const lenses: vscode.CodeLens[] = [];
+        const labels: Array<[string, string]> = [
+          ['fix',         'ARIA /fix'],
+          ['test',        'ARIA /test'],
+          ['explain',     'ARIA /explain'],
+          ['redTeam',     'ARIA /red-team'],
+          ['compliance',  'ARIA /compliance'],
+          ['designCheck', 'ARIA /design-check'],
+        ];
+        for (const [cmd, title] of labels) {
+          lenses.push(new vscode.CodeLens(range, { title, command: `aria.dispatch.${cmd}` }));
+        }
+        return lenses;
+      },
+    },
+  ));
 }
 
 export async function deactivate(): Promise<void> {
