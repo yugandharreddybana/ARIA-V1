@@ -1,0 +1,17 @@
+skill: qa-e2e
+tickets_touched: 0
+
+best_practices:
+  - text: "Each Sprint adds 3-5 dedicated `sprintN-*.spec.ts` files covering the DoD acceptance items."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Auth helpers (`login`, `signup`, `createProject`) live in `helpers/auth.ts` — never duplicated in specs."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+
+anti_patterns:
+  - text: "Trivial assertions like `expect(true).toBe(true)` — Anti-Test-Dodging linter rejects them."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+failure_stories: []

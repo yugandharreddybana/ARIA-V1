@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "entries": {
+    ".entiresystem/CORE_VALUES.yml": {
+      "path": ".entiresystem/CORE_VALUES.yml",
+      "hash": "70996893140a39de91b67d3a1ca0ea5a1996a69c3808e87b2db1a6c51da1dff5",
+      "signature": "qjwMMoa8ZinUBw9BQEqs/Uw4ZXElXlY928DYLkRug3Ouy9QJxgES3FvDVzLp0bE1Xt6PN5QkmqVepzyhIQ9PDw==",
+      "signedBy": "cd06ff2f4e6ef96f4ff009ef8f50631210422bab340bd19b8127bd6a18ee946f",
+      "signedAt": "2026-05-16T20:00:42.488Z"
+    },
+    ".entiresystem/DESIGN.md": {
+      "path": ".entiresystem/DESIGN.md",
+      "hash": "11f0d3bc3a5db754bc5caf02c799561c40318faee32ca1d3352ed175698090e2",
+      "signature": "GAHND+2ZmQon3j12ZdBx22rrH8dkyIXxFE3rFXTB4/vUvH0MIf6j4k9pIGjI2YUyCGLemKZ27XsGEpptdhwpDg==",
+      "signedBy": "cd06ff2f4e6ef96f4ff009ef8f50631210422bab340bd19b8127bd6a18ee946f",
+      "signedAt": "2026-05-16T20:00:42.489Z"
+    },
+    ".entiresystem/DOMAIN_BOUNDARIES.json": {
+      "path": ".entiresystem/DOMAIN_BOUNDARIES.json",
+      "hash": "f47b5c1b2ec50d424658232b39cc3ac7dd31c7f21bac61db19ed91c58fadedcf",
+      "signature": "d8olo0djRh5XvS0NiNxFRcG5zhsSoa2ENQHEw0VGNWikAMyvV0szexZz28Q5v69ruG7zT3okDUXYy5fYaaxKBA==",
+      "signedBy": "cd06ff2f4e6ef96f4ff009ef8f50631210422bab340bd19b8127bd6a18ee946f",
+      "signedAt": "2026-05-16T20:00:42.489Z"
+    },
+    ".entiresystem/SKILL.md": {
+      "path": ".entiresystem/SKILL.md",
+      "hash": "8061060eedaec580d48187321d146ae98dd9f6bcf6d49ba186280698be87938f",
+      "signature": "uOqzQdTyKJ81fBfLq717toeIFzgF2uykiw3KEMN5VRwrorFSUvzyZjg4u0CpYgrhoi6592nLHpc+5N27Pfk9CA==",
+      "signedBy": "cd06ff2f4e6ef96f4ff009ef8f50631210422bab340bd19b8127bd6a18ee946f",
+      "signedAt": "2026-05-16T20:00:42.490Z"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+# SLO catalogue — sourced by IncidentCommanderService (Sprint 9).
+# Each entry mirrors a row in `slo_definitions`; the daemon syncs this file on boot.
+
+slos:
+  - service: middleware
+    name: availability
+    metric: error_rate
+    threshold: 0.01           # < 1% 5xx
+    comparison: "<"
+    window_seconds: 300
+    description: "Middleware 5xx rate must stay under 1% over any 5-minute window."
+
+  - service: middleware
+    name: latency_p95
+    metric: p95_latency_ms
+    threshold: 500
+    comparison: "<"
+    window_seconds: 300
+    description: "API p95 < 500 ms over any 5-minute window (excluding /api/llm/*)."
+
+  - service: backend
+    name: availability
+    metric: error_rate
+    threshold: 0.01
+    comparison: "<"
+    window_seconds: 300
+    description: "Spring backend 5xx rate must stay under 1% over any 5-minute window."
+
+  - service: backend
+    name: latency_p99
+    metric: p99_latency_ms
+    threshold: 1500
+    comparison: "<"
+    window_seconds: 300
+    description: "Orchestrator p99 < 1.5 s over any 5-minute window."
+
+  - service: token-gateway
+    name: queue_depth_p95
+    metric: p95_queue_depth
+    threshold: 40
+    comparison: "<"
+    window_seconds: 60
+    description: "Token Gateway queue p95 < 40 (max queue depth is 50 — backpressure trips above this)."
+
+  - service: concept-graph
+    name: summary_coverage
+    metric: summary_coverage_pct
+    threshold: 95
+    comparison: ">="
+    window_seconds: 86400
+    description: "≥95% of Level-1 chunks must have a summary (target from §18N coverage rules)."

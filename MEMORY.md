@@ -8,6 +8,116 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-17 (late) — Sprint 10 code-complete (NO-RUN MODE)
+- Shipped V27.9 §17.4 + §18I end-to-end. **Flyway V10** introduces `agent_registry`,
+  `fleet_outcomes`, `agent_heartbeats`, `contract_debts`, `shadow_branches`,
+  `fleet_circuit_breakers`. Java `com.aria.fleet.*`: 5 entities, 5 repositories (incl. native
+  `latestPerAgentSince()` heartbeat query), `AgentRegistryService` (Ed25519 keypair on register,
+  PKCS8 private key returned once), `FleetEnvelopeSigner` (canonical `epicId|topic|payload|agentId`
+  + Ed25519), `FleetCommanderService` (signature-verify-before-persist), `HealingGuardrailService`
+  (pure-function DFS + circuit-breaker row), `DeadlockBreakerService` (3-minute timeout per
+  ADR-0015 → ContractDebt), `ShadowBranchService` (`aria-shadow/<ticket>` row with deterministic
+  naming), `FleetController` (10 REST routes).
+- Middleware `services/fleet.proxy.ts` + Zod-strict schemas + controller + routes mounted at
+  `/api/fleet`. **`apps/middleware/src/app.ts` fully rebuilt** to include every route registered
+  across Sprints 5–10 (telemetry middleware + `/metrics` + `/api/incidents` + `/api/fleet`).
+  Earlier incremental Edits had silently dropped the Sprint 9 mounts — caught in this audit.
+- Tests authored (NOT executed in NO-RUN MODE): 11 JUnit/Mockito, 5 Vitest, 5 Playwright.
+- New ADRs: **0014** Fleet envelope format + signing rules, **0015** Deadlock Breaker timeout +
+  producer election heuristic.
+
+### 2026-05-17 (later) — Sprint 9 audit gap-fill (NO-RUN MODE) — commits `466bb48` + `80fe3e3`
+- Self-audit closed 7 §6 DoD gaps:
+  - **`SystemAlertsConsumer`** (middleware/ts): Redis `XREADGROUP` on `system.alerts` →
+    `POST /api/incidents` with internal service token; started in `index.ts`.
+  - **`IncidentResponder`** orchestrates Precision-session spawn (P0/P1 only) + Concept Graph
+    correlation + Jira stub. `IncidentController.declare()` now returns `{incident, escalation}`.
+  - **`SemanticCorrelator`** ranks `semantic_chunks` against incident text (ADR-0010 weights).
+  - **`JiraMcpStub`** logs `ARIA-<sha8>` keys (Sprint 17 swaps for real MCP behind same API).
+  - **`SemanticTripwireService`** + entity + repo: `install(table, column)` returns a unique
+    `__aria_tripwire_<hex>__` honeypot; `checkAccess()` auto-declares P1 on first hit only.
+  - **`SloBootstrap` `@PostConstruct`** reads `.entiresystem/slos.yml` and upserts
+    `slo_definitions` (`SloDefinition` entity + repo).
+  - **Observability profile** in docker-compose: `otel-collector` + `tempo` + `prometheus` +
+    `grafana` under `--profile observability`. Configs at `infra/`.
+- 8 unrun tests (`SemanticTripwireServiceTest` 3, `IncidentResponderTest` 3, `SloBootstrapTest` 2).
+
+### 2026-05-17 — Sprint 8 gap-fill + Sprint 9 code-complete (NO-RUN MODE)
+- Sprint 8 audit revealed three gaps and closed them: `OllamaDispatcher.embed()` against
+  Ollama `/api/embeddings`; `POST /api/llm/embed` route; Token Gateway honours an optional
+  `expectedCompressionRatio` so budget projection uses `promptTokensEstimated / ratio`
+  (the Pre-Flight Estimator wiring task #7 from §5). Java `EmbeddingClient` retargeted to
+  `/api/llm/embed`; `ARIA_INTERNAL_SERVICE_TOKEN` env + `aria.middleware.url` /
+  `aria.internal.service-token` Spring properties added.
+- Sprint 9 shipped V27.9 §17 end-to-end: `.entiresystem/slos.yml` (ADR-0011), Flyway V9
+  (`slo_definitions`, `slo_breaches`, `incidents`, `migration_playbooks`,
+  `migration_phase_runs`, `semantic_tripwires`). Java `com.aria.incident.*`,
+  `com.aria.migration.*` (NEVER auto-rolls back `stateful_dangerous`/`irreversible` per
+  ADR-0012), `com.aria.telemetry.*` Prometheus registry + `/metrics` endpoint. Middleware
+  telemetry registry + middleware + `/metrics` route + `/api/incidents` proxy. Web
+  `/(dashboard)/system-health` page.
+- Tests authored, **not executed**: 9 Java JUnit, 6 Vitest, 4 Playwright. Sprint 10 queued.
+- ADRs: 0011 (SLO catalogue + severity), 0012 (Migration playbook + rollback rules), 0013
+  (Tripwire isolation).
+
+### 2026-05-16 (late night) — Sprint 8 code-complete (NO-RUN MODE)
+- Built the V27.9 §18N stack end-to-end without running any code (still in NO-RUN MODE).
+- Java `com.aria.graph.*`: `SemanticChunk` JPA entity (TEXT chunk_type with DB CHECK, raw String
+  projection of the pgvector column + native UPDATE in the repository for vector writes),
+  `SemanticChunker` regex per ADR-0009 (TS/JS/Java/Python/SQL/Markdown), `EmbeddingClient`
+  routing through the middleware Token Gateway, `ConceptGraphBuilder` idempotent per version_hash,
+  `DistillationEngine` with ranking per ADR-0010 (3.0 symbol / 2.0 summary / 1.0 path / 0.5 recency
+  bump, default bucket caps 8/5/5/3, ≥5× compression target). `DistillationController` exposes
+  `/api/distill`, `/api/graph/rebuild`, `/api/graph/coverage/{projectId}`.
+- Middleware: `distill.service.ts` proxies to Java + merges in `experienceNotes` / `antiPatterns`
+  from `ExperienceService` (top-3 by veracity); `preFlight()` computes a 20-sample moving average
+  of `compression_ratio` per (project, agent) over `distillation_runs`. Routes
+  `/api/distill` + `/api/distill/preflight` (auth, Zod-strict, rate-limited).
+- Flyway **V8**: `semantic_chunks` (768-dim pgvector + HNSW), `distillation_runs`,
+  `concept_graph_coverage`, deferred HNSW index on `concept_nodes.embedding`.
+- Web graph page gained a 4-level switcher (`data-testid="graph-level-{1..4}"`).
+- CLIs: `scripts/knowledge-review.ts` wired as `pnpm knowledge-review`.
+- Tests: 5 SemanticChunkerTest + 5 DistillationEngineTest (JUnit); 5 distill.test.ts cases
+  (Vitest); 4 sprint8-distillation + 1 sprint8-graph-levels (Playwright). **Not executed.**
+- ADRs: 0009 (regex chunker, tree-sitter deferred to Sprint 14), 0010 (ranking weights + 5× target +
+  Pre-Flight Estimator window).
+
+### 2026-05-16 (night) — Sprint 7 code-complete (NO-RUN MODE)
+- Honoured a user "do not run any code" directive: zero `pnpm`/`mvn`/`tsx`/`node`/`playwright`
+  invocations this session. Mentally typechecked every file before commit.
+- Shipped V27.9 §6 Experience & Memory layer: `.entiresystem/` locked down per **ADR-0007**;
+  Knowledge Veracity scoring per **ADR-0008** (`weight × 0.5^(age/half_life)`).
+- Services: `ExperienceService` (YAML reader/writer for `.entiresystem/skills/<slug>/experience.yml`,
+  idempotent append + dedupe), `VeracityService` (`score`, `rank`, `auditSkill`),
+  `ModelTransferService` (writes `.backend/<workspace>/{file_index,skill_headers,experience}.json` +
+  `prompts/*.md` — NO LLM, NO NETWORK).
+- Routes: `/api/experience` (list / read / audit / append entry / append failure story /
+  model-transfer). Authenticated + Zod-strict.
+- CLIs: `scripts/knowledge-audit.ts` + `scripts/model-transfer.ts`.
+- Shadow Learning GitHub Action drafts an `ai-only` entry on every merged PR and opens a follow-up PR
+  for human promotion. Real Ollama scoring deferred to Sprint 17.
+- Flyway **V7** — `skill_experience_profiles`, `knowledge_veracity_audits`,
+  `shadow_learning_runs`, `backend_workspaces`.
+- Tests authored but **not executed**: 15 new Vitest cases (experience / veracity / modelTransfer) +
+  2 new Playwright specs.
+- CLAUDE.md §5 extended with rule **5a NO-RUN MODE** so future sessions handle the same directive
+  consistently. Status reported in two sentences per the user's response-style rule.
+
+### 2026-05-16 (evening) — Sprint 6 closed
+- Shipped the V27.9 §12–§14 safety layer: two-stage **sanitizer** with rate-limited defensive posture,
+  Ed25519-signed **FIM** over CORE_VALUES / DESIGN / DOMAIN_BOUNDARIES / SKILL, copyleft-aware
+  **plagiarism scanner**, deterministic **Red Team probe generator**, 5-axis **Anti-Slop Gate**,
+  regex-based **Anti-Test-Dodging linter**, **Turn-1 Discovery Form** with YAML mirror, Playwright **device
+  matrix** (1920 / 768 / 375), `.github/workflows/ci.yml`, Flyway **V6** schema.
+- Discovered + fixed a `.gitignore` bug that was silently excluding the entire `.entiresystem/` directory —
+  Sprint 5 ADRs were never actually pushed. New rule: `.aria/` (private runtime) gitignored,
+  `.entiresystem/` (canonical knowledge) committed.
+- Created the canonical brain files (CORE_VALUES.yml, DESIGN.md, DOMAIN_BOUNDARIES.json, SKILL.md stub) and
+  signed the FIM registry. Daemon Ed25519 key at `.aria/keys/daemon.ed25519`, public key at
+  `.entiresystem/keys/daemon.pub`.
+- Tests: 29 / 29 middleware (Sprints 5 + 6), 5 / 5 Java orchestrator, web typecheck green. 5 new E2E specs.
+- New ADRs: 0004 sanitizer thresholds, 0005 Anti-Slop axes, 0006 FIM signing key custody.
+
 ### 2026-05-16 (afternoon) — Sprint 5 closed end-to-end
 - Shipped Token Gateway (TS), Java Orchestrator, WebSocket hub, Flyway V5 migration, docker-compose stack,
   pgvector, Ollama init container, web session-status indicator + `useAriaSocket` hook.
@@ -53,6 +163,33 @@
 - **`.entiresystem/ADRs/ADR-0001-pgvector.md`** | pgvector for all embeddings/graph | sha:`HEAD@S5` |
   **`ADR-0002-socket-io.md`** | socket.io over native ws | sha:`HEAD@S5` |
   **`ADR-0003-token-gateway-in-middleware.md`** | Token Gateway lives in Node middleware | sha:`HEAD@S5` |
+- **`.entiresystem/CORE_VALUES.yml`/`DESIGN.md`/`DOMAIN_BOUNDARIES.json`/`SKILL.md`** | sha:`HEAD@S6+` | FIM-signed brain files.
+- **`.entiresystem/EXPERIENCE/{EXPERIENCE,frontend-web_EXPERIENCE,backend-api_EXPERIENCE,security_EXPERIENCE}.md`** | sha:`HEAD@S7` | cross-cutting + per-persona lessons, every entry tagged with a Veracity tag.
+- **`.entiresystem/ANTI_PATTERNS/{auth,database,ux}_ANTI_PATTERNS.md`** | sha:`HEAD@S7` | per-domain forbidden patterns.
+- **`packages/db/flyway/migrations/V8__sprint8_concept_graph_distillation.sql`** | sha:`HEAD@S8` | `semantic_chunks` (768-dim pgvector + HNSW), `distillation_runs`, `concept_graph_coverage`; deferred HNSW index on `concept_nodes.embedding` materialised here.
+- **`apps/backend/src/main/java/com/aria/graph/**`** | sha:`HEAD@S8` | `model/{ChunkType,GraphLevel,SemanticChunk}`, `repository/SemanticChunkRepository` (native HNSW + UPDATE), `service/{SemanticChunker,EmbeddingClient,ConceptGraphBuilder,DistillationEngine}`, `dto/{DistillRequest,DistilledContextPayload}`, `controller/DistillationController` (POST /api/distill, POST /api/graph/rebuild, GET /api/graph/coverage/{projectId}).
+- **`apps/middleware/src/services/distill.service.ts`** | sha:`HEAD@S8` | Java proxy + ExperienceService merge + 20-sample moving-average Pre-Flight Estimator.
+- **`apps/middleware/src/{schemas/distill,controllers/distill,routes/distill}.ts`** | sha:`HEAD@S8` | Strict Zod schemas; `/api/distill` and `/api/distill/preflight` mounted in `app.ts`.
+- **`apps/middleware/src/__tests__/distill.test.ts`** | sha:`HEAD@S8` | 5 Vitest cases (NOT executed).
+- **`apps/backend/src/test/java/com/aria/graph/{SemanticChunkerTest,DistillationEngineTest}.java`** | sha:`HEAD@S8` | 10 JUnit/AssertJ cases (NOT executed).
+- **`apps/e2e/tests/sprint8-{distillation,graph-levels}.spec.ts`** | sha:`HEAD@S8` | 5 Playwright cases (NOT executed).
+- **`scripts/knowledge-review.ts`** | sha:`HEAD@S8` | read-only coverage report against `/api/graph/coverage/{projectId}`.
+- **`.entiresystem/ADRs/ADR-{0009,0010}-*.md`** | sha:`HEAD@S8` | regex SemanticChunker strategy + Distillation ranking weights & 5× target.
+- **`apps/web/src/app/(dashboard)/projects/[id]/graph/page.tsx`** | sha:`HEAD@S8` | Added 4-level switcher.
+
+- **`.entiresystem/skills/<slug>/{SKILL.md,experience.yml}`** | sha:`HEAD@S7` | **12 personas** wired up: backend-api-specialist, frontend-web-specialist, db-specialist, devops-engineer, qa-e2e, security-engineer, compliance-auditor, finops-oracle, historian, ux-defender, integration-engineer, knowledge-graph-architect.
+- **`.entiresystem/README.md`** | sha:`HEAD@S7` | Full layout reference + per-directory rules + `pnpm knowledge-audit` / `pnpm model-transfer` quickstart.
+- **`.entiresystem/ADRs/ADR-{0007,0008}-*.md`** | sha:`HEAD@S7` | canonical layout + Knowledge Veracity scoring.
+- **`packages/db/flyway/migrations/V7__sprint7_experience_memory.sql`** | sha:`HEAD@S7` | `skill_experience_profiles`, `knowledge_veracity_audits`, `shadow_learning_runs`, `backend_workspaces`.
+- **`apps/middleware/src/services/experience.service.ts`** | sha:`HEAD@S7` | Dep-free YAML reader/writer for skill experience profiles. Knowledge Veracity tags enforced at the helper level (defaults `ai-only`).
+- **`apps/middleware/src/services/veracity.service.ts`** | sha:`HEAD@S7` | ADR-0008 scoring + `auditSkill` with stale-entry thresholds (`ai-only` < 0.10, `human-approved` < 0.50).
+- **`apps/middleware/src/services/modelTransfer.service.ts`** | sha:`HEAD@S7` | `/model-transfer` zero-token tool. Writes `file_index.json` (sha256), `skill_headers.json` (frontmatter), `experience.json` (ranked), and `prompts/<slug>.md`. NO LLM, NO NETWORK.
+- **`apps/middleware/src/{schemas/experience,controllers/experience,routes/experience}.ts`** | sha:`HEAD@S7` | Strict Zod schemas + `/api/experience/*` endpoints.
+- **`apps/middleware/src/__tests__/{experience,veracity,modelTransfer}.test.ts`** | sha:`HEAD@S7` | 15 Vitest cases (NOT executed — NO-RUN MODE).
+- **`scripts/{knowledge-audit,model-transfer}.ts`** | sha:`HEAD@S7` | CLIs.
+- **`.github/workflows/shadow-learning.yml`** | sha:`HEAD@S7` | On PR merge, drafts an `ai-only` entry and opens a follow-up PR.
+- **`apps/e2e/tests/sprint7-{experience,model-transfer}.spec.ts`** | sha:`HEAD@S7` | 6 Playwright cases (NOT executed — NO-RUN MODE).
+
 - **`packages/db/flyway/migrations/V5__sprint5_token_gateway.sql`** | sha:`HEAD@S5` |
   Enables pgvector. Extends `sessions` with workspace_id, user_id, mode, environment, mission_type,
   mission_risk_appetite, mission_scope, token_budget, time_budget_minutes, is_first_start, brief_summary;
@@ -320,6 +457,26 @@
 - **`scripts/generate-keys.sh`** | Generates RS256 JWT keypair (PEM) | sha:tbd |
   Outputs to `keys/jwt-private.pem` and `keys/jwt-public.pem`. Protected per CLAUDE.md §8.
 
+### Sprint 9 (Telemetry & Incidents) + gap-fill
+- **`packages/db/flyway/migrations/V9__sprint9_telemetry_incidents.sql`** | sha:`HEAD@S9` | `slo_definitions`, `slo_breaches`, `incidents`, `migration_playbooks`, `migration_phase_runs`, `semantic_tripwires`.
+- **`.entiresystem/slos.yml`** | sha:`HEAD@S9` | SLO catalogue (ADR-0011); `SloBootstrap @PostConstruct` upserts into `slo_definitions`.
+- **`apps/backend/src/main/java/com/aria/incident/**`** | sha:`HEAD@S9` | `Incident` entity + `IncidentCommanderService` (state machine with explicit transition validator) + `IncidentController` (`/api/incidents`).  Sprint 9 gap-fill added `IncidentResponder` (auto-Precision-session on P0/P1 + Jira stub + Concept Graph correlate), `SemanticCorrelator`, `JiraMcpStub`, `SemanticTripwireService` + `SemanticTripwire` entity/repo, `SloDefinition` entity + `SloBootstrap`.
+- **`apps/backend/src/main/java/com/aria/migration/**`** | sha:`HEAD@S9` | `MigrationPlaybook` + `MigrationPhaseRun` entities, dep-free YAML parser, `MigrationOrchestratorService` that NEVER auto-rolls back `stateful_dangerous` / `irreversible` per ADR-0012.
+- **`apps/backend/src/main/java/com/aria/telemetry/**`** | sha:`HEAD@S9` | `PrometheusMetrics` registry + `MetricsController` (`/metrics`).
+- **`apps/middleware/src/services/{telemetry,incident.proxy,systemAlerts.consumer}.ts`** | sha:`HEAD@S9` | Telemetry registry (counter/gauge/histogram) + incident proxy + Redis `system.alerts` consumer (XREADGROUP → `POST /api/incidents`).
+- **`apps/middleware/src/middleware/telemetry.middleware.ts`** | sha:`HEAD@S9` | Records `aria_http_requests_total_{2xx..5xx}` + `aria_http_request_duration_ms` histogram per request.
+- **`apps/middleware/src/{controllers/incidents,routes/incidents,routes/metrics}.ts`** | sha:`HEAD@S9` | `/api/incidents` proxy + `/metrics` text exposition.
+- **`apps/web/src/app/(dashboard)/system-health/page.tsx`** | sha:`HEAD@S9` | Token Gateway queue card + incidents list with severity badges.
+- **`infra/{prometheus.yml,otel-collector.yaml,tempo.yaml}`** | sha:`HEAD@S9` | Observability profile configs (`docker compose --profile observability up`).
+- **`.entiresystem/ADRs/ADR-{0011,0012,0013}-*.md`** | sha:`HEAD@S9` | SLO catalogue + breach severity, Migration playbook + rollback rules, Tripwire isolation.
+
+### Sprint 10 (Fleet & Speculation)
+- **`packages/db/flyway/migrations/V10__sprint10_fleet_speculation.sql`** | sha:`HEAD@S10` | `agent_registry` (Ed25519 pubkey + sha256 fingerprint), `fleet_outcomes` (signed envelopes), `agent_heartbeats`, `contract_debts`, `shadow_branches`, `fleet_circuit_breakers`.
+- **`apps/backend/src/main/java/com/aria/fleet/**`** | sha:`HEAD@S10` | 5 JPA entities, 5 repositories (incl. native `latestPerAgentSince()`), `AgentRegistryService` (Ed25519 keygen + PKCS8 returned once), `FleetEnvelopeSigner` (canonical `epicId|topic|payload|agentId`), `FleetCommanderService` (sig-verify-before-persist), `HealingGuardrailService` (pure-function `detectCycles()` DFS), `DeadlockBreakerService` (3-min timeout per ADR-0015), `ShadowBranchService`, `FleetController` (10 routes).
+- **`apps/middleware/src/{services/fleet.proxy,schemas/fleet.schemas,controllers/fleet.controller,routes/fleet.routes}.ts`** | sha:`HEAD@S10` | Auth-gated proxy at `/api/fleet/*` with per-endpoint rate limits (heartbeats 600/min, writes 60/min).
+- **`apps/middleware/src/app.ts`** | sha:`HEAD@S10` | Fully rebuilt route mount list — Sprint 9 telemetry + `/metrics` + `/api/incidents` mounts had been silently dropped by earlier incremental Edits; restored alongside the Sprint 10 `/api/fleet` route.
+- **`.entiresystem/ADRs/ADR-{0014,0015}-*.md`** | sha:`HEAD@S10` | Fleet envelope format + signing; Deadlock Breaker timeout + producer election.
+
 ---
 
 ## §C Decision Log (mini-ADR)
@@ -338,6 +495,35 @@
   fallback transports, mature TS types. Cost: slightly heavier than `ws`. Acceptable for local-first.
 - **DEC-007 — MEMORY.md is the canonical token-optimisation index** (2026-05-16). Replaces ad-hoc file rereads.
   Update protocol in §H of this file.
+- **DEC-008 — `.entiresystem/` canonical layout locked** (2026-05-16, Sprint 7, ADR-0007). The committed tree
+  is the single source of truth for ARIA knowledge; `.backend/<workspace>/` is derived; `.aria/` is private
+  runtime.
+- **DEC-009 — Knowledge Veracity 3-tag taxonomy** (2026-05-16, Sprint 7, ADR-0008). `human-authored` ∞,
+  `human-approved` 365d half-life, `ai-only` 30d. Score = `weight × 0.5^(age/half_life)`. Defaults to
+  `ai-only` everywhere agents write — only humans promote.
+- **DEC-010 — NO-RUN MODE protocol** (2026-05-16, Sprint 7, CLAUDE.md §5a). When user says "do not run any
+  code", do not execute pnpm/mvn/tsx/node/playwright; mentally typecheck; mark sprint
+  `code-complete (unverified)`. Stay in NO-RUN MODE for the rest of the session unless lifted.
+- **DEC-011 — Regex SemanticChunker, tree-sitter deferred** (2026-05-16, Sprint 8, ADR-0009). Daemon image
+  stays native-binding-free until Sprint 14 (Chaos Sandbox image carries the libs); regex covers every Sprint 1-7
+  file shape we actually ship.
+- **DEC-013 — Migration rollback policy** (2026-05-17, Sprint 9, ADR-0012). `stateless_safe` auto-rolls back;
+  `stateful_dangerous` + `irreversible` NEVER auto-rollback once real data has flowed — halt and require
+  human review.
+- **DEC-014 — SLO catalogue is the source of truth** (2026-05-17, Sprint 9, ADR-0011). `.entiresystem/slos.yml`
+  is canonical; `SloBootstrap @PostConstruct` syncs it into `slo_definitions` one-way on boot.
+- **DEC-015 — Tripwires never in production data** (2026-05-17, Sprint 9, ADR-0013). Honeypots install only into
+  Synthetic Hydrator profiles (Sprint 14). Production code referencing tripwire magic strings is an Anti-Slop
+  P0 violation.
+- **DEC-016 — Fleet envelope canonical signing input** (2026-05-17, Sprint 10, ADR-0014). Ed25519 over
+  `epicId|topic|payload|agentId`. Producer + consumer agree on payload JSON canonicalisation per topic
+  contract until Sprint 14 ships an in-repo canonicaliser.
+- **DEC-017 — Deadlock timeout = 3 min, producer = first in cycle** (2026-05-17, Sprint 10, ADR-0015).
+  Heartbeat window 2 min; cycle members all waiting ≥ 3 min trigger a forced V1 contract via `ContractDebt`.
+  LLM-driven prompt deferred to Sprint 17.
+- **DEC-012 — Distillation ranking + 5× target** (2026-05-16, Sprint 8, ADR-0010). Score = 3·symbol +
+  2·summary + 1·path + 0.5 if updated <24h. Bucket caps 8/5/5/3. Pre-Flight Estimator uses a 20-sample
+  moving average per (project, agent) over `distillation_runs`. Cold-start default ratio 1.0 (safe upper bound).
 
 ---
 

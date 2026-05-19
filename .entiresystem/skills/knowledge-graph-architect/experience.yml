@@ -1,0 +1,14 @@
+skill: knowledge-graph-architect
+tickets_touched: 0
+best_practices:
+  - text: "Always include the governing ADR in the distilled payload — agents must see the decision graph, not just the symbol graph."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Use HNSW indexes for pgvector at our scale; IVFFlat tuning is a recall trap."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "Caching a distilled payload across versions of the underlying file — hash-key the cache to the source SHA."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

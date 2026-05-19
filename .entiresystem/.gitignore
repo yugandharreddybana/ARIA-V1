@@ -1,0 +1,10 @@
+# Track ALL .entiresystem/ contents except daemon-generated runtime artifacts.
+# The signed FIM registry is committed so the team can audit hashes via git.
+# The private signing key is NEVER stored here — it lives in .aria/keys/.
+
+# Generated indices / caches (regenerable from the source files).
+embeddings/
+concept_graphs/*/embeddings/
+
+# Per-run temp dirs (Meta-Evolution outputs are git-tracked though — see Sprint 17).
+*/temp/

@@ -1,0 +1,20 @@
+skill: frontend-web-specialist
+tickets_touched: 0
+
+best_practices:
+  - text: "Use `Promise.allSettled` for dashboard fan-out — never `Promise.all`."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Mount global indicators (e.g. SessionStatus) in the dashboard layout, not in pages."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+
+anti_patterns:
+  - text: "Inline #hex colours — fails Anti-Slop P0 (`execution/inline-hex`)."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Fixed pixel widths ≥100px — fails Anti-Slop P0 (`execution/fixed-px-width`)."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+failure_stories: []

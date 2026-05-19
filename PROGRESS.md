@@ -7,13 +7,254 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 6 — Phase 1: Safety & Quality**  *(queued — start after user review of Sprint 5)*
-- Spec anchors: §12 (Security/FIM/Sanitization), §13 (QA/Red Team/IP scanner), §14 (Anti-Slop, Turn-1 Discovery)
-- DoD checklist: see IMPLEMENTATION.md §3.
+**Sprint 11 — Phase 6: IDE / LSP Integration**  *(queued)*
+- Spec anchors: §18M (Deep Native IDE/LSP Integration).
+- DoD checklist: see IMPLEMENTATION.md §8.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 10 — Phase 5: Fleet & Speculation  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §17.4 + §18I + §8
+
+What was built:
+- **Flyway V10** — `agent_registry` (Ed25519 pubkey + fingerprint), `fleet_outcomes` (signed
+  envelope log), `agent_heartbeats`, `contract_debts`, `shadow_branches`, `fleet_circuit_breakers`.
+- **Java `com.aria.fleet`**:
+  - `model/*` — `AgentRegistration`, `FleetOutcome`, `AgentHeartbeat`, `ContractDebt`,
+    `FleetCircuitBreaker`.
+  - `repository/*` — 5 Spring Data JPA repositories with a native `latestPerAgentSince()` query.
+  - `service/AgentRegistryService` — generates Ed25519 keypair on register (per ADR-0014),
+    stores SPKI pubkey + SHA-256 fingerprint, returns PKCS8 private key once.
+  - `service/FleetEnvelopeSigner` — Ed25519 sign + verify over the canonical input
+    `epicId|topic|payload|agentId`.
+  - `service/FleetCommanderService` — verifies envelope signature, persists `fleet_outcomes`,
+    enforces `CANONICAL_TOPICS` (advisory log, not hard-fail).
+  - `service/HealingGuardrailService` — DFS over the heartbeat wait-graph; pure-function
+    `detectCycles()` exposed for testing; persists `fleet_circuit_breakers` per detected cycle.
+  - `service/DeadlockBreakerService` — sweeps every 2-min heartbeat window; agents waiting
+    ≥ 3 min (ADR-0015) trigger a forced V1 contract via `ContractDebt`. LLM-driven prompt
+    deferred to Sprint 17.
+  - `service/ShadowBranchService` — opens `aria-shadow/<ticket>` rows with deterministic
+    branch names; revert helper for ticket re-prioritisation.
+  - `dto/FleetDtos` + `controller/FleetController` — `/api/fleet/{agents,events,heartbeats,
+    heal/scan,deadlock/sweep,shadow,debts,breakers}`.
+- **Middleware proxy** — `services/fleet.proxy.ts` + Zod-strict schemas + controller + routes
+  mounted at `/api/fleet` (auth + per-endpoint rate limit). Heartbeats get a 600/min cap so
+  many agents can beat without hitting the global rate limiter.
+- **`apps/middleware/src/app.ts` rebuilt** with the full route list (telemetry middleware +
+  `/metrics` + `/api/incidents` + `/api/fleet` — previous incremental Edits had silently lost
+  the Sprint 9 mounts).
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit / Mockito: `FleetEnvelopeSignerTest` (4 cases — round-trip, tampered payload,
+    unknown agent, tampered topic), `HealingGuardrailServiceTest` (4 cases — 2-cycle, 3-cycle,
+    acyclic chain, disconnected components), `AgentRegistryServiceTest` (3 cases — keygen,
+    duplicate reject, end-to-end sign-then-verify round-trip).
+  - Middleware Vitest: `fleet.test.ts` (5 schema cases).
+  - Playwright: `sprint10-fleet.spec.ts` (3), `sprint10-deadlock.spec.ts` (2).
+- **ADRs**: 0014 Fleet envelope format + signing, 0015 Deadlock Breaker timeout + producer
+  election.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm` / `mvn` / `tsx` / `node` / `playwright` executed.
+- Pre-Cog speculative execution: the `aria-shadow/*` row infrastructure ships in Sprint 10;
+  the actual git operations + Jira webhook listener wire in Sprint 14 alongside the Chaos
+  Sandbox.
+- Healing scan + deadlock sweep are explicit POST endpoints in Sprint 10; Sprint 14 adds a
+  cron (`@Scheduled`) to run them every 30 s and 60 s respectively.
+
+---
+
+### Sprint 9 (gap-fill) — close all 7 §6 DoD audit gaps  *(NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Commit**: `466bb48`
+
+Self-audit caught seven Sprint 9 §6 gaps; all closed in `466bb48`:
+
+1. **Redis `system.alerts` consumer** — `apps/middleware/src/services/systemAlerts.consumer.ts`
+   subscribes via `XREADGROUP`, forwards payloads to `POST /api/incidents` with the internal
+   service token. Started in `index.ts`, stopped on `SIGTERM` / `SIGINT`.
+2. **Auto-Precision session on P0/P1** — `IncidentResponder` orchestrates the escalation path;
+   `IncidentController.declare()` returns `{ incident, escalation }` in one response.
+3. **Concept Graph correlation** — `SemanticCorrelator` ranks `semantic_chunks` against incident
+   text (ADR-0010 weights) and returns top-N file paths.
+4. **Jira MCP stub** — `JiraMcpStub.createIncidentTicket()` logs deterministic `ARIA-<sha8>` keys.
+5. **Semantic Tripwire generator** — `SemanticTripwire` entity + repo + service with
+   `install(table, column)` and `checkAccess(value, ctx)` that auto-declares P1 incidents on
+   first hit.
+6. **SLO file → DB sync** — `SloDefinition` entity + `SloBootstrap @PostConstruct` reads
+   `.entiresystem/slos.yml` and upserts `slo_definitions`.
+7. **Observability profile** — `otel-collector`, `tempo`, `prometheus`, `grafana` services added
+   under `--profile observability`. Config files at `infra/{prometheus.yml,otel-collector.yaml,tempo.yaml}`.
+
+New tests (authored, NOT executed — NO-RUN MODE): `SemanticTripwireServiceTest` (3),
+`IncidentResponderTest` (3), `SloBootstrapTest` (2).
+
+---
+
+### Sprint 9 — Phase 4: Telemetry & Incidents  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Commit**: `69adb98` | **Spec**: §17
+
+What was built:
+- **`.entiresystem/slos.yml`** — canonical SLO catalogue (ADR-0011).
+- **Flyway V9** — `slo_definitions`, `slo_breaches`, `incidents`, `migration_playbooks`,
+  `migration_phase_runs`, `semantic_tripwires`.
+- **Java `com.aria.incident`** — `Incident` JPA entity, `IncidentCommanderService` (state machine
+  with explicit valid transitions), `IncidentController` (`/api/incidents`).
+- **Java `com.aria.migration`** — `MigrationPlaybook` + `MigrationPhaseRun` entities,
+  `MigrationOrchestratorService` (dep-free YAML parser, signed-hash registration, sequential
+  runner that **NEVER auto-rolls back** `stateful_dangerous` or `irreversible` phases per
+  ADR-0012), `MigrationController`.
+- **Java `com.aria.telemetry`** — `PrometheusMetrics` registry + `MetricsController` (`/metrics`).
+- **Middleware telemetry** — counter / gauge / histogram registry, request middleware,
+  `/metrics` route, `/api/incidents` proxy (auth + Zod).
+- **Web `/(dashboard)/system-health`** — Token Gateway queue card + recent incidents list with
+  severity badges.
+- 13 unrun tests (9 Java JUnit, 4 Vitest, 4 Playwright).
+- ADRs **0011** (SLO catalogue + breach severity), **0012** (Migration playbook + rollback rules),
+  **0013** (Tripwire isolation rules).
+
+---
+
+### Sprint 8 — Phase 3: Advanced Retrieval (Concept Graph + Distillation)  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §6, §18N, §7
+
+What was built:
+- **Java `com.aria.graph`** package: `SemanticChunk` JPA entity, `ChunkType` + `GraphLevel` enums,
+  `SemanticChunkRepository` (with native HNSW query for nearest neighbours + native UPDATE for
+  pgvector writes), `SemanticChunker` (regex-based per ADR-0009 — TS/JS/Java/Python/SQL/Markdown,
+  whole-file fallback for unknown languages), `EmbeddingClient` (routes through the middleware
+  Token Gateway — no direct provider calls), `ConceptGraphBuilder` (idempotent per `version_hash`,
+  upserts Level-1 chunks + summary + embedding), `DistillationEngine` (intent extraction → ranking
+  per ADR-0010 → bucketed payload with `rawTokens / totalTokens / compressionRatio` accounting).
+- **REST contracts** (`com.aria.graph.controller.DistillationController`):
+  `POST /api/distill`, `POST /api/graph/rebuild`, `GET /api/graph/coverage/{projectId}`.
+- **Middleware proxy** (`apps/middleware/src/services/distill.service.ts`):
+  `distill()` forwards to the Java engine and merges in `experienceNotes` + `antiPatterns` from
+  `ExperienceService` (top-3 per veracity rank), `preFlight()` computes a running compression-ratio
+  estimate (20-sample moving average per `(project, agent)`) over `distillation_runs`. Both wired
+  to `/api/distill` and `/api/distill/preflight` (auth, Zod-strict, rate-limited).
+- **Flyway V8** — `semantic_chunks` (768-dim pgvector + HNSW index), `distillation_runs` audit log,
+  `concept_graph_coverage` materialised view, deferred HNSW index on `concept_nodes.embedding`.
+- **Web dashboard graph page** — added a 4-level switcher (`graph-level-{1..4}`) for Symbol /
+  Module / Domain / Decision filtering.
+- **CLIs** — `scripts/knowledge-review.ts` (read-only coverage report) wired as `pnpm knowledge-review`.
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit: 5 `SemanticChunkerTest` cases + 5 `DistillationEngineTest` cases.
+  - Middleware Vitest: 5 `distill.test.ts` cases (schemas + preflight fallback).
+  - Playwright: `sprint8-distillation.spec.ts` (4 cases), `sprint8-graph-levels.spec.ts` (1 case).
+- **ADRs**: 0009 SemanticChunker strategy, 0010 Distillation ranking weights + 5× target.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm`/`mvn`/`tsx`/`node`/`playwright` executed this session.
+- The Java side still needs `Jdbc` config on Sprint 14 (Testcontainers) before the integration
+  test can boot a real Postgres.
+- EmbeddingClient currently calls `/api/llm/invoke` with a placeholder `embeddingOnly: true`
+  flag; the Token Gateway already routes to Ollama, but the embedding-vs-chat dispatch path will
+  be tightened in Sprint 9 (telemetry will expose the timing per call).
+
+---
+
+### Sprint 7 — Phase 2: Experience & Memory  *(code-complete, unverified — NO-RUN MODE)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §2.2, §6, §9
+
+What was built:
+- **Canonical `.entiresystem/` layout** locked down per ADR-0007: CORE_VALUES, DESIGN, DOMAIN_BOUNDARIES,
+  SKILL.md (top-level index), EXPERIENCE/, ANTI_PATTERNS/, skills/ subtree, ADRs/, ui_discovery/ stubs for
+  Sprint 8+ subtrees.
+- **EXPERIENCE.md** — cross-cutting lessons file + 3 per-persona files (`frontend-web`, `backend-api`,
+  `security`). Every entry tagged with a Knowledge Veracity tag.
+- **ANTI_PATTERNS** — `auth`, `database`, `ux` domain catalogues.
+- **Per-skill SKILL.md + experience.yml** for **12 personas**: backend-api-specialist,
+  frontend-web-specialist, db-specialist, devops-engineer, qa-e2e, security-engineer,
+  compliance-auditor, finops-oracle, historian, ux-defender, integration-engineer,
+  knowledge-graph-architect. Each SKILL.md carries the V27.9 §9 frontmatter + Transparency Card.
+- **`.entiresystem/README.md`** — full layout reference + per-directory rules.
+- **`ExperienceService`** (`apps/middleware/src/services/experience.service.ts`) — dep-free YAML
+  reader/writer for skill experience profiles. Idempotent `append*` helpers; `incrementTicketsTouched`;
+  `listSkills`; `read`.
+- **`VeracityService`** (`apps/middleware/src/services/veracity.service.ts`) — ADR-0008 scoring
+  (`weight × 0.5^(age/half_life)`), `rank`, `auditSkill` with stale-entry thresholds.
+- **`ModelTransferService`** (`apps/middleware/src/services/modelTransfer.service.ts`) — `/model-transfer`
+  zero-token tool that writes `.backend/<workspace>/{file_index.json, skill_headers.json, experience.json,
+  prompts/*.md}`. **No LLM, no network**.
+- **Routes** (`/api/experience`): `GET /`, `GET /:slug`, `GET /:slug/audit`, `POST /entries`,
+  `POST /failure-stories`, `POST /model-transfer`. All authenticated + Zod-strict.
+- **Scripts**: `scripts/knowledge-audit.ts` + `scripts/model-transfer.ts` CLIs, wired into root
+  `package.json` as `pnpm knowledge-audit`, `pnpm model-transfer`, `pnpm anti-slop`,
+  `pnpm anti-test-dodging`.
+- **Shadow Learning** (`.github/workflows/shadow-learning.yml`) — on PR merge, extracts a draft entry
+  (heuristic only — Sprint 17 wires the real Ollama call through the Token Gateway) and opens a
+  follow-up PR tagged `veracity: ai-only`.
+- **Flyway V7** (`packages/db/flyway/migrations/V7__sprint7_experience_memory.sql`) —
+  `skill_experience_profiles`, `knowledge_veracity_audits`, `shadow_learning_runs`, `backend_workspaces`.
+- **Tests** (NOT executed — NO-RUN MODE): 6 ExperienceService Vitest cases, 5 Veracity cases, 4
+  ModelTransfer cases (15 new middleware tests); 2 new Playwright specs
+  (`sprint7-experience.spec.ts`, `sprint7-model-transfer.spec.ts`).
+- **ADRs**: 0007 `.entiresystem/` canonical layout; 0008 Knowledge Veracity scoring.
+- **CLAUDE.md**: §5 extended with **5a. NO-RUN MODE** rule so future sessions know how to honour the
+  "do not run any code" directive.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked but no `pnpm test` / `pnpm typecheck` / `mvn test` were executed this
+  session. Sprint promoted to `code-complete (unverified)` per CLAUDE.md §5a. First post-NO-RUN session
+  should run the full verification matrix (middleware typecheck + test + build, Java test, web typecheck)
+  before opening the next sprint.
+- Sanitizer / FIM / Token Gateway from Sprints 5+6 still pass; Sprint 7 work does not touch them.
+- Shadow Learning is heuristic-only — no LLM call until Sprint 17 wires the Token Gateway through.
+
+---
+
+### Sprint 6 — Phase 1: Safety & Quality
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §12, §13, §14
+
+What was built:
+- **Sanitizer** (`apps/middleware/src/services/sanitizer.service.ts`) — two-stage detector (structural strip
+  + 11 weighted heuristics), thresholds `<0.70 cleared` / `0.70–0.89 quarantined` / `≥0.90 rejected`,
+  defensive auto-reject after `>20 quarantines / 60 min`. Optional `OllamaScorer` blends 50/50 with the
+  heuristic. Pure heuristic mode works without a live Ollama.
+- **File Integrity Monitor** (`apps/middleware/src/services/fim.service.ts`) — Ed25519-signed registry over
+  `SKILL.md`, `DESIGN.md`, `DOMAIN_BOUNDARIES.json`, `CORE_VALUES.yml`. Detects `ok`, `missing`, `untracked`,
+  `modified`, `invalid_signature`. Private key auto-generated at `.aria/keys/daemon.ed25519` (gitignored);
+  public key committed to `.entiresystem/keys/daemon.pub`; signed registry committed to
+  `.entiresystem/fim_registry.json`.
+- **Plagiarism / IP scanner** (`apps/middleware/src/services/plagiarism.service.ts`) — SPDX + 5-gram
+  fingerprint scan. Copyleft trips Legal Kill-Switch; permissive requires attribution; corpus matches above
+  15% similarity flag for review.
+- **Red Team probe generator** (`apps/middleware/src/services/redTeam.service.ts`) — deterministic seeded
+  LCG produces SQLi/XSS/CSRF/IDOR/mass-assign probes per changed route. Critical/high block merge.
+- **Anti-Slop Gate** (`apps/middleware/src/services/antiSlop.service.ts` + `tools/anti-slop-gate.ts`) —
+  5-axis rubric (Philosophy/Hierarchy/Execution/Specificity/Restraint). P0 violations hard-fail; total
+  score < 6 fails.
+- **Anti-Test-Dodging linter** (`tools/anti-test-dodging.ts`) — rejects tests with zero `expect()`, trivial
+  `expect(true).toBe(true)`-style assertions, or `it.skip` / `it.todo` / `xit(` / `xdescribe(`.
+- **Turn-1 Discovery Form** — `POST/GET /api/ui-discovery`, persisted to Postgres + mirrored to
+  `.entiresystem/ui_discovery/<ticket-id>.yml`. New page at `/(dashboard)/ui-discovery/[ticket]`.
+- **Playwright config** — device matrix added: `chromium-desktop` (1920×1080), `chromium-tablet`
+  (768×1024), `chromium-mobile` (375×667). Every spec runs on all three projects.
+- **Flyway V6** — `quarantine_events`, `fim_registry`, `fim_alerts`, `red_team_findings`,
+  `ui_discovery_forms` tables.
+- **CI workflow** (`.github/workflows/ci.yml`) — jobs: typecheck, unit-tests, java-tests, anti-test-dodging,
+  anti-slop, e2e matrix (desktop/tablet/mobile).
+- **`.entiresystem/` brain files** stubbed and signed: CORE_VALUES.yml, DESIGN.md (read-only marker),
+  DOMAIN_BOUNDARIES.json, SKILL.md.
+- 3 new ADRs: 0004 sanitizer thresholds, 0005 Anti-Slop axes, 0006 FIM signing key custody.
+- Fixed a pre-existing `.gitignore` bug that excluded `.entiresystem/` entirely — Sprint 5 ADRs were never
+  actually pushed. Now `.aria/` (daemon-private runtime) is gitignored and `.entiresystem/` (canonical
+  knowledge store) is committed.
+
+Tests:
+- Middleware Vitest 29/29 green (5 sanitizer + 5 FIM + 4 plagiarism + 5 redTeam + 3 antiSlop + 7 tokenGateway).
+- Java JUnit 5/5 green (1 `@Disabled` until Sprint 14 Testcontainers).
+- Web typecheck green.
+- 5 new Playwright specs: `sprint6-{sanitizer,fim,redteam,plagiarism,ui-discovery}.spec.ts`.
+
+Known state:
+- Sanitizer / FIM are wired as services; binding them to specific ingress points
+  (Token Gateway sanitization, FIM watcher on commit) is Sprint 7 + 9 work.
+- Red Team runner is offline — chaos sandbox + Blue Team correlation lands Sprint 14.
+
+---
 
 ### Sprint 5 — Phase 0 closeout: Token Gateway + Orchestrator + WebSocket + Infra
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §2.1, §2.2, §4, §6, §18F, §18H
@@ -127,11 +368,11 @@ Known state:
 | Sprint | Spec phase | Theme |
 |---|---|---|
 | 5 | Phase 0 | ✅ Core Foundation closeout — Token Gateway, Orchestrator, WebSocket, Flyway, docker-compose, pgvector |
-| 6 | Phase 1 | Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
-| 7 | Phase 2 | Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer |
-| 8 | Phase 3 | Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading |
-| 9 | Phase 4 | Telemetry & Incidents — OpenTelemetry, Incident Commander, Migration Orchestrator, Semantic Tripwires |
-| 10 | Phase 5 | Fleet & Speculation — Pub/Sub mesh, FleetOutcome, healing cascade guardrail, Deadlock Breaker |
+| 6 | Phase 1 | ✅ Safety & Quality — sanitizer, FIM, Anti-Slop, Red Team (local), IP scanner, P0 linter, anti-test-dodging |
+| 7 | Phase 2 | ✅ Experience & Memory — `.entiresystem/`, EXPERIENCE.md, ANTI_PATTERNS.md, Shadow Learning hook, /model-transfer *(code-complete, unverified)* |
+| 8 | Phase 3 | ✅ Advanced Retrieval — Semantic Chunker, Concept Graph builder, Distillation Engine, Needle-Threading *(code-complete, unverified)* |
+| 9 | Phase 4 | ✅ Telemetry & Incidents — OpenTelemetry (basic Prom format), Incident Commander, Migration Orchestrator, Semantic Tripwires *(code-complete, unverified)* |
+| 10 | Phase 5 | ✅ Fleet & Speculation — Ed25519-signed envelopes, FleetOutcome log, healing cascade DFS, Deadlock Breaker, shadow branches *(code-complete, unverified)* |
 | 11 | Phase 6 | IDE/LSP — ARIA LSP server, VS Code extension, ghost-text diffs, cursor-aware context |
 | 12 | Phase 7 | Governance & Legal — Ed25519 agent identity, Compliance Auditor, GDPR erasure, /aria explain, audit export |
 | 13 | Phase 8 | Finance & Procurement — FinOps Oracle, Procurement Scout, Stripe Issuing stub, Arbitrage Engine |
@@ -157,18 +398,18 @@ Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 | IDOR ownership checks | ✅ Sprint 3 (re-audit every new user-scoped route) |
 | Zod validation on every endpoint | ✅ Sprint 1 (enforced) |
 | Ed25519 agent identity + signed actions | 🔜 Sprint 12 |
-| FIM (SKILL.md / DESIGN.md / DOMAIN_BOUNDARIES.json / CORE_VALUES.yml) | 🔜 Sprint 6 |
-| Content sanitization (two-stage injection detector) | 🔜 Sprint 6 |
-| Red Team Saboteur (local pre-merge) | 🔜 Sprint 6 |
+| FIM (SKILL.md / DESIGN.md / DOMAIN_BOUNDARIES.json / CORE_VALUES.yml) | ✅ Sprint 6 |
+| Content sanitization (two-stage injection detector) | ✅ Sprint 6 |
+| Red Team Saboteur (local pre-merge) | ✅ Sprint 6 |
 | Red Team vs Blue Team (chaos every 6h) | 🔜 Sprint 14 |
-| Anti-Slop Gate (5 axes) | 🔜 Sprint 6 |
-| P0 deterministic linter | 🔜 Sprint 6 |
-| Anti-test-dodging static linter | 🔜 Sprint 6 |
+| Anti-Slop Gate (5 axes) | ✅ Sprint 6 |
+| P0 deterministic linter | ✅ Sprint 6 |
+| Anti-test-dodging static linter | ✅ Sprint 6 |
 | Golden Dataset evaluator regression | 🔜 Sprint 14 |
 | SWE-bench Lite CI gate | 🔜 Sprint 14 |
 | SWE-bench Verified + WebArena weekly | 🔜 Sprint 14 |
 | Token Gateway (queue, reservations, replay frames) | ✅ Sprint 5 |
-| Concept Graph + RAG distillation (≥5× compression) | 🔜 Sprint 8 |
+| Concept Graph + RAG distillation (≥5× compression) | ✅ Sprint 8 *(code-complete, unverified)* |
 | State-Space Replay engine | 🔜 Sprint 14 (frames stubbed Sprint 5) |
 | Seed Vault (weekly air-gapped archive) | 🔜 Sprint 15 |
 | Defcon-1 distributed kill switch | 🔜 Sprint 15 |
@@ -181,9 +422,12 @@ Full nine-block expansion for every sprint lives in `IMPLEMENTATION.md`.
 | Edge Swarm (SLM web/iOS/Android) | 🔜 Sprint 20 |
 | Predictive Data Gravity (cache pre-warm) | 🔜 Sprint 20 |
 | Genesis pipeline | 🔜 Sprint 21 |
-| Observability (OpenTelemetry, Prom, Datadog/Sentry MCP) | 🔜 Sprint 9 |
-| Incident Commander + auto-hotfix | 🔜 Sprint 9 |
-| Zero-Downtime Migration Orchestrator | 🔜 Sprint 9 |
+| Observability (Prom `/metrics`, OpenTelemetry SDK in Sprint 14) | ✅ Sprint 9 *(code-complete, unverified)* |
+| Incident Commander + auto-hotfix | ✅ Sprint 9 *(state machine + REST; auto-hotfix in Sprint 14)* |
+| Zero-Downtime Migration Orchestrator | ✅ Sprint 9 *(code-complete, unverified)* |
+| Semantic Tripwires (honeypots) | ✅ Sprint 9 *(schema + ADR; install/check loop in Sprint 14)* |
+| Auto Precision-session on P0/P1 incident | ✅ Sprint 9 *(gap-fill)* |
+| Jira MCP integration | ⚠️ Stub Sprint 9; real MCP Sprint 17 |
 | Synthetic Data Hydrator (profiles + cache) | 🔜 Sprint 14 |
 | Skill Quarantine | 🔜 Sprint 16 |
 | Token-optimisation via MEMORY.md file index | ✅ Sprint 5 (this commit) |
@@ -229,6 +473,33 @@ Coverage table is auto-refreshed at the end of every sprint after `pnpm test --c
 
 ## 📝 Session Notes
 
+- **2026-05-17** — Sprint 8 gap-fill (added `/api/llm/embed`, Pre-Flight Estimator wired into the Token
+  Gateway via `expectedCompressionRatio`, EmbeddingClient retargeted) **+** Sprint 9 **code-complete,
+  unverified** (NO-RUN MODE): SLO catalogue (ADR-0011), Flyway V9, Java incident + migration packages
+  (IncidentCommanderService state machine, MigrationOrchestratorService that never auto-rolls back
+  stateful_dangerous/irreversible per ADR-0012), middleware telemetry registry + `/metrics`, incident
+  proxy + `/api/incidents`, web `/(dashboard)/system-health` page, ADRs 0011–0013. 16 unrun tests
+  (9 Java, 6 Vitest, 4 Playwright). Sprint 10 (Phase 5 — Fleet & Speculation) is queued.
+- **2026-05-16 (late night)** — Sprint 8 **code-complete, unverified** (NO-RUN MODE). Built the 4-level
+  Concept Graph + Distillation Engine end-to-end: Java `com.aria.graph` package
+  (SemanticChunk JPA + repo with native HNSW query, SemanticChunker regex-based per ADR-0009,
+  EmbeddingClient routed through the Token Gateway, ConceptGraphBuilder idempotent per version_hash,
+  DistillationEngine with ranking per ADR-0010 — ≥5× compression target). Middleware proxy at
+  `/api/distill` + Pre-Flight Estimator at `/api/distill/preflight` (20-sample moving average over
+  `distillation_runs`). Web graph page gained a 4-level switcher (Symbol / Module / Domain / Decision).
+  Flyway V8 schema, `knowledge-review` CLI, 10 new Java tests + 5 new Vitest cases + 5 new Playwright
+  cases (all unrun). ADRs 0009 + 0010. Sprint marked `code-complete (unverified)`.
+- **2026-05-16 (night)** — Sprint 7 **code-complete, unverified** (NO-RUN MODE per user directive).
+  Shipped `.entiresystem/` canonical layout (5 skill subtrees, 3 EXPERIENCE files, 3 ANTI_PATTERNS files),
+  ExperienceService + VeracityService + ModelTransferService, `/api/experience` routes, `knowledge-audit`
+  and `model-transfer` CLIs, Shadow Learning GitHub Action, Flyway V7 schema, 15 new Vitest tests + 2 new
+  Playwright specs (none executed this session), and ADRs 0007 + 0008. CLAUDE.md §5a documents the
+  NO-RUN MODE protocol so future sessions handle the same directive consistently.
+- **2026-05-16 (evening)** — Sprint 6 closed. Shipped sanitizer + FIM + plagiarism + Red Team + Anti-Slop +
+  Anti-Test-Dodging + Turn-1 Discovery Form + device-matrix Playwright + Flyway V6 + CI workflow + signed
+  `.entiresystem/` brain files. 29 middleware tests green, 5 Java tests green, web typecheck green. Three
+  new ADRs (0004–0006). Found and fixed pre-existing `.gitignore` bug that was silently excluding
+  `.entiresystem/` — Sprint 5 ADRs now committed alongside Sprint 6 work.
 - **2026-05-16 (afternoon)** — Sprint 5 closed. Full Token Gateway + Java Orchestrator + WebSocket hub + Flyway
   V5 migration + docker-compose stack + pgvector + Ollama wiring + Anthropic stub. Middleware typecheck/test/build
   green, Java tests green, web typecheck green. Three ADRs committed under `.entiresystem/ADRs/`. Existing

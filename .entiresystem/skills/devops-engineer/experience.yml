@@ -1,0 +1,23 @@
+skill: devops-engineer
+tickets_touched: 0
+
+best_practices:
+  - text: "docker-compose health checks gate downstream startup so services come up in the right order."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "Use `?stringtype=unspecified` on Spring JDBC URLs to bridge String↔UUID columns."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+anti_patterns:
+  - text: "`.entiresystem/` accidentally added to `.gitignore` — the entire knowledge store would never get committed."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+failure_stories:
+  - id: SPRINT5-GITIGNORE
+    description: "Sprint 5 ADRs were never committed because `.entiresystem/` was in `.gitignore`."
+    root_cause: "Default `.gitignore` from project scaffolding ignored the entire `.entiresystem/` tree."
+    resolution: "Replace with `.aria/` (daemon-private runtime) gitignored; `.entiresystem/` committed. Added `.entiresystem/.gitignore` for narrow runtime artefacts only."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"

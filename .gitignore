@@ -45,7 +45,12 @@ test-results/
 *.pem
 *.key
 private_key*
+keys/jwt-private.pem
+keys/jwt-public.pem
 
-# ARIA system directory (contains sensitive workspace data)
-.entiresystem/
+# ARIA daemon-private workspace (private keys, replay DB, hydration cache, seed vault).
+# The committed counterpart is `.entiresystem/` which holds the canonical knowledge store.
+.aria/
+
+# Next.js / TS build artifacts
 tsconfig.tsbuildinfo

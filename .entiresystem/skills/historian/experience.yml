@@ -1,0 +1,11 @@
+skill: historian
+tickets_touched: 0
+best_practices:
+  - text: "Always Slack the blame author with the proposed change; default behaviour on silence is archive-behind-flag, never hard-delete."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "Dropping a `git rm` on legacy code without a Historian review — past incidents recurred because the deletion took the workaround with them."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

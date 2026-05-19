@@ -1,0 +1,11 @@
+skill: ux-defender
+tickets_touched: 0
+best_practices:
+  - text: "Every user-facing flow ticket requires a Turn-1 Discovery Form (audience / surface / tone / brand / constraints / success metrics) before engineering starts."
+    veracity: human-approved
+    captured_at: "2026-05-16T00:00:00Z"
+anti_patterns:
+  - text: "Dark-pattern consent flows (pre-checked opt-in, double-negatives, hidden opt-out) — always reject."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+failure_stories: []

@@ -1,0 +1,17 @@
+skill: security-engineer
+tickets_touched: 0
+
+best_practices:
+  - text: "Sanitize at every untrusted ingress (GitHub webhooks, RSS, model output, file uploads)."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+  - text: "FIM-sign new entries in `.entiresystem/` immediately on commit."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+anti_patterns:
+  - text: "Skipping signature verification when the hash matches — both must validate."
+    veracity: human-authored
+    captured_at: "2026-05-16T00:00:00Z"
+
+failure_stories: []

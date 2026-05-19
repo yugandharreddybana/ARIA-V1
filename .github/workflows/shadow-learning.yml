@@ -1,0 +1,109 @@
+name: shadow-learning
+
+# Shadow Learning Git hook (V27.9 §6).
+# On every merged PR, diff the change and propose EXPERIENCE.md / experience.yml updates
+# as a follow-up PR. The proposals are always `veracity: ai-only` — a human must promote
+# them via PR review to graduate to `human-approved`.
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to analyse (defaults to default branch HEAD)'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  extract-lessons:
+    if: ${{ github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+        with: { version: '9.1.0' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: pnpm }
+      - run: pnpm install --frozen-lockfile=false
+
+      - name: Resolve target SHA + base
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHA="${{ github.event.inputs.sha }}"
+            [ -z "$SHA" ] && SHA="${{ github.sha }}"
+            BASE=$(git rev-parse "${SHA}~1" 2>/dev/null || git rev-parse origin/main)
+          else
+            SHA="${{ github.event.pull_request.merge_commit_sha }}"
+            BASE="${{ github.event.pull_request.base.sha }}"
+          fi
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+
+      - name: Summarise diff into experience drafts (no LLM)
+        id: extract
+        run: |
+          # Pure structural extraction — file paths + commit message keywords are enough to
+          # propose a draft. Sprint 17 augments this with a real Ollama call gated by the
+          # Token Gateway. Until then the heuristic gives reviewers something to react to.
+          mkdir -p .aria/shadow_learning
+          BASE='${{ steps.refs.outputs.base }}'
+          SHA='${{ steps.refs.outputs.sha }}'
+          git diff --name-only "$BASE" "$SHA" > .aria/shadow_learning/files.txt
+          git log -1 --pretty=%B "$SHA" > .aria/shadow_learning/message.txt
+          node -e "
+            const fs = require('fs');
+            const files = fs.readFileSync('.aria/shadow_learning/files.txt','utf8').trim().split('\n').filter(Boolean);
+            const msg   = fs.readFileSync('.aria/shadow_learning/message.txt','utf8').trim();
+            const skill = files.some(f => f.startsWith('apps/web/'))    ? 'frontend-web-specialist'
+                       : files.some(f => f.startsWith('apps/middleware/')) ? 'backend-api-specialist'
+                       : files.some(f => f.startsWith('apps/backend/')) ? 'backend-api-specialist'
+                       : files.some(f => f.startsWith('apps/e2e/'))    ? 'qa-e2e'
+                       : 'devops-engineer';
+            const text = msg.split('\n')[0].slice(0, 240).replace(/\"/g, '\\\\\"');
+            const yaml = '- text: \"' + text + ' (sha ' + '${{ steps.refs.outputs.sha }}'.slice(0,7) + ')\"\n' +
+                          '  veracity: ai-only\n' +
+                          '  captured_at: \"' + new Date().toISOString() + '\"\n';
+            fs.writeFileSync('.aria/shadow_learning/proposed.yml', JSON.stringify({ skill, text, yaml }));
+          "
+          cat .aria/shadow_learning/proposed.yml
+
+      - name: Open follow-up PR with the draft entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PAYLOAD=$(cat .aria/shadow_learning/proposed.yml)
+          SKILL=$(node -e "console.log(JSON.parse(process.argv[1]).skill)" "$PAYLOAD")
+          YAML=$(node -e "process.stdout.write(JSON.parse(process.argv[1]).yaml)" "$PAYLOAD")
+          BRANCH="shadow-learning/${{ steps.refs.outputs.sha }}"
+          git config user.name  "aria-shadow-learning"
+          git config user.email "aria-bot@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          FILE=".entiresystem/skills/${SKILL}/experience.yml"
+          if grep -q '^best_practices: \[\]' "$FILE" 2>/dev/null; then
+            # Replace empty list marker with a list containing the draft entry.
+            python3 - <<'PY'
+import os, pathlib
+file = pathlib.Path(os.environ['FILE'])
+yaml = os.environ['YAML']
+src = file.read_text()
+src = src.replace('best_practices: []', 'best_practices:\n' + ''.join('  ' + l + '\n' for l in yaml.splitlines()))
+file.write_text(src)
+PY
+          elif [ -f "$FILE" ]; then
+            printf '%s' "$YAML" | sed 's/^/  /' >> "$FILE"
+          else
+            echo "skipping — $FILE not present yet."
+            exit 0
+          fi
+          git add "$FILE"
+          git commit -m "shadow-learning(${SKILL}): draft entry from ${{ steps.refs.outputs.sha }}"
+          git push -u origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Shadow Learning: draft for ${SKILL}" \
+            --body  "Auto-extracted lesson candidate (veracity: ai-only). Promote to human-approved by editing the entry, or close to discard."

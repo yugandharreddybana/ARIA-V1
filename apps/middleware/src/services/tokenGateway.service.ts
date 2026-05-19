@@ -71,6 +71,12 @@ export interface GatewayRequest {
   modelParameters?: Record<string, unknown>;
   /** When set, gateway will reject if reserved + this > session budget. */
   timeoutMs?: number;
+  /**
+   * Pre-Flight Estimator hint (ADR-0010). When set, the budget projection uses
+   * `promptTokensEstimated / expectedCompressionRatio` instead of the raw value.
+   * Callers compute the ratio via `POST /api/distill/preflight` ahead of the dispatch.
+   */
+  expectedCompressionRatio?: number;
 }
 
 export interface GatewayResponse {
@@ -269,7 +275,13 @@ export class TokenGateway {
       this.deps.warnRatio,
       this.deps.hardRatio,
     );
-    const projected = budget.used + budget.reserved + reqWithId.promptTokensEstimated;
+    // Pre-Flight Estimator (ADR-0010): if the caller supplied a distillation compression ratio,
+    // project the actual tokens that will hit the LLM instead of using the raw prompt size.
+    const ratio = reqWithId.expectedCompressionRatio && reqWithId.expectedCompressionRatio > 0
+      ? reqWithId.expectedCompressionRatio
+      : 1.0;
+    const projectedThisCall = Math.ceil(reqWithId.promptTokensEstimated / ratio);
+    const projected = budget.used + budget.reserved + projectedThisCall;
     const hardLimit = Math.floor(budget.maxTokens * budget.hardRatio);
     if (projected > hardLimit) {
       this.rejectedCount++;
