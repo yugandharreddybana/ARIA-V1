@@ -28,6 +28,7 @@ import metricsRoutes from './routes/metrics.routes';
 import fleetRoutes from './routes/fleet.routes';
 import lspRoutes from './routes/lsp.routes';
 import governanceRoutes from './routes/governance.routes';
+import financeRoutes from './routes/finance.routes';
 
 /**
  * Build the Express app. Factory pattern so tests (and the WS attach step
@@ -69,6 +70,7 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/fleet',         fleetRoutes);
   app.use('/api/lsp',           lspRoutes);
   app.use('/api/governance',    governanceRoutes);
+  app.use('/api/finance',       financeRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
