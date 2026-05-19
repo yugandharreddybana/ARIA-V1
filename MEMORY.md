@@ -457,6 +457,26 @@
 - **`scripts/generate-keys.sh`** | Generates RS256 JWT keypair (PEM) | sha:tbd |
   Outputs to `keys/jwt-private.pem` and `keys/jwt-public.pem`. Protected per CLAUDE.md §8.
 
+### Sprint 9 (Telemetry & Incidents) + gap-fill
+- **`packages/db/flyway/migrations/V9__sprint9_telemetry_incidents.sql`** | sha:`HEAD@S9` | `slo_definitions`, `slo_breaches`, `incidents`, `migration_playbooks`, `migration_phase_runs`, `semantic_tripwires`.
+- **`.entiresystem/slos.yml`** | sha:`HEAD@S9` | SLO catalogue (ADR-0011); `SloBootstrap @PostConstruct` upserts into `slo_definitions`.
+- **`apps/backend/src/main/java/com/aria/incident/**`** | sha:`HEAD@S9` | `Incident` entity + `IncidentCommanderService` (state machine with explicit transition validator) + `IncidentController` (`/api/incidents`).  Sprint 9 gap-fill added `IncidentResponder` (auto-Precision-session on P0/P1 + Jira stub + Concept Graph correlate), `SemanticCorrelator`, `JiraMcpStub`, `SemanticTripwireService` + `SemanticTripwire` entity/repo, `SloDefinition` entity + `SloBootstrap`.
+- **`apps/backend/src/main/java/com/aria/migration/**`** | sha:`HEAD@S9` | `MigrationPlaybook` + `MigrationPhaseRun` entities, dep-free YAML parser, `MigrationOrchestratorService` that NEVER auto-rolls back `stateful_dangerous` / `irreversible` per ADR-0012.
+- **`apps/backend/src/main/java/com/aria/telemetry/**`** | sha:`HEAD@S9` | `PrometheusMetrics` registry + `MetricsController` (`/metrics`).
+- **`apps/middleware/src/services/{telemetry,incident.proxy,systemAlerts.consumer}.ts`** | sha:`HEAD@S9` | Telemetry registry (counter/gauge/histogram) + incident proxy + Redis `system.alerts` consumer (XREADGROUP → `POST /api/incidents`).
+- **`apps/middleware/src/middleware/telemetry.middleware.ts`** | sha:`HEAD@S9` | Records `aria_http_requests_total_{2xx..5xx}` + `aria_http_request_duration_ms` histogram per request.
+- **`apps/middleware/src/{controllers/incidents,routes/incidents,routes/metrics}.ts`** | sha:`HEAD@S9` | `/api/incidents` proxy + `/metrics` text exposition.
+- **`apps/web/src/app/(dashboard)/system-health/page.tsx`** | sha:`HEAD@S9` | Token Gateway queue card + incidents list with severity badges.
+- **`infra/{prometheus.yml,otel-collector.yaml,tempo.yaml}`** | sha:`HEAD@S9` | Observability profile configs (`docker compose --profile observability up`).
+- **`.entiresystem/ADRs/ADR-{0011,0012,0013}-*.md`** | sha:`HEAD@S9` | SLO catalogue + breach severity, Migration playbook + rollback rules, Tripwire isolation.
+
+### Sprint 10 (Fleet & Speculation)
+- **`packages/db/flyway/migrations/V10__sprint10_fleet_speculation.sql`** | sha:`HEAD@S10` | `agent_registry` (Ed25519 pubkey + sha256 fingerprint), `fleet_outcomes` (signed envelopes), `agent_heartbeats`, `contract_debts`, `shadow_branches`, `fleet_circuit_breakers`.
+- **`apps/backend/src/main/java/com/aria/fleet/**`** | sha:`HEAD@S10` | 5 JPA entities, 5 repositories (incl. native `latestPerAgentSince()`), `AgentRegistryService` (Ed25519 keygen + PKCS8 returned once), `FleetEnvelopeSigner` (canonical `epicId|topic|payload|agentId`), `FleetCommanderService` (sig-verify-before-persist), `HealingGuardrailService` (pure-function `detectCycles()` DFS), `DeadlockBreakerService` (3-min timeout per ADR-0015), `ShadowBranchService`, `FleetController` (10 routes).
+- **`apps/middleware/src/{services/fleet.proxy,schemas/fleet.schemas,controllers/fleet.controller,routes/fleet.routes}.ts`** | sha:`HEAD@S10` | Auth-gated proxy at `/api/fleet/*` with per-endpoint rate limits (heartbeats 600/min, writes 60/min).
+- **`apps/middleware/src/app.ts`** | sha:`HEAD@S10` | Fully rebuilt route mount list — Sprint 9 telemetry + `/metrics` + `/api/incidents` mounts had been silently dropped by earlier incremental Edits; restored alongside the Sprint 10 `/api/fleet` route.
+- **`.entiresystem/ADRs/ADR-{0014,0015}-*.md`** | sha:`HEAD@S10` | Fleet envelope format + signing; Deadlock Breaker timeout + producer election.
+
 ---
 
 ## §C Decision Log (mini-ADR)
@@ -487,6 +507,20 @@
 - **DEC-011 — Regex SemanticChunker, tree-sitter deferred** (2026-05-16, Sprint 8, ADR-0009). Daemon image
   stays native-binding-free until Sprint 14 (Chaos Sandbox image carries the libs); regex covers every Sprint 1-7
   file shape we actually ship.
+- **DEC-013 — Migration rollback policy** (2026-05-17, Sprint 9, ADR-0012). `stateless_safe` auto-rolls back;
+  `stateful_dangerous` + `irreversible` NEVER auto-rollback once real data has flowed — halt and require
+  human review.
+- **DEC-014 — SLO catalogue is the source of truth** (2026-05-17, Sprint 9, ADR-0011). `.entiresystem/slos.yml`
+  is canonical; `SloBootstrap @PostConstruct` syncs it into `slo_definitions` one-way on boot.
+- **DEC-015 — Tripwires never in production data** (2026-05-17, Sprint 9, ADR-0013). Honeypots install only into
+  Synthetic Hydrator profiles (Sprint 14). Production code referencing tripwire magic strings is an Anti-Slop
+  P0 violation.
+- **DEC-016 — Fleet envelope canonical signing input** (2026-05-17, Sprint 10, ADR-0014). Ed25519 over
+  `epicId|topic|payload|agentId`. Producer + consumer agree on payload JSON canonicalisation per topic
+  contract until Sprint 14 ships an in-repo canonicaliser.
+- **DEC-017 — Deadlock timeout = 3 min, producer = first in cycle** (2026-05-17, Sprint 10, ADR-0015).
+  Heartbeat window 2 min; cycle members all waiting ≥ 3 min trigger a forced V1 contract via `ContractDebt`.
+  LLM-driven prompt deferred to Sprint 17.
 - **DEC-012 — Distillation ranking + 5× target** (2026-05-16, Sprint 8, ADR-0010). Score = 3·symbol +
   2·summary + 1·path + 0.5 if updated <24h. Bucket caps 8/5/5/3. Pre-Flight Estimator uses a 20-sample
   moving average per (project, agent) over `distillation_runs`. Cold-start default ratio 1.0 (safe upper bound).
