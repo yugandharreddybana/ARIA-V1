@@ -7,13 +7,64 @@
 
 ## 🔄 Active Sprint
 
-**Sprint 13 — Phase 8: Finance & Procurement**  *(queued)*
-- Spec anchors: §11 (FinOps + Procurement), §17.6 (Infrastructure Arbitrage Engine).
-- DoD checklist: see IMPLEMENTATION.md §10.
+**Sprint 14 — Phase 9: Security Protocol & Benchmarking**  *(queued)*
+- Spec anchors: §18E (Red Team vs Blue Team), §18F (Replay Engine), §18G (Synthetic Hydrator), §18L (Benchmarking).
+- DoD checklist: see IMPLEMENTATION.md §11.
 
 ---
 
 ## ✅ Completed Sprints
+
+### Sprint 12 (gap-fill) + Sprint 13 — Finance & Procurement  *(code-complete, unverified — NO-RUN MODE, commit `e76411e`)*
+**Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §11 + §17.6
+
+Sprint 12 audit gap-fill (rolled into the same commit):
+- **`LegalContractReaderService` + `LegalContractController`** — the §13.7 Legal Reader / ToS
+  Watcher that was missing in Sprint 12. Ingests vendor contracts (text-extracted upstream),
+  records the sha256, classifies the licence (`copyleft` / `permissive` / `proprietary` /
+  `unknown`) via regex over SPDX + GNU keywords, and trips the Legal Kill-Switch via
+  `ComplianceAuditorService.scanDiff()` on copyleft. Audit-chain event
+  `legal.contract.ingest`.
+- **`tools/no-direct-llm.ts`** — CI lint that bans direct provider URLs / SDK imports /
+  `/api/{chat,generate,embeddings}` references outside the Token Gateway dispatchers
+  (ADR-0003). Wired as `pnpm no-direct-llm`.
+
+Sprint 13 (Phase 8) — V27.9 §11 + §17.6:
+- **Flyway V13** — `budgets`, `vendors`, `procurement_proposals`, `virtual_cards`,
+  `arbitrage_proposals`.
+- **Java `com.aria.finance`**:
+  - `model/Budget` + `repository/BudgetRepository`.
+  - `service/FinOpsOracleService` — pure-function `estimate(EstimateInput)` per **ADR-0021**
+    (token local $0 / remote $3 per 1k; compute $0.01/min; storage $0.0008/GB-day);
+    `gate()` enforcing token + USD caps; `allocate/reserve/consume` per **ADR-0022**.
+  - `service/ProcurementScoutService` — deterministic weighted scorer
+    `0.4·coverage + 0.3·(1-normCost) + 0.2·sla + 0.1·trust`; pros / cons auto-tagged;
+    proposal persisted with the JSON shortlist.
+  - `service/CorporateTreasuryService` — Stripe Issuing stub with deterministic
+    `ic_<sha12>` card ids + `freeze()`.
+  - `service/InfrastructureArbitrageService` — stateful + cross-cloud risk classifier
+    (`high` / `medium` / `low`); persists `arbitrage_proposals`.
+  - `service/DiplomatAgentService` — 5-stage negotiation playbook (kickoff → discovery →
+    counter → concession → close) + markdown renderer.
+  - `controller/FinanceController` — 7 routes (`/finops/estimate`, `/finops/allocate`,
+    `/procurement/proposals`, `/treasury/cards`, `/treasury/cards/freeze`,
+    `/arbitrage/proposals`, `/diplomat/playbook`).
+- **Middleware** — `services/finance.proxy.ts`, Zod-strict schemas, controller, routes
+  mounted at `/api/finance` (auth + rate-limit).
+- **Tests** (authored, NOT executed — NO-RUN MODE):
+  - Java JUnit: `LegalContractReaderServiceTest` (5), `FinOpsOracleServiceTest` (5),
+    `ProcurementScoutServiceTest` (4), `InfrastructureArbitrageServiceTest` (5) — 19 cases.
+  - Middleware Vitest: `finance.test.ts` (7 schema cases).
+  - Playwright: `sprint13-finance.spec.ts` (5).
+- **ADRs**: 0021 FinOps cost-model coefficients, 0022 Token reservation diff strategy.
+
+Known state (NO-RUN MODE):
+- All code mentally typechecked; no `pnpm` / `mvn` invoked.
+- FinOps coefficients are placeholders — Sprint 14 hooks a live pricing source + Golden
+  Dataset re-tune.
+- Stripe Issuing is a stub; Sprint 17 swaps for real MCP behind the same shape.
+
+---
 
 ### Sprint 11 (gap-fill) + Sprint 12 — Governance & Legal  *(code-complete, unverified — NO-RUN MODE)*
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §12 + §13.7 + §20

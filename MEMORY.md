@@ -8,6 +8,26 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-05-18 (later) — Sprint 12 audit gap-fill + Sprint 13 code-complete (NO-RUN MODE) — commit `e76411e`
+- Sprint 12 audit closed two real gaps:
+  1. **`LegalContractReaderService` + `LegalContractController`** — the §13.7 reader missing
+     from Sprint 12. Classifies licences via regex over SPDX + GNU keywords; copyleft trips
+     the Legal Kill-Switch via `ComplianceAuditorService.scanDiff()`. Audit-chain event
+     `legal.contract.ingest`.
+  2. **`tools/no-direct-llm.ts`** — CI lint that bans direct provider URLs / SDK imports /
+     direct `/api/{chat,generate,embeddings}` calls outside the Token Gateway dispatchers
+     (ADR-0003). Wired as `pnpm no-direct-llm`.
+- Sprint 13 shipped V27.9 §11 + §17.6 end-to-end. Flyway V13 (`budgets`, `vendors`,
+  `procurement_proposals`, `virtual_cards`, `arbitrage_proposals`). Java
+  `com.aria.finance.*`: `FinOpsOracleService` (pure-function cost estimator per ADR-0021,
+  reservation arithmetic per ADR-0022), `ProcurementScoutService` (weighted scorer
+  `0.4·cov + 0.3·(1-normCost) + 0.2·sla + 0.1·trust`), `CorporateTreasuryService` (Stripe
+  Issuing stub with `ic_<sha12>` card ids), `InfrastructureArbitrageService` (stateful +
+  cross-cloud risk classifier), `DiplomatAgentService` (5-stage negotiation playbook).
+  `FinanceController` with 7 routes. Middleware proxy + Zod-strict schemas + controller +
+  routes at `/api/finance`. 26 unrun tests (19 Java, 7 Vitest, 5 Playwright). ADRs **0021**
+  (cost-model coefficients), **0022** (reservation diff strategy).
+
 ### 2026-05-18 — Sprint 11 audit gap-fill + Sprint 12 code-complete (NO-RUN MODE) — commit `bd4487d`
 - Sprint 11 audit closed three real gaps in the same commit:
   1. `pnpm-workspace.yaml` extended to `extensions/*` so the VS Code extension is in the
