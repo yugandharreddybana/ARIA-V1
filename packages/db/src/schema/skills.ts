@@ -1,43 +1,87 @@
-import { pgTable, uuid, varchar, text, boolean, timestamp, pgEnum, index, jsonb } from 'drizzle-orm/pg-core';
+import {
+  pgTable, uuid, varchar, text, integer,
+  timestamp, pgEnum, index, jsonb,
+} from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 import { projects } from './projects';
 
-export const riskClassEnum = pgEnum('risk_class', ['A','B','C','D']);
-export const skillStatusEnum = pgEnum('skill_status', ['active','future','inactive','quarantined']);
-export const idleModeEnum = pgEnum('idle_mode', ['learning','creative','reflection','off']);
+export const riskClassEnum      = pgEnum('risk_class',       ['A','B','C','D']);
+export const skillStatusEnum    = pgEnum('skill_status',     ['active','future','inactive','quarantined']);
+export const idleModeEnum       = pgEnum('idle_mode',        ['learning','creative','reflection','off']);
 export const teamMemberRoleEnum = pgEnum('team_member_role', ['lead','member','scrum_master','observer']);
 
+// ── Teams ─────────────────────────────────────────────────────────────────────
 export const teams = pgTable('teams', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
-  name: varchar('name', { length: 255 }).notNull(),
-  leadSkillId: uuid('lead_skill_id'),
+  id:                 uuid('id').primaryKey().defaultRandom(),
+  projectId:          uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name:               varchar('name', { length: 255 }).notNull(),
+  department:         varchar('department', { length: 100 }),
+  leadSkillId:        uuid('lead_skill_id'),
   scrumMasterSkillId: uuid('scrum_master_skill_id'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdAt:          timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('teams_project_idx').on(t.projectId) }));
 
+// ── Skills (agents) ───────────────────────────────────────────────────────────
 export const skills = pgTable('skills', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id:        uuid('id').primaryKey().defaultRandom(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
-  teamId: uuid('team_id').references(() => teams.id),
-  slug: varchar('slug', { length: 100 }).notNull(),
-  realName: varchar('real_name', { length: 255 }).notNull(),
+  teamId:    uuid('team_id').references(() => teams.id),
+
+  // ── Reporting hierarchy ────────────────────────────────────────────────────
+  // null reportingManagerId = this agent is the CEO (top of tree)
+  reportingManagerId: uuid('reporting_manager_id'),
+  // 1=CEO  2=C-suite  3=Director/Lead  4=Scrum Master  5=Individual Contributor
+  hierarchyLevel:     integer('hierarchy_level').notNull().default(5),
+  department:         varchar('department', { length: 100 }),
+
+  // ── Identity ───────────────────────────────────────────────────────────────
+  slug:      varchar('slug',       { length: 100 }).notNull(),
+  realName:  varchar('real_name',  { length: 255 }).notNull(),
   roleTitle: varchar('role_title', { length: 255 }).notNull(),
+
+  // ── Risk & status ──────────────────────────────────────────────────────────
   riskClass: riskClassEnum('risk_class').notNull().default('B'),
-  status: skillStatusEnum('status').notNull().default('active'),
-  idleMode: idleModeEnum('idle_mode').notNull().default('learning'),
-  ownedDomains: jsonb('owned_domains').notNull().default([]),
-  ownedRepoPaths: jsonb('owned_repo_paths').notNull().default([]),
+  status:    skillStatusEnum('status').notNull().default('active'),
+  idleMode:  idleModeEnum('idle_mode').notNull().default('learning'),
+
+  // ── Domain ownership & trigger detection ──────────────────────────────────
+  ownedDomains:    jsonb('owned_domains').notNull().default([]),
+  ownedRepoPaths:  jsonb('owned_repo_paths').notNull().default([]),
   triggerKeywords: jsonb('trigger_keywords').notNull().default([]),
-  description: text('description').notNull().default(''),
-  skillMdPath: varchar('skill_md_path', { length: 500 }),
+
+  // ── AI-generated instructions tailored to this codebase ───────────────────
+  description:  text('description').notNull().default(''),
+  instructions: text('instructions').notNull().default(''),
+  skillMdPath:  varchar('skill_md_path', { length: 500 }),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('skills_project_idx').on(t.projectId) }));
 
+// ── Team members (many-to-many skills ↔ teams) ────────────────────────────────
 export const teamMembers = pgTable('team_members', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  teamId: uuid('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
-  skillId: uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
-  role: teamMemberRoleEnum('role').notNull().default('member'),
+  id:        uuid('id').primaryKey().defaultRandom(),
+  teamId:    uuid('team_id').notNull().references(() => teams.id,   { onDelete: 'cascade' }),
+  skillId:   uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  role:      teamMemberRoleEnum('role').notNull().default('member'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({ teamIdx: index('team_members_team_idx').on(t.teamId) }));
+
+// ── Drizzle relations ─────────────────────────────────────────────────────────
+export const skillsRelations = relations(skills, ({ one, many }) => ({
+  project:          one(projects, { fields: [skills.projectId], references: [projects.id] }),
+  team:             one(teams,    { fields: [skills.teamId],    references: [teams.id] }),
+  reportingManager: one(skills,   { fields: [skills.reportingManagerId], references: [skills.id], relationName: 'reports_to' }),
+  directReports:    many(skills,  { relationName: 'reports_to' }),
+  teamMemberships:  many(teamMembers),
+}));
+
+export const teamsRelations = relations(teams, ({ one, many }) => ({
+  project: one(projects, { fields: [teams.projectId], references: [projects.id] }),
+  members: many(teamMembers),
+}));
+
+export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
+  team:  one(teams,  { fields: [teamMembers.teamId],  references: [teams.id] }),
+  skill: one(skills, { fields: [teamMembers.skillId], references: [skills.id] }),
+}));
