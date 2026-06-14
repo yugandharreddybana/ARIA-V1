@@ -6,7 +6,6 @@ import { AppError } from '../middleware/error.middleware';
 import type { LlmConfigInput } from '../schemas/workspace.schema';
 
 // AES-256-GCM encryption for API keys at rest.
-// Key is derived from WORKSPACE_ENCRYPTION_KEY env var (32-byte hex).
 function getEncryptionKey(): Buffer {
   const raw = process.env.WORKSPACE_ENCRYPTION_KEY;
   if (!raw || raw.length < 32) {
@@ -21,7 +20,6 @@ function encryptApiKey(plain: string): string {
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(plain, 'utf-8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  // Store as iv:tag:ciphertext all in hex
   return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
 }
 
@@ -38,10 +36,6 @@ export function decryptApiKey(stored: string): string {
   return decipher.update(ct).toString('utf-8') + decipher.final('utf-8');
 }
 
-/**
- * Saves the LLM provider configuration for a workspace.
- * API keys are encrypted with AES-256-GCM before storing.
- */
 export async function saveLlmConfig(
   workspaceId: string,
   config: LlmConfigInput,
@@ -57,7 +51,7 @@ export async function saveLlmConfig(
   await db
     .update(workspaces)
     .set({
-      llmProvider: config.provider as 'ollama' | 'anthropic' | 'openai' | 'custom',
+      llmProvider: config.provider as 'ollama' | 'anthropic' | 'openai' | 'nvidia' | 'custom',
       llmBaseUrl:  config.baseUrl ?? null,
       llmApiKeyEncrypted: apiKeyEncrypted,
       llmModel:    config.model,
@@ -66,10 +60,6 @@ export async function saveLlmConfig(
     .where(eq(workspaces.id, workspaceId));
 }
 
-/**
- * Returns the current LLM config for a workspace.
- * The API key is never returned in plaintext — callers receive a masked sentinel.
- */
 export async function getLlmConfig(workspaceId: string) {
   const workspace = await db.query.workspaces.findFirst({
     where: eq(workspaces.id, workspaceId),
@@ -80,15 +70,13 @@ export async function getLlmConfig(workspaceId: string) {
     provider: workspace.llmProvider ?? 'ollama',
     baseUrl:  workspace.llmBaseUrl ?? null,
     model:    workspace.llmModel ?? null,
-    // Never expose the raw key — just signal whether one is configured
     hasApiKey: !!workspace.llmApiKeyEncrypted,
   };
 }
 
 /**
- * Tests connectivity to the configured LLM endpoint.
- * For Ollama: hits /api/tags to verify the server is reachable.
- * For API providers: attempts a minimal token probe.
+ * Tests live connectivity to a configured LLM endpoint.
+ * For NVIDIA NIM: hits /models on integrate.api.nvidia.com with Bearer nvapi-... key.
  */
 export async function testLlmConnectivity(
   provider: string,
@@ -106,7 +94,9 @@ export async function testLlmConnectivity(
       const found = data.models?.some(m => m.name.startsWith(model.split(':')[0]));
       return {
         ok: true,
-        message: found ? `Model "${model}" found on Ollama` : `Ollama reachable but model "${model}" not found — pull it first`,
+        message: found
+          ? `Model "${model}" found on Ollama`
+          : `Ollama reachable but model "${model}" not found — pull it first`,
         latencyMs: Date.now() - start,
       };
     }
@@ -124,8 +114,33 @@ export async function testLlmConnectivity(
       return { ok: true, message: 'Anthropic API key verified', latencyMs: Date.now() - start };
     }
 
+    if (provider === 'nvidia') {
+      // NVIDIA NIM is OpenAI-compatible. Base URL defaults to the hosted NIM endpoint.
+      const base = baseUrl?.replace(/\/$/, '') ?? 'https://integrate.api.nvidia.com/v1';
+      if (!apiKey?.startsWith('nvapi-')) {
+        return { ok: false, message: 'NVIDIA API keys must start with "nvapi-". Get yours at build.nvidia.com.' };
+      }
+      const res = await fetch(`${base}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (res.status === 401) return { ok: false, message: 'Invalid NVIDIA API key — check your nvapi- key at build.nvidia.com' };
+      if (res.status === 403) return { ok: false, message: 'NVIDIA API key does not have access to this endpoint' };
+      if (!res.ok)           return { ok: false, message: `NVIDIA NIM returned HTTP ${res.status}` };
+      // Check if the requested model is available
+      const data = await res.json() as { data?: { id: string }[] };
+      const found = data.data?.some(m => m.id === model || m.id.includes(model.split('/').pop() ?? model));
+      return {
+        ok: true,
+        message: found
+          ? `NVIDIA NIM key verified — model "${model}" available`
+          : `NVIDIA NIM key verified — model "${model}" not found in your plan; check build.nvidia.com`,
+        latencyMs: Date.now() - start,
+      };
+    }
+
     if (provider === 'openai' || provider === 'custom') {
-      const base = baseUrl ?? 'https://api.openai.com/v1';
+      const base = baseUrl?.replace(/\/$/, '') ?? 'https://api.openai.com/v1';
       const res = await fetch(`${base}/models`, {
         headers: { Authorization: `Bearer ${apiKey ?? ''}` },
         signal: AbortSignal.timeout(6_000),

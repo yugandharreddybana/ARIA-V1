@@ -9,12 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import {
   Eye, EyeOff, Loader2, Github,
   CheckCircle2, Circle, ChevronRight, ChevronLeft,
-  Server, Key, Zap, Wifi, WifiOff, BrainCircuit,
+  Server, Key, Zap, Wifi, WifiOff, BrainCircuit, Cpu,
 } from 'lucide-react';
 
 const MIDDLEWARE_URL = process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
@@ -48,24 +45,27 @@ const BAR_COLOR      = ['bg-muted', 'bg-destructive', 'bg-destructive', 'bg-ambe
 // ────────────────────────────────────────────────────────────────
 // Step 2 — LLM provider presets
 // ────────────────────────────────────────────────────────────────
-type LlmProvider = 'ollama' | 'anthropic' | 'openai' | 'custom';
+type LlmProvider = 'ollama' | 'anthropic' | 'openai' | 'nvidia' | 'custom';
 
 const PROVIDER_PRESETS: {
   id: LlmProvider;
   label: string;
   description: string;
   icon: React.ReactNode;
+  badge?: string;
   requiresApiKey: boolean;
   requiresBaseUrl: boolean;
   defaultBaseUrl: string;
   defaultModel: string;
   modelPlaceholder: string;
   apiKeyPlaceholder: string;
+  apiKeyHint?: string;
+  modelHint?: string;
 }[] = [
   {
     id: 'ollama',
     label: 'Ollama (Local)',
-    description: 'Run models locally on your machine. Private, free, no API key needed.',
+    description: 'Run models locally. Private, free, no API key needed.',
     icon: <Server className="h-5 w-5" />,
     requiresApiKey: false,
     requiresBaseUrl: true,
@@ -73,11 +73,12 @@ const PROVIDER_PRESETS: {
     defaultModel: 'qwen2.5-coder:7b',
     modelPlaceholder: 'e.g. qwen2.5-coder:7b',
     apiKeyPlaceholder: '',
+    modelHint: 'Must be pulled first: ollama pull <model>',
   },
   {
     id: 'anthropic',
     label: 'Anthropic (Claude)',
-    description: 'Use Claude models via the Anthropic API. Requires an API key.',
+    description: 'Claude models via the Anthropic API.',
     icon: <BrainCircuit className="h-5 w-5" />,
     requiresApiKey: true,
     requiresBaseUrl: false,
@@ -85,11 +86,12 @@ const PROVIDER_PRESETS: {
     defaultModel: 'claude-sonnet-4-5',
     modelPlaceholder: 'e.g. claude-sonnet-4-5',
     apiKeyPlaceholder: 'sk-ant-api...',
+    modelHint: 'The model slug accepted by the Anthropic API.',
   },
   {
     id: 'openai',
     label: 'OpenAI (GPT / o-series)',
-    description: 'Use GPT or o-series models via the OpenAI API. Requires an API key.',
+    description: 'GPT-4o, o3, and more via the OpenAI API.',
     icon: <Key className="h-5 w-5" />,
     requiresApiKey: true,
     requiresBaseUrl: false,
@@ -97,6 +99,22 @@ const PROVIDER_PRESETS: {
     defaultModel: 'gpt-4o',
     modelPlaceholder: 'e.g. gpt-4o',
     apiKeyPlaceholder: 'sk-...',
+    modelHint: 'The model identifier as accepted by the OpenAI API.',
+  },
+  {
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    description: 'Nemotron and other NVIDIA-hosted models via NIM.',
+    icon: <Cpu className="h-5 w-5" />,
+    badge: 'Nemotron',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
+    defaultModel: 'nvidia/nemotron-3-8b-chat-4k',
+    modelPlaceholder: 'e.g. nvidia/nemotron-3-8b-chat-4k',
+    apiKeyPlaceholder: 'nvapi-...',
+    apiKeyHint: 'Get your free API key at build.nvidia.com — keys start with "nvapi-".',
+    modelHint: 'Use the full model ID from build.nvidia.com/explore (e.g. nvidia/nemotron-3-8b-chat-4k).',
   },
   {
     id: 'custom',
@@ -109,6 +127,7 @@ const PROVIDER_PRESETS: {
     defaultModel: '',
     modelPlaceholder: 'e.g. mistral-7b-instruct',
     apiKeyPlaceholder: 'Optional — leave blank if not required',
+    modelHint: 'The model identifier your server expects.',
   },
 ];
 
@@ -119,15 +138,14 @@ export default function SignupPage() {
   const router    = useRouter();
   const { signup } = useAuth();
 
-  // Step tracker: 1 | 2 | 3
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // ── Step 1 state ──
-  const [form,        setForm]        = useState({ name: '', email: '', password: '', confirm: '' });
-  const [showPw,      setShowPw]      = useState(false);
+  const [form,         setForm]        = useState({ name: '', email: '', password: '', confirm: '' });
+  const [showPw,       setShowPw]      = useState(false);
   const [step1Loading, setStep1Loading] = useState(false);
   const [step1Error,   setStep1Error]  = useState<string | null>(null);
-  const [pwState,     setPwState]     = useState<{ passed: Record<RuleKey, boolean>; score: number } | null>(null);
+  const [pwState,      setPwState]     = useState<{ passed: Record<RuleKey, boolean>; score: number } | null>(null);
 
   // ── Step 2 state ──
   const [provider,    setProvider]    = useState<LlmProvider>('ollama');
@@ -188,6 +206,10 @@ export default function SignupPage() {
     if (!model.trim()) { setStep2Error('Model name is required to test connection.'); return; }
     if (preset.requiresBaseUrl && !baseUrl.trim()) { setStep2Error('Base URL is required.'); return; }
     if (preset.requiresApiKey && !apiKey.trim())   { setStep2Error('API key is required.'); return; }
+    if (provider === 'nvidia' && !apiKey.startsWith('nvapi-')) {
+      setStep2Error('NVIDIA API keys must start with "nvapi-".');
+      return;
+    }
     setTestStatus('testing');
     setTestMessage('');
     setStep2Error(null);
@@ -217,6 +239,10 @@ export default function SignupPage() {
     if (!model.trim())                             { setStep2Error('Model name is required.');     return; }
     if (preset.requiresBaseUrl && !baseUrl.trim()) { setStep2Error('Base URL is required.');       return; }
     if (preset.requiresApiKey && !apiKey.trim())   { setStep2Error('API key is required.');        return; }
+    if (provider === 'nvidia' && !apiKey.startsWith('nvapi-')) {
+      setStep2Error('NVIDIA API keys must start with "nvapi-".');
+      return;
+    }
     setStep2Loading(true); setStep2Error(null);
     try {
       await api('/workspace/llm-config', {
@@ -236,7 +262,6 @@ export default function SignupPage() {
     }
   };
 
-  // ── Step 3 handler ──
   const handleFinish = () => router.push('/dashboard');
 
   // ────────────────────────────────────────────────────────────────
@@ -298,13 +323,11 @@ export default function SignupPage() {
               <div className="space-y-1.5">
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
-                  <Input
-                    id="password" name="password"
+                  <Input id="password" name="password"
                     type={showPw ? 'text' : 'password'}
                     placeholder="Min. 8 characters"
                     value={form.password} onChange={handleFormChange}
-                    autoComplete="new-password" className="pr-10"
-                  />
+                    autoComplete="new-password" className="pr-10" />
                   <button type="button" onClick={() => setShowPw(p => !p)}
                     aria-label={showPw ? 'Hide password' : 'Show password'}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -378,21 +401,36 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* Provider cards */}
-              <div className="grid grid-cols-2 gap-2">
-                {PROVIDER_PRESETS.map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => handleProviderChange(p.id)}
-                    className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all ${
+              {/* Provider cards — 3-col first row (ollama, anthropic, openai), 2-col second row (nvidia, custom) */}
+              <div className="grid grid-cols-3 gap-2">
+                {PROVIDER_PRESETS.slice(0, 3).map(p => (
+                  <button key={p.id} type="button" onClick={() => handleProviderChange(p.id)}
+                    className={`relative flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all ${
                       provider === p.id
                         ? 'border-aria-500 bg-aria-950/40 text-foreground'
                         : 'border-border bg-card text-muted-foreground hover:border-aria-800'
-                    }`}
-                  >
-                    <div className={`${ provider === p.id ? 'text-aria-400' : 'text-muted-foreground' }`}>
-                      {p.icon}
+                    }`}>
+                    <div className={provider === p.id ? 'text-aria-400' : 'text-muted-foreground'}>{p.icon}</div>
+                    <span className="text-xs font-semibold">{p.label}</span>
+                    <span className="text-[10px] leading-relaxed line-clamp-2">{p.description}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {PROVIDER_PRESETS.slice(3).map(p => (
+                  <button key={p.id} type="button" onClick={() => handleProviderChange(p.id)}
+                    className={`relative flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all ${
+                      provider === p.id
+                        ? 'border-aria-500 bg-aria-950/40 text-foreground'
+                        : 'border-border bg-card text-muted-foreground hover:border-aria-800'
+                    }`}>
+                    <div className="flex items-center gap-2 w-full">
+                      <div className={provider === p.id ? 'text-aria-400' : 'text-muted-foreground'}>{p.icon}</div>
+                      {p.badge && (
+                        <span className="ml-auto text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-aria-900/60 text-aria-400 border border-aria-800/50">
+                          {p.badge}
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs font-semibold">{p.label}</span>
                     <span className="text-[10px] leading-relaxed line-clamp-2">{p.description}</span>
@@ -400,74 +438,71 @@ export default function SignupPage() {
                 ))}
               </div>
 
-              {/* Base URL — shown for ollama + custom */}
-              {preset.requiresBaseUrl && (
+              {/* NVIDIA-specific info banner */}
+              {provider === 'nvidia' && (
+                <div className="rounded-md border border-aria-800/50 bg-aria-950/30 px-4 py-3 text-[11px] text-aria-300 space-y-1">
+                  <p className="font-semibold text-aria-400">About NVIDIA NIM</p>
+                  <p>NVIDIA NIM is a cloud API that serves Nemotron, Llama, and other models on NVIDIA infrastructure.</p>
+                  <p>
+                    Get a free API key at{' '}
+                    <a href="https://build.nvidia.com" target="_blank" rel="noopener noreferrer"
+                      className="underline text-aria-400 hover:text-aria-300">build.nvidia.com</a>
+                    {' '}→ Explore Models → any model → "Get API Key".
+                  </p>
+                  <p>Keys always start with <code className="font-mono bg-aria-900/60 px-1 rounded">nvapi-</code>.</p>
+                </div>
+              )}
+
+              {/* Base URL — shown for ollama + custom (and nvidia if user wants to override) */}
+              {(preset.requiresBaseUrl || (provider === 'nvidia' && baseUrl !== 'https://integrate.api.nvidia.com/v1')) && (
                 <div className="space-y-1.5">
                   <Label htmlFor="llm-base-url">Base URL</Label>
-                  <Input
-                    id="llm-base-url"
-                    value={baseUrl}
+                  <Input id="llm-base-url" value={baseUrl}
                     onChange={e => { setBaseUrl(e.target.value); setTestStatus('idle'); }}
-                    placeholder={preset.defaultBaseUrl || 'https://...'}
-                    autoComplete="off"
-                  />
+                    placeholder={preset.defaultBaseUrl || 'https://...'} autoComplete="off" />
                   <p className="text-[11px] text-muted-foreground">The root URL of your LLM server (no trailing slash).</p>
                 </div>
               )}
 
-              {/* API Key — shown for anthropic + openai + custom (optional) */}
+              {/* API Key — shown for anthropic, openai, nvidia, and custom (optional) */}
               {(preset.requiresApiKey || provider === 'custom') && (
                 <div className="space-y-1.5">
                   <Label htmlFor="llm-api-key">
                     API Key{!preset.requiresApiKey && <span className="text-muted-foreground ml-1">(optional)</span>}
                   </Label>
                   <div className="relative">
-                    <Input
-                      id="llm-api-key"
+                    <Input id="llm-api-key"
                       type={showApiKey ? 'text' : 'password'}
                       value={apiKey}
                       onChange={e => { setApiKey(e.target.value); setTestStatus('idle'); }}
-                      placeholder={preset.apiKeyPlaceholder}
-                      autoComplete="off"
-                      className="pr-10"
-                    />
+                      placeholder={preset.apiKeyPlaceholder} autoComplete="off" className="pr-10" />
                     <button type="button" onClick={() => setShowApiKey(s => !s)}
                       aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                       {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">Stored encrypted at rest. Never transmitted in plaintext.</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {preset.apiKeyHint ?? 'Stored encrypted at rest. Never transmitted in plaintext.'}
+                  </p>
                 </div>
               )}
 
               {/* Model name */}
               <div className="space-y-1.5">
                 <Label htmlFor="llm-model">Model</Label>
-                <Input
-                  id="llm-model"
-                  value={model}
+                <Input id="llm-model" value={model}
                   onChange={e => { setModel(e.target.value); setTestStatus('idle'); }}
-                  placeholder={preset.modelPlaceholder}
-                  autoComplete="off"
-                />
+                  placeholder={preset.modelPlaceholder} autoComplete="off" />
                 <p className="text-[11px] text-muted-foreground">
-                  {provider === 'ollama'
-                    ? 'Must be pulled locally first (ollama pull <model>).'
-                    : 'The model identifier as accepted by the API.'}
+                  {preset.modelHint ?? 'The model identifier as accepted by the API.'}
                 </p>
               </div>
 
               {/* Test connection */}
               <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleTestConnection}
-                  disabled={testStatus === 'testing'}
-                  className="shrink-0"
-                >
+                <Button type="button" variant="outline" size="sm"
+                  onClick={handleTestConnection} disabled={testStatus === 'testing'} className="shrink-0">
                   {testStatus === 'testing'
                     ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Testing...</>
                     : 'Test Connection'}

@@ -1,6 +1,6 @@
 import { pgTable, uuid, varchar, text, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 
-export const llmProviderEnum = pgEnum('llm_provider', ['ollama', 'anthropic', 'openai', 'custom']);
+export const llmProviderEnum = pgEnum('llm_provider', ['ollama', 'anthropic', 'openai', 'nvidia', 'custom']);
 
 export const workspaces = pgTable('workspaces', {
   id:                         uuid('id').primaryKey().defaultRandom(),
@@ -16,10 +16,6 @@ export const workspaces = pgTable('workspaces', {
   jiraUserEmail:              varchar('jira_user_email', { length: 255 }),
 
   // LLM / model configuration (set during onboarding Step 2)
-  // llmProvider: which provider to use for this workspace
-  // llmBaseUrl:  custom base URL (required for 'ollama' and 'custom', optional for others)
-  // llmApiKeyEncrypted: AES-256-GCM encrypted API key (null for local Ollama)
-  // llmModel:    the specific model name / slug to use
   llmProvider:          llmProviderEnum('llm_provider').default('ollama'),
   llmBaseUrl:           varchar('llm_base_url', { length: 500 }),
   llmApiKeyEncrypted:   text('llm_api_key_encrypted'),
