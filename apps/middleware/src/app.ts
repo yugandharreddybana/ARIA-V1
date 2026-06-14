@@ -30,10 +30,6 @@ import fleetRoutes from './routes/fleet.routes';
 import workspaceRoutes from './routes/workspace.routes';
 import onboardingRoutes from './routes/onboarding.routes';
 
-/**
- * Build the Express app. Factory pattern so tests (and the WS attach step
- * in `index.ts`) can construct an app instance without side-effects.
- */
 export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   const app = express();
 
@@ -44,22 +40,22 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use(requestLogger);
   app.use(rateLimit({
     windowMs: env.RATE_LIMIT_WINDOW_MS,
-    max:      env.RATE_LIMIT_MAX,
+    max: env.RATE_LIMIT_MAX,
     standardHeaders: true,
-    legacyHeaders:   false,
+    legacyHeaders: false,
   }));
   app.use(telemetryMiddleware);
 
   app.use('/metrics',              metricsRoutes);
   app.use('/api/health',           healthRoutes);
   app.use('/api/auth',             authRouter);
-  app.use('/api/onboarding',       onboardingRoutes);     // ⭐ 6-step onboarding wizard
+  app.use('/api/onboarding',       onboardingRoutes);     // ← 6-step onboarding wizard
   app.use('/api/projects',         projectsRoutes);
-  app.use('/api/projects',         skillsRoutes);         // /:projectId/skills and /:projectId/teams
+  app.use('/api/projects',         skillsRoutes);          // /:projectId/skills and /:projectId/teams
   app.use('/api/analysis/jobs',    analysisRoutes);
   app.use('/api/graph',            graphRoutes);
-  app.use('/api/tickets',          ticketsRoutes);        // human Kanban mutations
-  app.use('/api/agent/tickets',    agentTicketsRoutes);   // agent-driven Kanban mutations
+  app.use('/api/tickets',          ticketsRoutes);
+  app.use('/api/agent/tickets',    agentTicketsRoutes);
   app.use('/api/sessions',         sessionsRoutes);
   app.use('/api/ideas',            ideasRoutes);
   app.use('/api/ai',               aiRoutes);
@@ -70,7 +66,7 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/distill',          distillRoutes);
   app.use('/api/incidents',        incidentsRoutes);
   app.use('/api/fleet',            fleetRoutes);
-  app.use('/api/workspace',        workspaceRoutes);      // LLM config, workspace settings
+  app.use('/api/workspace',        workspaceRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
@@ -78,6 +74,5 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   return app;
 }
 
-// Backwards-compat default export
 const app = createApp();
 export default app;

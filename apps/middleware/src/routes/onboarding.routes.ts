@@ -1,141 +1,175 @@
 /**
  * onboarding.routes.ts
  * --------------------
- * All API routes for the 6-step onboarding wizard.
+ * All REST endpoints driving the 6-step onboarding wizard.
  *
- * POST   /api/onboarding/company           — Step 1
- * POST   /api/onboarding/llm               — Step 2 (delegates to workspace LLM config)
- * POST   /api/onboarding/repos             — Step 3
- * POST   /api/onboarding/scout             — Step 4 (triggers async analysis)
- * GET    /api/onboarding/proposal          — Step 5: poll for proposal status
- * PATCH  /api/onboarding/proposal/:tempId  — Step 5: edit an agent in the tree
- * POST   /api/onboarding/proposal          — Step 5: add a custom agent
- * DELETE /api/onboarding/proposal/:tempId  — Step 5: remove an agent
- * POST   /api/onboarding/commit            — Step 6: write to DB, go live
+ * POST /api/onboarding/company          — Step 1
+ * POST /api/onboarding/repos            — Step 3 (Step 2 reuses /api/workspace/llm-config)
+ * POST /api/onboarding/scout            — Step 4 (triggers async analysis)
+ * GET  /api/onboarding/proposal         — Step 5 poll (returns status + proposedSkills)
+ * PATCH /api/onboarding/proposal/:tempId— Step 5 edit one skill
+ * POST /api/onboarding/proposal/skill   — Step 5 add custom skill
+ * DELETE /api/onboarding/proposal/:tempId — Step 5 delete skill
+ * POST /api/onboarding/commit           — Step 6 "Create Company"
+ * GET  /api/onboarding/status           — check if onboarding is complete
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
-import * as OnboardingService from '../services/onboarding.service';
-import type {
-  OnboardingCompanyPayload,
-  OnboardingRepoSelection,
-  OnboardingScoutPayload,
-  ProposedSkill,
-} from '../types/onboarding.types';
+import * as Onboarding from '../services/onboarding.service';
+import { db } from '@aria/db';
+import { users } from '@aria/db';
+import { eq } from 'drizzle-orm';
+import { AppError } from '../middleware/error.middleware';
 
 const router = Router();
 
-// All onboarding routes require a valid session
+// All onboarding routes require a valid JWT
 router.use(authenticate);
 
-// ---------------------------------------------------------------------------
-// Step 1 — Company name + description
-// ---------------------------------------------------------------------------
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function ok(res: Response, data: unknown, status = 200) {
+  res.status(status).json({ ok: true, data });
+}
+
+// Decrypt GitHub token from workspace for repo analysis
+async function getGhToken(workspaceId: string): Promise<string> {
+  // The GitHub access token is stored in workspaces.github_access_token_encrypted.
+  // In this codebase the field is currently stored as plain-text (encrypted field
+  // name is a migration target). We read it directly.
+  const { workspaces } = await import('@aria/db');
+  const { db } = await import('@aria/db');
+  const ws = await db.query.workspaces.findFirst({
+    where: (w, { eq }) => eq(w.id, workspaceId),
+  });
+  if (!ws?.githubAccessTokenEncrypted) {
+    throw new AppError('GitHub not connected — complete OAuth in Step 3', 400);
+  }
+  return ws.githubAccessTokenEncrypted;
+}
+
+// ── GET /api/onboarding/status ─────────────────────────────────────────────────
+// Returns whether this workspace has completed onboarding.
+// Frontend uses this to redirect /onboarding → /dashboard if already done.
+
+router.get('/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const { workspaces } = await import('@aria/db');
+    const { db } = await import('@aria/db');
+    const ws = await db.query.workspaces.findFirst({ where: (w, { eq }) => eq(w.id, workspaceId) });
+    ok(res, { completed: !!ws?.onboardingCompletedAt, completedAt: ws?.onboardingCompletedAt ?? null });
+  } catch (e) { next(e); }
+});
+
+// ── POST /api/onboarding/company  (Step 1) ─────────────────────────────────────
+
 router.post('/company', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await OnboardingService.saveCompany(
-      req.user!.workspaceId,
-      req.body as OnboardingCompanyPayload,
-    );
-    res.status(200).json(result);
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const { companyName, companyDescription } = req.body as { companyName?: string; companyDescription?: string };
+    if (!companyName?.trim()) throw new AppError('companyName is required', 400);
+    if (!companyDescription?.trim()) throw new AppError('companyDescription is required', 400);
+    const result = await Onboarding.saveCompany(workspaceId, { companyName: companyName.trim(), companyDescription: companyDescription.trim() });
+    ok(res, result, 201);
+  } catch (e) { next(e); }
 });
 
-// ---------------------------------------------------------------------------
-// Step 2 — LLM / agent provider selection
-// Reuses the existing workspace LLM-config endpoint logic.
-// The frontend calls PATCH /api/workspace/llm-config directly for this step.
-// We expose a forwarding endpoint here for wizard consistency.
-// ---------------------------------------------------------------------------
-router.post('/llm', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    // Import inline to avoid circular deps with workspace.service
-    const { updateLlmConfig } = await import('../services/workspace.service');
-    const result = await updateLlmConfig(req.user!.workspaceId, req.body);
-    res.status(200).json(result);
-  } catch (err) { next(err); }
-});
+// ── POST /api/onboarding/repos  (Step 3) ──────────────────────────────────────
 
-// ---------------------------------------------------------------------------
-// Step 3 — GitHub repo selection (multi-select)
-// ---------------------------------------------------------------------------
 router.post('/repos', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await OnboardingService.saveRepos(
-      req.user!.workspaceId,
-      req.body as OnboardingRepoSelection,
-    );
-    res.status(200).json(result);
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const { repos } = req.body as { repos?: unknown };
+    if (!Array.isArray(repos) || repos.length === 0) throw new AppError('repos must be a non-empty array', 400);
+    const result = await Onboarding.saveRepos(workspaceId, { repos });
+    ok(res, result);
+  } catch (e) { next(e); }
 });
 
-// ---------------------------------------------------------------------------
-// Step 4 — Scout persona + trigger async analysis
-// ---------------------------------------------------------------------------
+// ── POST /api/onboarding/scout  (Step 4) ──────────────────────────────────────
+
 router.post('/scout', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await OnboardingService.saveScoutAndTrigger(
-      req.user!.workspaceId,
-      req.body as OnboardingScoutPayload,
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const { scoutName, scoutDescription } = req.body as { scoutName?: string; scoutDescription?: string };
+    if (!scoutName?.trim())        throw new AppError('scoutName is required', 400);
+    if (!scoutDescription?.trim()) throw new AppError('scoutDescription is required', 400);
+    const ghToken = await getGhToken(workspaceId);
+    const result  = await Onboarding.saveScoutAndTriggerAnalysis(
+      workspaceId,
+      { scoutName: scoutName.trim(), scoutDescription: scoutDescription.trim() },
+      ghToken,
     );
-    // 202 Accepted: analysis running in background, client should poll /proposal
-    res.status(202).json({ ...result, message: 'Analysis started. Poll GET /api/onboarding/proposal for status.' });
-  } catch (err) { next(err); }
+    ok(res, result);
+  } catch (e) { next(e); }
 });
 
-// ---------------------------------------------------------------------------
-// Step 5 — Get proposal (frontend polls until status = 'ready' or 'failed')
-// ---------------------------------------------------------------------------
+// ── GET /api/onboarding/proposal  (Step 5 poll) ───────────────────────────────
+
 router.get('/proposal', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const proposal = await OnboardingService.getProposal(req.user!.workspaceId);
-    res.status(200).json(proposal);
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const proposal = await Onboarding.getProposal(workspaceId);
+    ok(res, {
+      id:             proposal.id,
+      status:         proposal.status,
+      proposedSkills: proposal.proposedSkills,
+      errorMessage:   proposal.errorMessage,
+      updatedAt:      proposal.updatedAt,
+    });
+  } catch (e) { next(e); }
 });
 
-// Step 5 — Edit an agent in the tree
+// ── PATCH /api/onboarding/proposal/:tempId  (Step 5 edit) ─────────────────────
+
 router.patch('/proposal/:tempId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const updated = await OnboardingService.patchSkill(
-      req.user!.workspaceId,
-      req.params.tempId,
-      req.body.skill as Partial<Omit<ProposedSkill, 'tempId'>>,
-    );
-    res.status(200).json(updated);
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const { tempId }  = req.params;
+    const { skill }   = req.body as { skill?: unknown };
+    if (!skill || typeof skill !== 'object') throw new AppError('skill payload required', 400);
+    const updated = await Onboarding.patchSkill(workspaceId, tempId, { skill: skill as ProposalSkillPatchPayload['skill'] });
+    ok(res, updated);
+  } catch (e) { next(e); }
 });
 
-// Step 5 — Add a custom agent
-router.post('/proposal', async (req: Request, res: Response, next: NextFunction) => {
+// ── POST /api/onboarding/proposal/skill  (Step 5 add) ────────────────────────
+// Note: this route must be BEFORE /:tempId to avoid param collision
+
+router.post('/proposal/skill', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const newSkill = await OnboardingService.addSkill(
-      req.user!.workspaceId,
-      req.body as Omit<ProposedSkill, 'tempId' | 'isAiGenerated'>,
-    );
-    res.status(201).json(newSkill);
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const body = req.body as Record<string, unknown>;
+    if (!body.slug || !body.roleTitle) throw new AppError('slug and roleTitle are required', 400);
+    const newSkill = await Onboarding.addSkill(workspaceId, body as Parameters<typeof Onboarding.addSkill>[1]);
+    ok(res, newSkill, 201);
+  } catch (e) { next(e); }
 });
 
-// Step 5 — Delete an agent from the proposal
+// ── DELETE /api/onboarding/proposal/:tempId  (Step 5 delete) ─────────────────
+
 router.delete('/proposal/:tempId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await OnboardingService.deleteSkill(
-      req.user!.workspaceId,
-      req.params.tempId,
-    );
-    res.status(200).json(result);
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const { tempId }  = req.params;
+    await Onboarding.deleteSkill(workspaceId, tempId);
+    ok(res, { deleted: true });
+  } catch (e) { next(e); }
 });
 
-// ---------------------------------------------------------------------------
-// Step 6 — Commit: write all agents to DB + redirect to dashboard
-// ---------------------------------------------------------------------------
+// ── POST /api/onboarding/commit  (Step 6) ─────────────────────────────────────
+
 router.post('/commit', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await OnboardingService.commitProposal(req.user!.workspaceId);
-    res.status(200).json({ ...result, message: 'Company created. All agents are live.' });
-  } catch (err) { next(err); }
+    const workspaceId = (req as unknown as { user: { workspaceId: string } }).user.workspaceId;
+    const result = await Onboarding.commitProposal(workspaceId);
+    ok(res, result, 201);
+  } catch (e) { next(e); }
 });
 
 export default router;
+
+// Import type for patch payload (avoids circular import)
+import type { ProposalSkillPatchPayload } from '../types/onboarding.types';

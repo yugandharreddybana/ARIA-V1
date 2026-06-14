@@ -1,263 +1,251 @@
 /**
  * repoAnalysis.service.ts
  * -----------------------
- * Fetches each connected GitHub repo's file tree, README, package.json,
- * and key config files via the GitHub REST API, then synthesises a
- * CodebaseProfile that the skillFactory uses to decide which agents to
- * generate and what instructions to write for them.
+ * Step 4 of onboarding: the "Aria Scout" agent.
  *
- * Uses the workspace's decrypted GitHub access token (set during Step 3
- * OAuth). Falls back gracefully when files are missing.
+ * Reads each connected GitHub repo (file tree + README + package.json +
+ * key config files) using the user's stored GitHub OAuth token, then
+ * builds a CodebaseProfile that the skillFactory uses to decide which
+ * agents to create and what instructions to write for each.
  */
 
 import { db } from '@aria/db';
 import { workspaces, projectRepos } from '@aria/db';
 import { eq } from 'drizzle-orm';
-import type { CodebaseProfile, RepoSignals } from '../types/onboarding.types';
 import { AppError } from '../middleware/error.middleware';
-import { decrypt } from '../utils/crypto.utils';
+import type { RepoSignals, CodebaseProfile, SelectedRepo } from '../types/onboarding.types';
 
-// ---- GitHub REST helpers --------------------------------------------------
+// ── GitHub API helpers ──────────────────────────────────────────────────────
 
-interface GHTreeItem { path: string; type: string; }
-interface GHTree    { tree: GHTreeItem[]; }
+const GH = 'https://api.github.com';
 
-async function ghFetch<T>(url: string, token: string): Promise<T | null> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept:        'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
+type GhHeaders = { Authorization: string; Accept: string };
+
+function ghHeaders(token: string): GhHeaders {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+  };
 }
 
-async function getFileContent(fullName: string, path: string, token: string): Promise<string | null> {
-  const data = await ghFetch<{ content?: string; encoding?: string }>(
-    `https://api.github.com/repos/${fullName}/contents/${path}`,
-    token,
-  );
-  if (!data?.content || data.encoding !== 'base64') return null;
-  return Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf-8');
+async function fetchText(url: string, headers: GhHeaders): Promise<string> {
+  const res = await fetch(url, { headers });
+  if (!res.ok) return '';
+  return res.text();
 }
 
-async function getRepoTree(fullName: string, branch: string, token: string): Promise<string[]> {
-  const tree = await ghFetch<GHTree>(
-    `https://api.github.com/repos/${fullName}/git/trees/${branch}?recursive=1`,
-    token,
-  );
-  return tree?.tree.map(i => i.path) ?? [];
+async function fetchJson<T>(url: string, headers: GhHeaders): Promise<T | null> {
+  const res = await fetch(url, { headers });
+  if (!res.ok) return null;
+  return res.json() as Promise<T>;
 }
 
-// ---- Detection logic -------------------------------------------------------
+// ── File-tree entry returned by GET /repos/{owner}/{repo}/git/trees/{sha}?recursive=1 ─
 
-const FRONTEND_MARKERS = [
-  'react', 'next', 'vue', 'nuxt', 'angular', 'svelte', 'vite',
-  '@remix-run', 'gatsby', 'astro',
-];
-const BACKEND_MARKERS = [
-  'express', 'fastify', 'nestjs', '@nestjs', 'koa', 'hapi',
-  'django', 'flask', 'fastapi', 'rails', 'spring',
-  'drizzle-orm', 'prisma', 'sequelize', 'typeorm',
-];
-const AIML_MARKERS = [
-  'torch', 'tensorflow', 'transformers', 'langchain',
-  'openai', 'anthropic', '@anthropic-ai', 'huggingface',
-  'sentence-transformers', 'llama', 'ollama',
-];
-const INFRA_FILE_PATTERNS = [
-  'Dockerfile', 'docker-compose', 'docker-compose.yml', 'docker-compose.yaml',
-];
-const CICD_PATH_PATTERNS = [
-  '.github/workflows', '.gitlab-ci', 'Jenkinsfile', 'circle.yml',
-  '.circleci', 'azure-pipelines',
-];
-const CLOUD_MARKERS = [
-  'aws-cdk', '@aws-cdk', 'serverless', '@pulumi', 'terraform',
-  'gcp', '@google-cloud', 'azure',
-];
-const MOBILE_MARKERS = [
-  'react-native', 'expo', 'flutter', '@capacitor', 'ionic',
-];
+interface GhTreeEntry { path: string; type: 'blob' | 'tree'; }
+interface GhTree      { tree: GhTreeEntry[]; }
+interface GhRepo      { description: string | null; default_branch: string; language: string | null; }
+interface GhContent   { content?: string; encoding?: string; }
 
-function detectFromPackageJson(raw: string): {
-  hasFrontend: boolean; hasBackend: boolean; hasAiMl: boolean;
-  hasCloud: boolean; hasMobile: boolean; frameworks: string[];
+// ── Signal detection ──────────────────────────────────────────────────────────────
+
+const FRONTEND_DEPS  = ['react', 'vue', 'next', '@angular', 'svelte', 'nuxt', 'remix', 'gatsby', 'vite'];
+const BACKEND_DEPS   = ['express', 'fastify', 'nestjs', '@nestjs', 'hono', 'koa', 'django', 'flask', 'rails', 'spring'];
+const AIML_DEPS      = ['torch', 'tensorflow', 'transformers', 'langchain', 'openai', 'anthropic', '@anthropic', 'huggingface', 'diffusers', 'sentence-transformers'];
+const CLOUD_FILES    = ['serverless.yml', 'serverless.yaml', 'samconfig.toml', 'cdk.json', 'pulumi.yaml', 'azure-pipelines.yml'];
+const CLOUD_DIRS     = ['terraform', 'infra', 'infrastructure', 'cdk', 'pulumi', '.aws'];
+const MOBILE_DEPS    = ['react-native', 'expo', 'flutter', 'capacitor', 'ionic'];
+
+function detectFromPaths(paths: string[]): {
+  hasInfra: boolean;
+  hasCiCd:  boolean;
+  hasCloud: boolean;
+  hasMobile: boolean;
 } {
-  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; name?: string } = {};
-  try { pkg = JSON.parse(raw); } catch { /* ignore malformed */ }
-  const allDeps = [
-    ...Object.keys(pkg.dependencies  ?? {}),
-    ...Object.keys(pkg.devDependencies ?? {}),
-  ].map(d => d.toLowerCase());
+  const pathSet = new Set(paths.map(p => p.toLowerCase()));
+  const hasDockerfile  = pathSet.has('dockerfile') || pathSet.has('docker-compose.yml') || pathSet.has('docker-compose.yaml');
+  const hasCiCd        = paths.some(p => p.startsWith('.github/workflows') || p.includes('gitlab-ci') || p === 'Jenkinsfile' || p.includes('circleci'));
+  const hasCloud       = paths.some(p => CLOUD_FILES.includes(p) || CLOUD_DIRS.some(d => p.startsWith(d + '/')));
+  const hasMobile      = paths.some(p => p.includes('android') || p.includes('ios') || p === 'pubspec.yaml');
 
-  const hit = (markers: string[]) => markers.some(m => allDeps.some(d => d.includes(m)));
+  return { hasInfra: hasDockerfile, hasCiCd, hasCloud, hasMobile };
+}
 
+function detectFromDeps(deps: Record<string, string>): {
+  hasFrontend: boolean;
+  hasBackend:  boolean;
+  hasAiMl:     boolean;
+  hasMobile:   boolean;
+  frameworks:  string[];
+} {
+  const keys = Object.keys(deps).map(k => k.toLowerCase());
+  const hasFrontend = FRONTEND_DEPS.some(d => keys.some(k => k.includes(d)));
+  const hasBackend  = BACKEND_DEPS.some(d => keys.some(k => k.includes(d)));
+  const hasAiMl     = AIML_DEPS.some(d => keys.some(k => k.includes(d)));
+  const hasMobile   = MOBILE_DEPS.some(d => keys.some(k => k.includes(d)));
+
+  // Build a human-readable frameworks list for the LLM prompt
   const frameworks: string[] = [];
-  if (allDeps.some(d => d.includes('next')))        frameworks.push('Next.js');
-  if (allDeps.some(d => d.includes('react')))       frameworks.push('React');
-  if (allDeps.some(d => d.includes('vue')))         frameworks.push('Vue.js');
-  if (allDeps.some(d => d.includes('svelte')))      frameworks.push('Svelte');
-  if (allDeps.some(d => d.includes('angular')))     frameworks.push('Angular');
-  if (allDeps.some(d => d.includes('express')))     frameworks.push('Express');
-  if (allDeps.some(d => d.includes('fastify')))     frameworks.push('Fastify');
-  if (allDeps.some(d => d.includes('nestjs') || d.includes('@nestjs'))) frameworks.push('NestJS');
-  if (allDeps.some(d => d.includes('drizzle')))     frameworks.push('Drizzle ORM');
-  if (allDeps.some(d => d.includes('prisma')))      frameworks.push('Prisma');
-  if (allDeps.some(d => d.includes('langchain')))   frameworks.push('LangChain');
-  if (allDeps.some(d => d.includes('openai')))      frameworks.push('OpenAI SDK');
-  if (allDeps.some(d => d.includes('react-native'))) frameworks.push('React Native');
-  if (allDeps.some(d => d.includes('expo')))        frameworks.push('Expo');
-  if (allDeps.some(d => d.includes('terraform')))   frameworks.push('Terraform');
-  if (allDeps.some(d => d.includes('aws-cdk') || d.includes('@aws-cdk'))) frameworks.push('AWS CDK');
+  if (keys.some(k => k.includes('next')))       frameworks.push('Next.js');
+  else if (keys.some(k => k.includes('react'))) frameworks.push('React');
+  if (keys.some(k => k.includes('vue')))        frameworks.push('Vue');
+  if (keys.some(k => k.includes('svelte')))     frameworks.push('Svelte');
+  if (keys.some(k => k.includes('express')))    frameworks.push('Express');
+  if (keys.some(k => k.includes('fastify')))    frameworks.push('Fastify');
+  if (keys.some(k => k.includes('nestjs') || k.includes('@nestjs'))) frameworks.push('NestJS');
+  if (keys.some(k => k.includes('hono')))       frameworks.push('Hono');
+  if (keys.some(k => k.includes('drizzle')))    frameworks.push('Drizzle ORM');
+  if (keys.some(k => k.includes('prisma')))     frameworks.push('Prisma');
+  if (keys.some(k => k.includes('langchain')))  frameworks.push('LangChain');
+  if (keys.some(k => k.includes('openai')))     frameworks.push('OpenAI SDK');
+  if (keys.some(k => k.includes('anthropic')))  frameworks.push('Anthropic SDK');
+  if (keys.some(k => k.includes('torch')))      frameworks.push('PyTorch');
+  if (keys.some(k => k.includes('expo')))       frameworks.push('Expo');
+  if (keys.some(k => k.includes('react-native'))) frameworks.push('React Native');
+
+  return { hasFrontend, hasBackend, hasAiMl, hasMobile, frameworks };
+}
+
+// ── Analyse a single repo ─────────────────────────────────────────────────────────────
+
+async function analyseRepo(fullName: string, branch: string, ghToken: string): Promise<RepoSignals> {
+  const headers = ghHeaders(ghToken);
+  const [owner, repo] = fullName.split('/');
+
+  // 1. Repo metadata (description + default language)
+  const ghRepo = await fetchJson<GhRepo>(`${GH}/repos/${fullName}`, headers);
+  const primaryLang = ghRepo?.language ?? 'Unknown';
+  const repoDesc    = ghRepo?.description ?? '';
+
+  // 2. File tree (recursive, flat list of all paths)
+  const treeData = await fetchJson<GhTree>(
+    `${GH}/repos/${fullName}/git/trees/${branch}?recursive=1`,
+    headers,
+  );
+  const paths = (treeData?.tree ?? []).filter(e => e.type === 'blob').map(e => e.path);
+
+  // 3. README (first 600 chars)
+  let readmeText = '';
+  const readmePath = paths.find(p => /^readme\.(md|txt|rst)$/i.test(p));
+  if (readmePath) {
+    const raw = await fetchText(
+      `https://raw.githubusercontent.com/${fullName}/${branch}/${readmePath}`,
+      headers,
+    );
+    readmeText = raw.slice(0, 600);
+  }
+
+  // 4. package.json (root level only)
+  let allDeps: Record<string, string> = {};
+  if (paths.includes('package.json')) {
+    const content = await fetchJson<GhContent>(
+      `${GH}/repos/${fullName}/contents/package.json?ref=${branch}`,
+      headers,
+    );
+    if (content?.content && content.encoding === 'base64') {
+      try {
+        const parsed = JSON.parse(Buffer.from(content.content, 'base64').toString('utf-8'));
+        allDeps = { ...parsed.dependencies, ...parsed.devDependencies };
+      } catch {
+        // malformed package.json — ignore
+      }
+    }
+  }
+
+  // 5. requirements.txt (Python)
+  let requirementsTxt = '';
+  if (paths.includes('requirements.txt')) {
+    requirementsTxt = await fetchText(
+      `https://raw.githubusercontent.com/${fullName}/${branch}/requirements.txt`,
+      headers,
+    );
+  }
+  // Treat Python requirement names as pseudo-deps
+  const pythonDeps = requirementsTxt
+    .split('\n')
+    .map(l => l.split('==')[0].split('>=')[0].trim().toLowerCase())
+    .filter(Boolean);
+  for (const dep of pythonDeps) allDeps[dep] = '*';
+
+  // 6. Run detection
+  const pathSignals = detectFromPaths(paths);
+  const depSignals  = detectFromDeps(allDeps);
+
+  const description = (readmeText || repoDesc).trim();
 
   return {
-    hasFrontend: hit(FRONTEND_MARKERS),
-    hasBackend:  hit(BACKEND_MARKERS),
-    hasAiMl:     hit(AIML_MARKERS),
-    hasCloud:    hit(CLOUD_MARKERS),
-    hasMobile:   hit(MOBILE_MARKERS),
-    frameworks,
+    repoName:    repo,
+    fullName,
+    hasFrontend: depSignals.hasFrontend,
+    hasBackend:  depSignals.hasBackend,
+    hasAiMl:     depSignals.hasAiMl,
+    hasInfra:    pathSignals.hasInfra,
+    hasCiCd:     pathSignals.hasCiCd,
+    hasCloud:    pathSignals.hasCloud,
+    hasMobile:   depSignals.hasMobile || pathSignals.hasMobile,
+    primaryLang,
+    frameworks:  depSignals.frameworks,
+    description,
   };
 }
 
-function detectFromRequirementsTxt(raw: string): { hasAiMl: boolean; hasBackend: boolean; frameworks: string[] } {
-  const lines = raw.toLowerCase().split('\n');
-  const frameworks: string[] = [];
-  const hasAiMl = AIML_MARKERS.some(m => lines.some(l => l.includes(m)));
-  const hasBackend = ['django', 'flask', 'fastapi'].some(m => {
-    const hit = lines.some(l => l.includes(m));
-    if (hit) frameworks.push(m.charAt(0).toUpperCase() + m.slice(1));
-    return hit;
-  });
-  return { hasAiMl, hasBackend, frameworks };
-}
+// ── Public API ───────────────────────────────────────────────────────────────────
 
-function detectLang(paths: string[]): string {
-  const counts: Record<string, number> = {};
-  for (const p of paths) {
-    const ext = p.split('.').pop()?.toLowerCase() ?? '';
-    if (['ts', 'tsx'].includes(ext))  counts['TypeScript'] = (counts['TypeScript'] ?? 0) + 1;
-    else if (['js', 'jsx'].includes(ext)) counts['JavaScript'] = (counts['JavaScript'] ?? 0) + 1;
-    else if (ext === 'py')            counts['Python']     = (counts['Python']     ?? 0) + 1;
-    else if (ext === 'go')            counts['Go']         = (counts['Go']         ?? 0) + 1;
-    else if (ext === 'rs')            counts['Rust']       = (counts['Rust']       ?? 0) + 1;
-    else if (ext === 'java')          counts['Java']       = (counts['Java']       ?? 0) + 1;
-    else if (ext === 'rb')            counts['Ruby']       = (counts['Ruby']       ?? 0) + 1;
-  }
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  return sorted[0]?.[0] ?? 'Unknown';
-}
+/**
+ * buildCodebaseProfile
+ * --------------------
+ * Analyses all repos connected to a workspace and returns a
+ * CodebaseProfile that the skillFactory uses to build the agent team.
+ *
+ * @param workspaceId - the workspace whose repos we read
+ * @param projectId   - the project whose projectRepos rows we read
+ * @param ghToken     - decrypted GitHub OAuth access token
+ */
+export async function buildCodebaseProfile(
+  repos: SelectedRepo[],
+  ghToken: string,
+): Promise<CodebaseProfile> {
+  if (repos.length === 0) throw new AppError('No repos provided for analysis', 400);
 
-// ---- Main export -----------------------------------------------------------
+  // Analyse all repos in parallel
+  const repoSignals = await Promise.all(
+    repos.map(r => analyseRepo(r.fullName, r.branch || 'main', ghToken)),
+  );
 
-export async function analyseRepos(workspaceId: string, projectId: string): Promise<CodebaseProfile> {
-  // 1. Load workspace to get GitHub token
-  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
-  if (!ws) throw new AppError('Workspace not found', 404);
-  if (!ws.githubAccessTokenEncrypted) throw new AppError('GitHub not connected — complete Step 3 first', 400);
-
-  const ghToken = decrypt(ws.githubAccessTokenEncrypted);
-
-  // 2. Load all repos for this project
-  const repos = await db.query.projectRepos.findMany({ where: eq(projectRepos.projectId, projectId) });
-  if (!repos.length) throw new AppError('No repos connected — complete Step 3 first', 400);
-
-  // 3. Analyse each repo
-  const repoSignals: RepoSignals[] = await Promise.all(
-    repos.map(async (repo) => {
-      // Derive fullName from repoUrl: https://github.com/owner/name -> owner/name
-      const fullName = repo.repoUrl
-        .replace('https://github.com/', '')
-        .replace(/\.git$/, '');
-
-      const [paths, readmeRaw, pkgRaw, reqsRaw] = await Promise.all([
-        getRepoTree(fullName, repo.branch, ghToken),
-        getFileContent(fullName, 'README.md', ghToken)
-          .then(r => r ?? getFileContent(fullName, 'readme.md', ghToken)),
-        getFileContent(fullName, 'package.json', ghToken),
-        getFileContent(fullName, 'requirements.txt', ghToken),
-      ]);
-
-      // File-tree based detection
-      const hasInfra = INFRA_FILE_PATTERNS.some(p => paths.some(f => f.toLowerCase().includes(p.toLowerCase())));
-      const hasCiCd  = CICD_PATH_PATTERNS.some(p  => paths.some(f => f.startsWith(p)));
-
-      let hasFrontend = false, hasBackend = false, hasAiMl = false;
-      let hasCloud = false, hasMobile = false;
-      const frameworks: string[] = [];
-
-      if (pkgRaw) {
-        const r = detectFromPackageJson(pkgRaw);
-        hasFrontend = hasFrontend || r.hasFrontend;
-        hasBackend  = hasBackend  || r.hasBackend;
-        hasAiMl     = hasAiMl    || r.hasAiMl;
-        hasCloud    = hasCloud    || r.hasCloud;
-        hasMobile   = hasMobile   || r.hasMobile;
-        frameworks.push(...r.frameworks);
-      }
-
-      if (reqsRaw) {
-        const r = detectFromRequirementsTxt(reqsRaw);
-        hasAiMl    = hasAiMl    || r.hasAiMl;
-        hasBackend  = hasBackend  || r.hasBackend;
-        frameworks.push(...r.frameworks);
-      }
-
-      const primaryLang = detectLang(paths);
-      const description = (readmeRaw ?? '').slice(0, 500);
-
-      return {
-        repoName: repo.repoName,
-        hasFrontend, hasBackend, hasAiMl,
-        hasInfra, hasCiCd, hasCloud, hasMobile,
-        primaryLang,
-        frameworks: [...new Set(frameworks)],
-        description,
-      } satisfies RepoSignals;
+  // Aggregate boolean flags
+  const agg = repoSignals.reduce(
+    (acc, r) => ({
+      hasFrontend: acc.hasFrontend || r.hasFrontend,
+      hasBackend:  acc.hasBackend  || r.hasBackend,
+      hasAiMl:     acc.hasAiMl    || r.hasAiMl,
+      hasInfra:    acc.hasInfra   || r.hasInfra,
+      hasCiCd:     acc.hasCiCd    || r.hasCiCd,
+      hasCloud:    acc.hasCloud    || r.hasCloud,
+      hasMobile:   acc.hasMobile   || r.hasMobile,
     }),
+    { hasFrontend: false, hasBackend: false, hasAiMl: false, hasInfra: false, hasCiCd: false, hasCloud: false, hasMobile: false },
   );
 
-  // 4. Aggregate
-  const profile: CodebaseProfile = {
-    repos:         repoSignals,
-    hasFrontend:   repoSignals.some(r => r.hasFrontend),
-    hasBackend:    repoSignals.some(r => r.hasBackend),
-    hasAiMl:       repoSignals.some(r => r.hasAiMl),
-    hasInfra:      repoSignals.some(r => r.hasInfra),
-    hasCiCd:       repoSignals.some(r => r.hasCiCd),
-    hasCloud:      repoSignals.some(r => r.hasCloud),
-    hasMobile:     repoSignals.some(r => r.hasMobile),
-    allFrameworks: [...new Set(repoSignals.flatMap(r => r.frameworks))],
-    allLangs:      [...new Set(repoSignals.map(r => r.primaryLang))],
-    projectSummary: buildSummary(repoSignals),
-  };
+  const allFrameworks = [...new Set(repoSignals.flatMap(r => r.frameworks))];
+  const allLangs      = [...new Set(repoSignals.map(r => r.primaryLang).filter(Boolean))];
 
-  return profile;
-}
+  // Build a 3-5 sentence project summary for the LLM prompt
+  const repoDescs = repoSignals.map(r => `${r.repoName}: ${r.description}`).filter(d => d.length > 10).join(' | ');
+  const stackLine  = allFrameworks.length > 0 ? `The tech stack includes ${allFrameworks.join(', ')}.` : '';
+  const layerLine  = [
+    agg.hasFrontend ? 'frontend UI' : '',
+    agg.hasBackend  ? 'backend API' : '',
+    agg.hasAiMl     ? 'AI/ML components' : '',
+    agg.hasMobile   ? 'mobile app' : '',
+    agg.hasInfra || agg.hasCiCd || agg.hasCloud ? 'infrastructure/DevOps' : '',
+  ].filter(Boolean).join(', ');
 
-function buildSummary(signals: RepoSignals[]): string {
-  const repoNames = signals.map(r => r.repoName).join(', ');
-  const langs     = [...new Set(signals.map(r => r.primaryLang))].join(', ');
-  const fws       = [...new Set(signals.flatMap(r => r.frameworks))].slice(0, 5).join(', ');
-  const layers: string[] = [];
-  if (signals.some(r => r.hasFrontend)) layers.push('frontend');
-  if (signals.some(r => r.hasBackend))  layers.push('backend');
-  if (signals.some(r => r.hasAiMl))    layers.push('AI/ML');
-  if (signals.some(r => r.hasInfra))   layers.push('containerised infrastructure');
-  if (signals.some(r => r.hasCloud))   layers.push('cloud/IaC');
-  const desc = signals[0]?.description ? ` ${signals[0].description.slice(0, 200).trim()}.` : '';
-  return (
-    `The project consists of ${signals.length} repo(s): ${repoNames}. ` +
-    `Primary language(s): ${langs}. ` +
-    `Key frameworks: ${fws || 'none detected'}. ` +
-    `Detected layers: ${layers.join(', ') || 'general purpose'}.` +
-    desc
-  );
+  const projectSummary = [
+    repoDescs ? `Project overview: ${repoDescs}.` : '',
+    stackLine,
+    layerLine ? `The project has ${layerLine} layers.` : '',
+    `Primary language(s): ${allLangs.join(', ') || 'unknown'}.`,
+  ].filter(Boolean).join(' ');
+
+  return { repos: repoSignals, ...agg, allFrameworks, allLangs, projectSummary };
 }
