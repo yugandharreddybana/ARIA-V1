@@ -27,20 +27,19 @@ export const skills = pgTable('skills', {
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   teamId:    uuid('team_id').references(() => teams.id),
 
-  // ── Org hierarchy ──────────────────────────────────────────────────────────
-  // null reportingManagerId = top of the tree (CEO)
-  // FK to skills.id enforced in Drizzle migration via ALTER TABLE
-  reportingManagerId: uuid('reporting_manager_id'),
-  // 1 = CEO  2 = CTO/CPO  3 = Director/Lead  4 = Scrum Master  5 = IC
+  // ── Reporting hierarchy ────────────────────────────────────────────────────
+  // reportingManagerId = null  →  this agent is at the top (CEO)
+  // hierarchyLevel:  1=CEO  2=C-Suite  3=Director/Lead  4=Scrum Master  5=IC
+  reportingManagerId: uuid('reporting_manager_id'),   // self-ref FK enforced in migration
   hierarchyLevel:     integer('hierarchy_level').notNull().default(5),
   department:         varchar('department', { length: 100 }),
 
   // ── Identity ───────────────────────────────────────────────────────────────
-  slug:      varchar('slug', { length: 100 }).notNull(),
-  realName:  varchar('real_name', { length: 255 }).notNull(),
+  slug:      varchar('slug',       { length: 100 }).notNull(),
+  realName:  varchar('real_name',  { length: 255 }).notNull(),
   roleTitle: varchar('role_title', { length: 255 }).notNull(),
 
-  // ── Risk & lifecycle ───────────────────────────────────────────────────────
+  // ── Risk & status ──────────────────────────────────────────────────────────
   riskClass: riskClassEnum('risk_class').notNull().default('B'),
   status:    skillStatusEnum('status').notNull().default('active'),
   idleMode:  idleModeEnum('idle_mode').notNull().default('learning'),
@@ -50,9 +49,7 @@ export const skills = pgTable('skills', {
   ownedRepoPaths:  jsonb('owned_repo_paths').notNull().default([]),
   triggerKeywords: jsonb('trigger_keywords').notNull().default([]),
 
-  // ── Instructions ─────────────────────────────────────────────────────────
-  // description = 1-2 line summary shown in org tree node
-  // instructions = full AI-written system prompt tailored to this codebase
+  // ── Instructions (AI-written, tailored to this project's codebase) ────────
   description:  text('description').notNull().default(''),
   instructions: text('instructions').notNull().default(''),
   skillMdPath:  varchar('skill_md_path', { length: 500 }),
@@ -61,7 +58,7 @@ export const skills = pgTable('skills', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('skills_project_idx').on(t.projectId) }));
 
-// ── Team members (skills ↔ teams many-to-many) ────────────────────────────────
+// ── Team members (many-to-many skills ↔ teams) ────────────────────────────────
 export const teamMembers = pgTable('team_members', {
   id:        uuid('id').primaryKey().defaultRandom(),
   teamId:    uuid('team_id').notNull().references(() => teams.id,   { onDelete: 'cascade' }),
@@ -75,12 +72,12 @@ export const skillsRelations = relations(skills, ({ one, many }) => ({
   project:          one(projects,  { fields: [skills.projectId],          references: [projects.id] }),
   team:             one(teams,     { fields: [skills.teamId],             references: [teams.id] }),
   reportingManager: one(skills,    { fields: [skills.reportingManagerId], references: [skills.id], relationName: 'reports_to' }),
-  directReports:    many(skills,   { relationName: 'reports_to' }),
+  directReports:    many(skills,                                                                   { relationName: 'reports_to' }),
   teamMemberships:  many(teamMembers),
 }));
 
 export const teamsRelations = relations(teams, ({ one, many }) => ({
-  project: one(projects, { fields: [teams.projectId], references: [projects.id] }),
+  project: one(projects,    { fields: [teams.projectId], references: [projects.id] }),
   members: many(teamMembers),
 }));
 
