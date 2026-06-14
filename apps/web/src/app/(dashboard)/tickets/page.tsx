@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/auth.context';
+import { useAriaSocket } from '@/hooks/useAriaSocket';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { Ticket, TicketType, TicketStatus } from '@aria/shared';
-import { Plus, Loader2, AlertCircle, Ticket as TicketIcon } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, Ticket as TicketIcon, Zap } from 'lucide-react';
 
 // All 8 statuses from DB schema ticketStatusEnum — must be exhaustive
 const COLUMNS: { key: TicketStatus; label: string; color: string }[] = [
@@ -155,13 +156,23 @@ interface TicketCardProps {
 function TicketCard({ ticket, onStatusChange }: TicketCardProps) {
   const typeColor = TYPE_COLORS[ticket.type as TicketType] ?? 'bg-muted text-muted-foreground';
   const next = NEXT_STATUS[ticket.status];
+  const isAgentCreated = !!ticket.createdBySkillId;
+
   return (
     <div
       className="rounded-lg border border-border bg-card p-3 space-y-2 hover:border-aria-500/40 transition-colors"
       data-testid="ticket-card"
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium leading-snug">{ticket.title}</p>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {isAgentCreated && (
+            <Zap
+              className="h-3 w-3 text-aria-400 shrink-0"
+              aria-label="Created by agent"
+            />
+          )}
+          <p className="text-sm font-medium leading-snug truncate">{ticket.title}</p>
+        </div>
         <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${typeColor}`}>
           {ticket.type.replace(/_/g, ' ')}
         </span>
@@ -170,7 +181,14 @@ function TicketCard({ ticket, onStatusChange }: TicketCardProps) {
         <p className="text-xs text-muted-foreground line-clamp-2">{ticket.description}</p>
       )}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground font-mono">Risk {ticket.riskClass}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground font-mono">Risk {ticket.riskClass}</span>
+          {!ticket.humanApproved && isAgentCreated && (
+            <span className="text-xs px-1 py-0.5 rounded bg-amber-500/10 text-amber-400">
+              Pending approval
+            </span>
+          )}
+        </div>
         {next && (
           <Button
             size="sm"
@@ -195,6 +213,12 @@ export default function TicketsPage() {
   const [loading,  setLoading]       = useState(false);
   const [error,    setError]         = useState('');
   const [showCreate, setShowCreate]  = useState(false);
+
+  // Track which project room we're currently joined so we can leave cleanly
+  const joinedProjectRef = useRef<string>('');
+
+  // WebSocket for real-time agent updates
+  const { connected, subscribe, unsubscribe } = useAriaSocket();
 
   // Load project list on mount
   useEffect(() => {
@@ -226,6 +250,46 @@ export default function TicketsPage() {
     if (projectId) loadTickets(projectId);
   }, [projectId, loadTickets]);
 
+  // ── Real-time WebSocket subscription for agent-created/updated tickets ──
+  // Uses the `useAriaSocket` hook's subscribe mechanism.
+  // The server emits `ticket:created` and `ticket:updated` to `project:<id>` rooms.
+  useEffect(() => {
+    if (!connected || !projectId) return;
+
+    // Leave old project room before joining new one
+    if (joinedProjectRef.current && joinedProjectRef.current !== projectId) {
+      unsubscribe(`project:${joinedProjectRef.current}`);
+    }
+    subscribe(`project:${projectId}`);
+    joinedProjectRef.current = projectId;
+
+    return () => {
+      unsubscribe(`project:${projectId}`);
+      joinedProjectRef.current = '';
+    };
+  }, [connected, projectId, subscribe, unsubscribe]);
+
+  // ── Ticket event listeners (separate effect so they always use fresh state) ──
+  const { lastEvent } = useAriaSocket();
+  useEffect(() => {
+    if (!lastEvent) return;
+
+    if ((lastEvent as { type: string }).type === 'ticket:created') {
+      const incoming = (lastEvent as unknown as { ticket: Ticket }).ticket;
+      if (incoming.projectId !== projectId) return;
+      setTickets(prev => {
+        if (prev.some(t => t.id === incoming.id)) return prev;
+        return [incoming, ...prev];
+      });
+    }
+
+    if ((lastEvent as { type: string }).type === 'ticket:updated') {
+      const incoming = (lastEvent as unknown as { ticket: Ticket }).ticket;
+      if (incoming.projectId !== projectId) return;
+      setTickets(prev => prev.map(t => t.id === incoming.id ? incoming : t));
+    }
+  }, [lastEvent, projectId]);
+
   const handleStatusChange = async (id: string, status: TicketStatus) => {
     // Optimistic update
     setTickets(prev =>
@@ -253,6 +317,15 @@ export default function TicketsPage() {
         <div className="flex items-center gap-3">
           <TicketIcon className="h-5 w-5 text-aria-400" />
           <h1 className="text-2xl font-bold">Tickets</h1>
+          {connected && (
+            <span
+              className="flex items-center gap-1 text-xs text-emerald-400"
+              title="Live updates active"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <Select value={projectId} onValueChange={setProjectId}>

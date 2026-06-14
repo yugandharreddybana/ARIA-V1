@@ -1,7 +1,11 @@
 /**
  * WebSocket hub for ARIA (V27.9 §2.1 + §18H).
  * Authenticates handshakes with RS256 JWT (same key as REST).
- * Rooms: session.<id>, agent.<id>, system.health.
+ * Rooms:
+ *   - session.<id>      session-scoped events
+ *   - agent.<id>        agent-scoped events
+ *   - system.health     global system status
+ *   - project:<id>      project-scoped events (ticket mutations from agents)
  *
  * Token Gateway and Orchestrator emit events through this hub so the web
  * client can render live session status, token warnings, and queue depth.
@@ -26,12 +30,25 @@ interface AriaJwtPayload {
   type: 'access';
 }
 
+let _io: IOServer | null = null;
+
+/**
+ * Returns the singleton Socket.IO server instance.
+ * Throws if called before createWsServer().
+ */
+export function getIO(): IOServer {
+  if (!_io) throw new Error('Socket.IO server not initialised — call createWsServer() first');
+  return _io;
+}
+
 export function createWsServer(httpServer: HttpServer): IOServer {
   const env = validateEnv();
   const io = new IOServer(httpServer, {
     cors: { origin: env.CORS_ORIGINS.split(',').map(o => o.trim()), credentials: true },
     path: '/ws',
   });
+
+  _io = io;
 
   // ── Handshake auth ──
   io.use((socket: Socket, next) => {
@@ -63,6 +80,7 @@ export function createWsServer(httpServer: HttpServer): IOServer {
     socket.join(`workspace.${user.workspaceId}`);
     socket.emit('hello', { userId: user.userId, ts: new Date().toISOString() });
 
+    // ── Legacy subscribe / unsubscribe (session.*, agent.*, system.health) ──
     socket.on('subscribe', (payload: { room: string }) => {
       if (!payload?.room) return;
       if (!payload.room.startsWith('session.') &&
@@ -73,6 +91,19 @@ export function createWsServer(httpServer: HttpServer): IOServer {
 
     socket.on('unsubscribe', (payload: { room: string }) => {
       if (payload?.room) socket.leave(payload.room);
+    });
+
+    // ── Project rooms (agent ticket mutations broadcast here) ──
+    socket.on('join:project', (payload: { projectId: string }) => {
+      if (typeof payload?.projectId === 'string' && payload.projectId.length > 0) {
+        socket.join(`project:${payload.projectId}`);
+      }
+    });
+
+    socket.on('leave:project', (payload: { projectId: string }) => {
+      if (typeof payload?.projectId === 'string') {
+        socket.leave(`project:${payload.projectId}`);
+      }
     });
   });
 

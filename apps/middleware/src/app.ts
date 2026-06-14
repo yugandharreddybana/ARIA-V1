@@ -14,6 +14,7 @@ import analysisRoutes from './routes/analysis.routes';
 import graphRoutes from './routes/graph.routes';
 import healthRoutes from './routes/health.routes';
 import ticketsRoutes from './routes/tickets.routes';
+import agentTicketsRoutes from './routes/agentTickets.routes';
 import sessionsRoutes from './routes/sessions.routes';
 import skillsRoutes from './routes/skills.routes';
 import ideasRoutes from './routes/ideas.routes';
@@ -47,24 +48,25 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   }));
   app.use(telemetryMiddleware);
 
-  app.use('/metrics',           metricsRoutes);
-  app.use('/api/health',        healthRoutes);
-  app.use('/api/auth',          authRouter);
-  app.use('/api/projects',      projectsRoutes);
-  app.use('/api/projects',      skillsRoutes);   // /:projectId/skills and /:projectId/teams
-  app.use('/api/analysis/jobs', analysisRoutes);
-  app.use('/api/graph',         graphRoutes);
-  app.use('/api/tickets',       ticketsRoutes);
-  app.use('/api/sessions',      sessionsRoutes);
-  app.use('/api/ideas',         ideasRoutes);
-  app.use('/api/ai',            aiRoutes);
-  app.use('/api/llm',           llmRoutes);
-  app.use('/api/orchestrator',  orchestratorRoutes);
-  app.use('/api/ui-discovery',  uiDiscoveryRoutes);
-  app.use('/api/experience',    experienceRoutes);
-  app.use('/api/distill',       distillRoutes);
-  app.use('/api/incidents',     incidentsRoutes);
-  app.use('/api/fleet',         fleetRoutes);
+  app.use('/metrics',              metricsRoutes);
+  app.use('/api/health',           healthRoutes);
+  app.use('/api/auth',             authRouter);
+  app.use('/api/projects',         projectsRoutes);
+  app.use('/api/projects',         skillsRoutes);        // /:projectId/skills and /:projectId/teams
+  app.use('/api/analysis/jobs',    analysisRoutes);
+  app.use('/api/graph',            graphRoutes);
+  app.use('/api/tickets',          ticketsRoutes);       // human Kanban mutations
+  app.use('/api/agent/tickets',    agentTicketsRoutes);  // agent-driven Kanban mutations
+  app.use('/api/sessions',         sessionsRoutes);
+  app.use('/api/ideas',            ideasRoutes);
+  app.use('/api/ai',               aiRoutes);
+  app.use('/api/llm',              llmRoutes);
+  app.use('/api/orchestrator',     orchestratorRoutes);
+  app.use('/api/ui-discovery',     uiDiscoveryRoutes);
+  app.use('/api/experience',       experienceRoutes);
+  app.use('/api/distill',          distillRoutes);
+  app.use('/api/incidents',        incidentsRoutes);
+  app.use('/api/fleet',            fleetRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
