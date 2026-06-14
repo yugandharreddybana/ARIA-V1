@@ -3,29 +3,39 @@ import { relations } from 'drizzle-orm';
 import { workspaces } from './workspaces';
 
 export const proposalStatusEnum = pgEnum('proposal_status', [
-  'pending',    // analysis triggered, AI generating the team
-  'ready',      // AI proposal done — awaiting user review in Step 5
-  'committed',  // user clicked "Create Company" — skills written to DB
-  'failed',     // analysis or skill-generation failed
+  'pending',   // analysis triggered, AI team generation in progress
+  'ready',     // AI proposal ready — awaiting user review in Step 5
+  'committed', // user clicked "Create Company" — skills written to DB
+  'failed',    // analysis or skill generation failed
 ]);
 
 /**
  * onboarding_proposals
  * --------------------
  * One row per workspace onboarding run.
- * `proposedSkills` is the full AI-generated ProposedSkill[] array.
- * Users review and edit it in Step 5 before committing in Step 6.
+ * `proposedSkills` JSONB holds the ProposedSkill[] array.
+ * The user reviews and edits this in Step 5 (org tree) before committing.
  */
 export const onboardingProposals = pgTable('onboarding_proposals', {
-  id:              uuid('id').primaryKey().defaultRandom(),
-  workspaceId:     uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  projectId:       uuid('project_id'),   // set after Step 1 creates the project
-  status:          proposalStatusEnum('status').notNull().default('pending'),
-  proposedSkills:  jsonb('proposed_skills').notNull().default([]),
-  codebaseProfile: jsonb('codebase_profile'),   // stored for debugging / re-runs
-  errorMessage:    text('error_message'),
-  createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  id:          uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+
+  // The project created in Step 1
+  projectId: uuid('project_id'),
+
+  status: proposalStatusEnum('status').notNull().default('pending'),
+
+  // Full AI-generated team — ProposedSkill[] JSON (see onboarding.types.ts)
+  proposedSkills: jsonb('proposed_skills').notNull().default([]),
+
+  // CodebaseProfile produced by repoAnalysis.service — stored for audit/debug
+  codebaseProfile: jsonb('codebase_profile'),
+
+  // Error message when status = 'failed'
+  errorMessage: text('error_message'),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const onboardingProposalsRelations = relations(onboardingProposals, ({ one }) => ({
