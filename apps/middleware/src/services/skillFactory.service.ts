@@ -1,403 +1,400 @@
 /**
  * skillFactory.service.ts
  * -----------------------
- * Takes a CodebaseProfile and builds the complete AI agent team as a
- * ProposedSkill[] array.
+ * Takes a CodebaseProfile + company context and produces a ProposedSkill[]
+ * array representing the full AI org chart.
  *
- * Two phases:
- *   1. STRUCTURE  — decide which roles exist and their hierarchy
- *                   (pure logic, no LLM call needed)
- *   2. INSTRUCTIONS — call the workspace LLM once per agent to write
- *                   fully custom instructions tailored to this project
+ * Hierarchy rules:
+ *   Level 1 — CEO                          (always)
+ *   Level 2 — CTO, CPO                     (always)
+ *   Level 3 — Tech Lead                    (always, reports to CTO)
+ *             Engineering Team Lead        (always, reports to Tech Lead)
+ *             Security & Cloud Lead        (only if infra/cloud/cicd detected, reports to CTO)
+ *             Product Manager              (always, reports to CPO)
+ *   Level 4 — Scrum Master                 (always, reports to Tech Lead + PM)
+ *   Level 5 — Frontend Dev                 (if hasFrontend)
+ *             Backend Dev                  (if hasBackend)
+ *             AI/ML Engineer               (if hasAiMl)
+ *             Mobile Engineer              (if hasMobile)
+ *             QA Engineer                  (always — every project needs QA)
+ *             DevOps Engineer              (if hasInfra || hasCiCd)
+ *             Cloud Engineer               (if hasCloud)
+ *             Cybersecurity Analyst        (if hasCloud || hasInfra)
+ *             Red Team / Pen Tester        (if hasCloud || hasInfra)
  *
- * The result is saved into onboarding_proposals.proposed_skills as JSON
- * and displayed in the Step 5 interactive org tree.
+ * The LLM (workspace LLM config) is called once per agent to produce
+ * fully tailored instructions.  Each call is short (~300 token output)
+ * so latency is acceptable for onboarding.
  */
 
 import { randomUUID } from 'crypto';
+import type { CodebaseProfile, ProposedSkill } from '../types/onboarding.types';
+import { decryptApiKey } from './workspace.service';
 import { db } from '@aria/db';
 import { workspaces } from '@aria/db';
 import { eq } from 'drizzle-orm';
-import { AppError } from '../middleware/error.middleware';
-import type { CodebaseProfile, ProposedSkill } from '../types/onboarding.types';
 
-// ── Persona name pool (used to give agents human-sounding names) ──────────────
+// ── LLM call helper ───────────────────────────────────────────────────────────
+async function callLlm(
+  workspaceId: string,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<string> {
+  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
+  if (!ws) throw new Error('Workspace not found');
 
-const PERSONA_NAMES = [
-  'Alex Chen', 'Jordan Lee', 'Morgan Kim', 'Riley Park', 'Casey Liu',
-  'Taylor Wang', 'Sam Patel', 'Quinn Zhang', 'Drew Nguyen', 'Blake Sharma',
-  'Avery Russo', 'Kai Tanaka', 'Reese Okafor', 'Jamie Costa', 'Skyler Mehta',
-  'Dana Kovacs', 'Sage Andersen', 'Rowan Diaz', 'Finley Gupta', 'Eden Brooks',
-];
+  const provider  = ws.llmProvider ?? 'ollama';
+  const model     = ws.llmModel    ?? 'qwen2.5-coder:7b';
+  const rawKey    = ws.llmApiKeyEncrypted ? decryptApiKey(ws.llmApiKeyEncrypted) : '';
 
-let nameIndex = 0;
-function nextName(): string {
-  return PERSONA_NAMES[nameIndex++ % PERSONA_NAMES.length];
-}
+  let baseUrl: string;
+  let headers: Record<string, string>;
 
-function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
-// ── Phase 1: Build structure ───────────────────────────────────────────────────────────
-
-function buildStructure(profile: CodebaseProfile, companyName: string): ProposedSkill[] {
-  nameIndex = 0; // reset for deterministic naming
-  const skills: ProposedSkill[] = [];
-
-  function add(role: Omit<ProposedSkill, 'tempId' | 'realName' | 'instructions' | 'description' | 'isAiGenerated'>): ProposedSkill {
-    const skill: ProposedSkill = {
-      tempId:       `tmp_${slug(role.slug)}`,
-      realName:     nextName(),
-      instructions: '', // filled in Phase 2
-      description:  '', // filled in Phase 2
-      isAiGenerated: true,
-      ...role,
+  if (provider === 'ollama') {
+    baseUrl = ws.llmBaseUrl ?? 'http://localhost:11434';
+    headers = { 'Content-Type': 'application/json' };
+  } else if (provider === 'anthropic') {
+    baseUrl = 'https://api.anthropic.com';
+    headers = {
+      'Content-Type':    'application/json',
+      'x-api-key':       rawKey,
+      'anthropic-version': '2023-06-01',
     };
-    skills.push(skill);
-    return skill;
+  } else if (provider === 'nvidia') {
+    baseUrl = ws.llmBaseUrl ?? 'https://integrate.api.nvidia.com/v1';
+    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` };
+  } else {
+    // openai | custom
+    baseUrl = ws.llmBaseUrl ?? 'https://api.openai.com/v1';
+    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` };
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // LEVEL 1 — CEO (always present)
-  // ────────────────────────────────────────────────────────────────────
-  add({
-    slug: 'ceo', roleTitle: 'Chief Executive Officer',
-    department: 'C-Suite', hierarchyLevel: 1,
-    reportingManagerTempId: null, isAlwaysPresent: true,
-    ownedDomains: ['strategy', 'vision', 'company', 'product-direction', 'roadmap', 'design'],
-    ownedRepoPaths: [],
-    triggerKeywords: ['strategy', 'vision', 'roadmap', 'company direction', 'product goal', 'priority', 'okr'],
-    riskClass: 'A',
+  // Normalise to OpenAI-compatible chat completions (Ollama also supports this)
+  const endpoint = provider === 'anthropic'
+    ? `${baseUrl}/v1/messages`
+    : `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+
+  const body = provider === 'anthropic'
+    ? JSON.stringify({
+        model,
+        max_tokens: 512,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      })
+    : JSON.stringify({
+        model,
+        max_tokens: 512,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userPrompt },
+        ],
+      });
+
+  const res = await fetch(endpoint, {
+    method:  'POST',
+    headers,
+    body,
+    signal: AbortSignal.timeout(30_000),
   });
 
-  // ────────────────────────────────────────────────────────────────────
-  // LEVEL 2 — C-Suite (always present)
-  // ────────────────────────────────────────────────────────────────────
-  add({
-    slug: 'cto', roleTitle: 'Chief Technology Officer',
-    department: 'C-Suite', hierarchyLevel: 2,
-    reportingManagerTempId: 'tmp_ceo', isAlwaysPresent: true,
-    ownedDomains: ['architecture', 'technology', 'engineering', 'infrastructure', 'security'],
-    ownedRepoPaths: [],
-    triggerKeywords: ['architecture', 'tech stack', 'engineering decision', 'infrastructure', 'security policy'],
-    riskClass: 'A',
-  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`LLM error ${res.status}: ${err.slice(0, 200)}`);
+  }
 
-  add({
-    slug: 'cpo', roleTitle: 'Chief Product Officer',
-    department: 'C-Suite', hierarchyLevel: 2,
-    reportingManagerTempId: 'tmp_ceo', isAlwaysPresent: true,
-    ownedDomains: ['product', 'design', 'ux', 'user-research', 'feature-planning'],
-    ownedRepoPaths: [],
-    triggerKeywords: ['product', 'feature', 'ux', 'user story', 'design', 'prototype', 'wireframe'],
-    riskClass: 'A',
-  });
+  const data = await res.json() as {
+    content?: { text: string }[];
+    choices?: { message: { content: string } }[];
+  };
 
-  // ────────────────────────────────────────────────────────────────────
-  // LEVEL 3 — Directors / Leads (always present)
-  // ────────────────────────────────────────────────────────────────────
-  add({
-    slug: 'tech-lead', roleTitle: 'Engineering Team Lead',
-    department: 'Engineering', hierarchyLevel: 3,
-    reportingManagerTempId: 'tmp_cto', isAlwaysPresent: true,
-    ownedDomains: ['code-review', 'engineering', 'sprint-planning', 'technical-design'],
-    ownedRepoPaths: [],
-    triggerKeywords: ['code review', 'pull request', 'sprint', 'technical design', 'engineering'],
-    riskClass: 'B',
-  });
+  if (provider === 'anthropic') {
+    return data.content?.[0]?.text?.trim() ?? '';
+  }
+  return data.choices?.[0]?.message?.content?.trim() ?? '';
+}
 
-  add({
-    slug: 'product-manager', roleTitle: 'Product Manager',
-    department: 'Product', hierarchyLevel: 3,
-    reportingManagerTempId: 'tmp_cpo', isAlwaysPresent: true,
-    ownedDomains: ['backlog', 'requirements', 'acceptance-criteria', 'stakeholders'],
-    ownedRepoPaths: [],
-    triggerKeywords: ['backlog', 'requirement', 'acceptance criteria', 'user story', 'stakeholder'],
-    riskClass: 'B',
-  });
+// ── Persona name pool ─────────────────────────────────────────────────────────
+const PERSONA_NAMES = [
+  'Alex Chen',    'Jordan Lee',   'Morgan Patel',  'Riley Kim',   'Casey Singh',
+  'Taylor Nguyen','Sam Okafor',   'Drew Fernandez','Jamie Xu',    'Quinn Osei',
+  'Blair Nkosi',  'Rowan Andrade','Avery Malik',   'Reese Okoro', 'Sage Kowalski',
+  'Dana Torres',  'Finley Russo', 'Logan Balogun', 'Ellis Vance', 'Shea Matsuda',
+];
+let nameIdx = 0;
+function nextName() { return PERSONA_NAMES[nameIdx++ % PERSONA_NAMES.length]; }
 
-  // Security & Cloud Lead — only if infra/cicd/cloud signals present
-  if (profile.hasInfra || profile.hasCiCd || profile.hasCloud) {
-    add({
-      slug: 'security-cloud-lead', roleTitle: 'Security & Cloud Lead',
-      department: 'Security & Cloud', hierarchyLevel: 3,
-      reportingManagerTempId: 'tmp_cto', isAlwaysPresent: false,
-      ownedDomains: ['security', 'cloud', 'devops', 'compliance', 'infrastructure'],
-      ownedRepoPaths: [],
-      triggerKeywords: ['security', 'cloud', 'devops', 'vulnerability', 'compliance', 'infrastructure'],
-      riskClass: 'A',
+// ── Agent definition ──────────────────────────────────────────────────────────
+interface AgentBlueprint {
+  slug:               string;
+  roleTitle:          string;
+  department:         string;
+  hierarchyLevel:     number;
+  reportingManagerSlug: string | null;  // null = CEO (root)
+  riskClass:          'A' | 'B' | 'C' | 'D';
+  isAlwaysPresent:    boolean;
+  ownedDomains:       string[];
+  triggerKeywords:    string[];
+  instructionFocus:   string;  // injected into LLM prompt
+}
+
+function buildBlueprints(profile: CodebaseProfile): AgentBlueprint[] {
+  const blueprints: AgentBlueprint[] = [
+    // ── Level 1 ────────────────────────────────────────────────────────────
+    {
+      slug: 'ceo', roleTitle: 'Chief Executive Officer', department: 'C-Suite',
+      hierarchyLevel: 1, reportingManagerSlug: null, riskClass: 'A',
+      isAlwaysPresent: true,
+      ownedDomains:    ['strategy', 'vision', 'product-roadmap', 'company-direction'],
+      triggerKeywords: ['vision', 'strategy', 'roadmap', 'company', 'direction', 'mission', 'goals', 'OKR'],
+      instructionFocus: 'You own the product vision, company strategy, and roadmap for this specific codebase. You make final decisions on feature priorities, technical direction, and product goals. You review sprint outcomes, align the team on objectives, and ensure every engineering decision ties back to user value and business impact. You are NOT a generic CEO — you deeply understand this codebase and speak specifically about its architecture, user flows, and competitive positioning.',
+    },
+    // ── Level 2 ────────────────────────────────────────────────────────────
+    {
+      slug: 'cto', roleTitle: 'Chief Technology Officer', department: 'C-Suite',
+      hierarchyLevel: 2, reportingManagerSlug: 'ceo', riskClass: 'A',
+      isAlwaysPresent: true,
+      ownedDomains:    ['architecture', 'tech-stack', 'engineering-standards', 'scalability'],
+      triggerKeywords: ['architecture', 'tech-stack', 'infrastructure', 'engineering', 'scalability', 'performance', 'system design'],
+      instructionFocus: 'You own technical architecture decisions, engineering standards, and the long-term scalability of the codebase. You review pull requests at a high level, approve major architectural changes, and ensure the engineering team follows best practices for this specific tech stack.',
+    },
+    {
+      slug: 'cpo', roleTitle: 'Chief Product Officer', department: 'C-Suite',
+      hierarchyLevel: 2, reportingManagerSlug: 'ceo', riskClass: 'A',
+      isAlwaysPresent: true,
+      ownedDomains:    ['product', 'user-experience', 'feature-definition', 'backlog'],
+      triggerKeywords: ['product', 'feature', 'user story', 'backlog', 'UX', 'requirements', 'acceptance criteria'],
+      instructionFocus: 'You own the product backlog, define features, write user stories, and ensure the product meets user needs. You work closely with the Scrum Master and Product Manager to prioritise work and define acceptance criteria for every ticket.',
+    },
+    // ── Level 3 ────────────────────────────────────────────────────────────
+    {
+      slug: 'tech-lead', roleTitle: 'Tech Lead', department: 'Engineering',
+      hierarchyLevel: 3, reportingManagerSlug: 'cto', riskClass: 'B',
+      isAlwaysPresent: true,
+      ownedDomains:    ['code-review', 'technical-decisions', 'team-mentoring', 'sprint-planning'],
+      triggerKeywords: ['code review', 'PR', 'merge', 'refactor', 'technical debt', 'design pattern', 'sprint'],
+      instructionFocus: 'You lead the engineering team day-to-day. You review all code changes, unblock engineers, make tactical technical decisions, and ensure sprint goals are achievable. You are the bridge between the CTO\u2019s architectural vision and the engineers\u2019 daily work.',
+    },
+    {
+      slug: 'product-manager', roleTitle: 'Product Manager', department: 'Product',
+      hierarchyLevel: 3, reportingManagerSlug: 'cpo', riskClass: 'B',
+      isAlwaysPresent: true,
+      ownedDomains:    ['sprint-planning', 'ticket-creation', 'stakeholder-comms', 'roadmap-execution'],
+      triggerKeywords: ['ticket', 'sprint', 'milestone', 'deadline', 'stakeholder', 'priority', 'estimate'],
+      instructionFocus: 'You translate the product roadmap into executable sprint tickets. You write detailed acceptance criteria, coordinate between engineering and design, track progress, and communicate status to stakeholders.',
+    },
+  ];
+
+  // Security & Cloud Lead — only if infra/cloud/cicd signals found
+  if (profile.hasInfra || profile.hasCloud || profile.hasCiCd) {
+    blueprints.push({
+      slug: 'security-cloud-lead', roleTitle: 'Security & Cloud Lead', department: 'Security & Cloud',
+      hierarchyLevel: 3, reportingManagerSlug: 'cto', riskClass: 'A',
+      isAlwaysPresent: false,
+      ownedDomains:    ['security', 'cloud-infrastructure', 'ci-cd', 'compliance'],
+      triggerKeywords: ['security', 'cloud', 'infrastructure', 'CI/CD', 'pipeline', 'vulnerability', 'compliance', 'IAM'],
+      instructionFocus: 'You own cloud infrastructure, CI/CD pipelines, and security posture. You review infrastructure-as-code changes, ensure secrets are managed correctly, and coordinate penetration testing and security audits.',
     });
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // LEVEL 4 — Scrum Master (always present)
-  // ────────────────────────────────────────────────────────────────────
-  add({
-    slug: 'scrum-master', roleTitle: 'Scrum Master',
-    department: 'Engineering', hierarchyLevel: 4,
-    reportingManagerTempId: 'tmp_tech-lead', isAlwaysPresent: true,
-    ownedDomains: ['ceremonies', 'sprint', 'retrospective', 'standup', 'velocity'],
-    ownedRepoPaths: [],
-    triggerKeywords: ['standup', 'retrospective', 'sprint planning', 'velocity', 'impediment', 'scrum'],
-    riskClass: 'B',
+  // ── Level 4 ────────────────────────────────────────────────────────────
+  blueprints.push({
+    slug: 'scrum-master', roleTitle: 'Scrum Master', department: 'Engineering',
+    hierarchyLevel: 4, reportingManagerSlug: 'tech-lead', riskClass: 'B',
+    isAlwaysPresent: true,
+    ownedDomains:    ['ceremonies', 'velocity', 'blockers', 'agile-process'],
+    triggerKeywords: ['standup', 'retrospective', 'sprint review', 'velocity', 'blocker', 'ceremony', 'agile', 'scrum'],
+    instructionFocus: 'You facilitate all agile ceremonies, track team velocity, surface blockers, and shield the engineering team from distractions. You report progress to the Product Manager and Tech Lead.',
   });
 
-  // ────────────────────────────────────────────────────────────────────
-  // LEVEL 5 — Engineering ICs (conditional on codebase signals)
-  // ────────────────────────────────────────────────────────────────────
-  const fePath = profile.repos.flatMap(r => r.frameworks).filter(f =>
-    ['React','Next.js','Vue','Svelte','Angular'].includes(f));
-
+  // ── Level 5 — IC agents (conditionally generated) ─────────────────────
   if (profile.hasFrontend) {
-    const fwLabel = fePath.length > 0 ? fePath[0] : 'Frontend';
-    add({
-      slug: 'frontend-dev', roleTitle: `${fwLabel} Developer`,
-      department: 'Engineering', hierarchyLevel: 5,
-      reportingManagerTempId: 'tmp_tech-lead', isAlwaysPresent: false,
-      ownedDomains: ['frontend', 'ui', 'ux-implementation', 'components', 'styling'],
-      ownedRepoPaths: profile.repos.filter(r => r.hasFrontend).map(r => r.repoName),
-      triggerKeywords: ['component', 'ui', 'frontend', 'css', 'styling', 'page', 'layout'],
-      riskClass: 'C',
+    blueprints.push({
+      slug: 'frontend-dev', roleTitle: 'Frontend Developer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerSlug: 'tech-lead', riskClass: 'C',
+      isAlwaysPresent: false,
+      ownedDomains:    ['ui', 'frontend', 'components', 'accessibility', 'performance'],
+      triggerKeywords: ['UI', 'component', 'CSS', 'HTML', 'accessibility', 'responsive', 'React', 'Vue', 'frontend'],
+      instructionFocus: `You write and review frontend code for this project. Frameworks detected: ${profile.allFrameworks.filter(f => ['React','Next.js','Vue','Svelte','Angular','Nuxt'].includes(f)).join(', ') || 'general frontend'}. You own component architecture, accessibility, performance optimisation, and visual correctness.`,
     });
   }
 
   if (profile.hasBackend) {
-    const bwLabel = profile.allFrameworks.find(f => ['Express','Fastify','NestJS','Hono','Django','Rails'].includes(f)) ?? 'Backend';
-    add({
-      slug: 'backend-dev', roleTitle: `${bwLabel} Engineer`,
-      department: 'Engineering', hierarchyLevel: 5,
-      reportingManagerTempId: 'tmp_tech-lead', isAlwaysPresent: false,
-      ownedDomains: ['api', 'backend', 'database', 'services', 'auth'],
-      ownedRepoPaths: profile.repos.filter(r => r.hasBackend).map(r => r.repoName),
-      triggerKeywords: ['api', 'endpoint', 'database', 'query', 'service', 'backend', 'auth'],
-      riskClass: 'B',
+    blueprints.push({
+      slug: 'backend-dev', roleTitle: 'Backend Developer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerSlug: 'tech-lead', riskClass: 'C',
+      isAlwaysPresent: false,
+      ownedDomains:    ['api', 'database', 'backend', 'business-logic', 'integrations'],
+      triggerKeywords: ['API', 'endpoint', 'database', 'migration', 'service', 'REST', 'GraphQL', 'backend'],
+      instructionFocus: `You implement and maintain backend services. Frameworks detected: ${profile.allFrameworks.filter(f => ['Express','Fastify','NestJS','Hono','Django','Flask'].includes(f)).join(', ') || 'general backend'}. You own API design, database schema changes, business logic, and third-party integrations.`,
     });
   }
 
   if (profile.hasAiMl) {
-    add({
-      slug: 'ai-engineer', roleTitle: 'AI / ML Engineer',
-      department: 'Engineering', hierarchyLevel: 5,
-      reportingManagerTempId: 'tmp_tech-lead', isAlwaysPresent: false,
-      ownedDomains: ['ai', 'ml', 'models', 'embeddings', 'prompts', 'rag'],
-      ownedRepoPaths: profile.repos.filter(r => r.hasAiMl).map(r => r.repoName),
-      triggerKeywords: ['model', 'embedding', 'prompt', 'llm', 'fine-tune', 'rag', 'inference'],
-      riskClass: 'B',
+    blueprints.push({
+      slug: 'ai-ml-engineer', roleTitle: 'AI/ML Engineer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerSlug: 'tech-lead', riskClass: 'B',
+      isAlwaysPresent: false,
+      ownedDomains:    ['ai', 'ml', 'llm', 'embeddings', 'model-integration', 'prompts'],
+      triggerKeywords: ['model', 'LLM', 'embedding', 'prompt', 'fine-tune', 'inference', 'AI', 'ML', 'training'],
+      instructionFocus: `You own AI/ML integration within the codebase. Detected AI frameworks: ${profile.allFrameworks.filter(f => ['LangChain','OpenAI SDK','Anthropic SDK','PyTorch','TensorFlow'].includes(f)).join(', ') || 'AI/ML libraries'}. You implement prompt engineering, model integrations, embedding pipelines, and ensure AI outputs are reliable and safe.`,
     });
   }
 
   if (profile.hasMobile) {
-    add({
-      slug: 'mobile-dev', roleTitle: 'Mobile Engineer',
-      department: 'Engineering', hierarchyLevel: 5,
-      reportingManagerTempId: 'tmp_tech-lead', isAlwaysPresent: false,
-      ownedDomains: ['mobile', 'ios', 'android', 'native', 'app-store'],
-      ownedRepoPaths: profile.repos.filter(r => r.hasMobile).map(r => r.repoName),
-      triggerKeywords: ['mobile', 'ios', 'android', 'app store', 'push notification'],
-      riskClass: 'C',
+    blueprints.push({
+      slug: 'mobile-engineer', roleTitle: 'Mobile Engineer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerSlug: 'tech-lead', riskClass: 'C',
+      isAlwaysPresent: false,
+      ownedDomains:    ['mobile', 'ios', 'android', 'react-native', 'flutter'],
+      triggerKeywords: ['mobile', 'iOS', 'Android', 'React Native', 'Flutter', 'Expo', 'app store'],
+      instructionFocus: `You develop and maintain the mobile application. Detected: ${profile.allFrameworks.filter(f => ['React Native','Expo','Flutter'].includes(f)).join(', ')}. You own native performance, app store submissions, and mobile-specific UX patterns.`,
     });
   }
 
-  // QA always present when there is any backend or frontend
-  if (profile.hasBackend || profile.hasFrontend) {
-    add({
-      slug: 'qa-engineer', roleTitle: 'QA Engineer',
-      department: 'Engineering', hierarchyLevel: 5,
-      reportingManagerTempId: 'tmp_tech-lead', isAlwaysPresent: false,
-      ownedDomains: ['testing', 'qa', 'bugs', 'regression', 'e2e'],
-      ownedRepoPaths: [],
-      triggerKeywords: ['test', 'bug', 'regression', 'qa', 'e2e', 'flaky', 'coverage'],
-      riskClass: 'B',
-    });
-  }
+  // QA — always present
+  blueprints.push({
+    slug: 'qa-engineer', roleTitle: 'QA Engineer', department: 'Engineering',
+    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead', riskClass: 'C',
+    isAlwaysPresent: false,
+    ownedDomains:    ['testing', 'qa', 'bugs', 'test-plans', 'e2e'],
+    triggerKeywords: ['test', 'bug', 'QA', 'quality', 'e2e', 'unit test', 'integration test', 'regression'],
+    instructionFocus: 'You write and maintain tests, identify bugs, define test plans, and gate releases on quality. You cover unit, integration, and end-to-end tests appropriate for this codebase.',
+  });
 
-  // ────────────────────────────────────────────────────────────────────
-  // LEVEL 5 — Security & Cloud ICs (conditional)
-  // ────────────────────────────────────────────────────────────────────
-  const secLead = 'tmp_security-cloud-lead';
-
-  if (profile.hasCiCd || profile.hasInfra) {
-    add({
-      slug: 'devops-engineer', roleTitle: 'DevOps Engineer',
-      department: 'Security & Cloud', hierarchyLevel: 5,
-      reportingManagerTempId: secLead, isAlwaysPresent: false,
-      ownedDomains: ['ci-cd', 'pipelines', 'deployments', 'docker', 'containers'],
-      ownedRepoPaths: [],
-      triggerKeywords: ['ci', 'cd', 'pipeline', 'deploy', 'dockerfile', 'container', 'build'],
-      riskClass: 'B',
+  if (profile.hasInfra || profile.hasCiCd) {
+    blueprints.push({
+      slug: 'devops-engineer', roleTitle: 'DevOps Engineer', department: 'Security & Cloud',
+      hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead', riskClass: 'B',
+      isAlwaysPresent: false,
+      ownedDomains:    ['ci-cd', 'pipelines', 'containers', 'deployments', 'monitoring'],
+      triggerKeywords: ['deploy', 'pipeline', 'CI/CD', 'Docker', 'container', 'Kubernetes', 'build', 'release'],
+      instructionFocus: 'You own CI/CD pipelines, container builds, deployment automation, and monitoring. You ensure every merge to main is safely and automatically deployed.',
     });
   }
 
   if (profile.hasCloud) {
-    add({
-      slug: 'cloud-engineer', roleTitle: 'Cloud Engineer',
-      department: 'Security & Cloud', hierarchyLevel: 5,
-      reportingManagerTempId: secLead, isAlwaysPresent: false,
-      ownedDomains: ['cloud', 'aws', 'gcp', 'azure', 'terraform', 'iam'],
-      ownedRepoPaths: [],
-      triggerKeywords: ['cloud', 'terraform', 'aws', 'gcp', 'azure', 'iam', 'vpc', 's3'],
-      riskClass: 'A',
+    blueprints.push({
+      slug: 'cloud-engineer', roleTitle: 'Cloud Engineer', department: 'Security & Cloud',
+      hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead', riskClass: 'B',
+      isAlwaysPresent: false,
+      ownedDomains:    ['cloud', 'iac', 'aws', 'gcp', 'azure', 'cost-optimisation'],
+      triggerKeywords: ['cloud', 'terraform', 'infrastructure', 'AWS', 'GCP', 'Azure', 'cost', 'IaC'],
+      instructionFocus: 'You manage cloud infrastructure using IaC. You provision, cost-optimise, and maintain cloud resources, ensuring high availability and disaster recovery.',
     });
   }
 
-  if (profile.hasInfra || profile.hasCloud) {
-    add({
-      slug: 'cybersecurity-engineer', roleTitle: 'Cybersecurity Engineer (Blue Team)',
-      department: 'Security & Cloud', hierarchyLevel: 5,
-      reportingManagerTempId: secLead, isAlwaysPresent: false,
-      ownedDomains: ['security', 'monitoring', 'siem', 'incident-response', 'hardening'],
-      ownedRepoPaths: [],
-      triggerKeywords: ['vulnerability', 'cve', 'incident', 'monitoring', 'soc', 'siem', 'hardening'],
-      riskClass: 'A',
-    });
-
-    add({
-      slug: 'red-team-engineer', roleTitle: 'Red Team / Penetration Tester',
-      department: 'Security & Cloud', hierarchyLevel: 5,
-      reportingManagerTempId: secLead, isAlwaysPresent: false,
-      ownedDomains: ['penetration-testing', 'red-team', 'exploit', 'attack-surface'],
-      ownedRepoPaths: [],
-      triggerKeywords: ['pentest', 'red team', 'exploit', 'attack surface', 'owasp', 'injection'],
-      riskClass: 'A',
-    });
-  }
-
-  return skills;
-}
-
-// ── Phase 2: LLM instruction generation ─────────────────────────────────────────────
-
-const LLM_TIMEOUT_MS = 60_000;
-
-async function callLlm(workspaceId: string, prompt: string): Promise<string> {
-  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
-  if (!ws) throw new AppError('Workspace not found', 404);
-
-  const provider  = ws.llmProvider ?? 'ollama';
-  const model     = ws.llmModel    ?? 'llama3';
-  const baseUrl   = ws.llmBaseUrl  ?? 'http://localhost:11434';
-
-  let endpoint: string;
-  let body: Record<string, unknown>;
-  let headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-  if (provider === 'ollama') {
-    endpoint = `${baseUrl}/api/generate`;
-    body     = { model, prompt, stream: false };
-  } else if (provider === 'anthropic') {
-    endpoint = 'https://api.anthropic.com/v1/messages';
-    headers  = { ...headers, 'x-api-key': ws.llmApiKeyEncrypted ?? '', 'anthropic-version': '2023-06-01' };
-    body     = { model, max_tokens: 1024, messages: [{ role: 'user', content: prompt }] };
-  } else {
-    // openai-compatible (openai / nvidia / custom)
-    endpoint = provider === 'openai'
-      ? 'https://api.openai.com/v1/chat/completions'
-      : `${baseUrl}/v1/chat/completions`;
-    headers  = { ...headers, Authorization: `Bearer ${ws.llmApiKeyEncrypted ?? ''}` };
-    body     = { model, messages: [{ role: 'user', content: prompt }] };
-  }
-
-  const controller = new AbortController();
-  const timer      = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new AppError(`LLM call failed (${res.status}): ${err}`, 502);
-    }
-    const data = await res.json() as Record<string, unknown>;
-
-    // Extract text from different provider response shapes
-    if (provider === 'ollama')     return (data.response as string) ?? '';
-    if (provider === 'anthropic')  return ((data.content as Array<{ text: string }>)[0]?.text) ?? '';
-    return ((data.choices as Array<{ message: { content: string } }>)[0]?.message?.content) ?? '';
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function buildInstructionPrompt(
-  skill: ProposedSkill,
-  profile: CodebaseProfile,
-  companyName: string,
-  managerTitle: string | null,
-): string {
-  return `You are writing the system instructions for an AI agent named "${skill.realName}" who works as the ${skill.roleTitle} at ${companyName}.
-
-Project context:
-${profile.projectSummary}
-
-Tech stack: ${profile.allFrameworks.join(', ') || 'not specified'}.
-Languages: ${profile.allLangs.join(', ') || 'not specified'}.
-
-This agent's department: ${skill.department}.
-Hierarchy level: ${skill.hierarchyLevel} (1=CEO, 5=IC).
-${managerTitle ? `This agent reports to: ${managerTitle}.` : 'This agent is the top-level executive (no manager).'}
-
-Your task: Write a detailed, specific system-prompt instruction for this agent. The instructions must:
-1. Open with who the agent is and their role at ${companyName} (use the actual company name).
-2. Describe their specific responsibilities in the context of THIS project's codebase and tech stack.
-3. Define what they own, what decisions they make, and what they escalate.
-4. Specify their communication style and how they interact with their team.
-5. Include 3-5 concrete examples of tasks or questions this agent should handle.
-6. Be written in second person ("You are...").
-
-Write ONLY the system instructions. No meta-commentary. No markdown headers. Plain paragraphs. 200-400 words.`;
-}
-
-// ── Public API ───────────────────────────────────────────────────────────────────
-
-/**
- * generateTeamProposal
- * --------------------
- * Builds a complete ProposedSkill[] for the given codebase profile.
- * Calls the workspace LLM once per agent to write custom instructions.
- */
-export async function generateTeamProposal(
-  workspaceId: string,
-  profile: CodebaseProfile,
-  companyName: string,
-): Promise<ProposedSkill[]> {
-  const structure = buildStructure(profile, companyName);
-
-  // Build a tempId → roleTitle map for manager lookup in prompts
-  const titleMap = new Map(structure.map(s => [s.tempId, s.roleTitle]));
-
-  // Generate instructions for all agents in parallel (max 5 concurrent)
-  const CONCURRENCY = 5;
-  const result: ProposedSkill[] = [...structure];
-
-  for (let i = 0; i < result.length; i += CONCURRENCY) {
-    const batch = result.slice(i, i + CONCURRENCY);
-    await Promise.all(
-      batch.map(async (skill, batchIdx) => {
-        const managerTitle = skill.reportingManagerTempId
-          ? (titleMap.get(skill.reportingManagerTempId) ?? null)
-          : null;
-        const prompt = buildInstructionPrompt(skill, profile, companyName, managerTitle);
-        try {
-          const instructions = await callLlm(workspaceId, prompt);
-          const descPrompt   = `In one sentence (max 20 words), describe the role of the ${skill.roleTitle} at ${companyName} in the context of: ${profile.projectSummary}`;
-          const description  = await callLlm(workspaceId, descPrompt);
-          result[i + batchIdx] = { ...skill, instructions: instructions.trim(), description: description.trim() };
-        } catch {
-          // If LLM fails for one agent, use a meaningful fallback
-          result[i + batchIdx] = {
-            ...skill,
-            instructions: `You are ${skill.realName}, the ${skill.roleTitle} at ${companyName}. ${profile.projectSummary} Your role is to own the ${skill.ownedDomains.join(', ')} domains and make decisions within your area of expertise.`,
-            description:  `Owns ${skill.ownedDomains.slice(0, 3).join(', ')} for ${companyName}.`,
-          };
-        }
-      }),
+  if (profile.hasCloud || profile.hasInfra) {
+    blueprints.push(
+      {
+        slug: 'cybersecurity-analyst', roleTitle: 'Cybersecurity Analyst', department: 'Security & Cloud',
+        hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead', riskClass: 'A',
+        isAlwaysPresent: false,
+        ownedDomains:    ['security', 'vulnerability-management', 'siem', 'compliance', 'blue-team'],
+        triggerKeywords: ['security', 'vulnerability', 'CVE', 'patch', 'compliance', 'audit', 'SIEM', 'blue team'],
+        instructionFocus: 'You are the blue team. You monitor for threats, manage vulnerabilities, ensure compliance, and harden the infrastructure and application against attacks.',
+      },
+      {
+        slug: 'red-team-engineer', roleTitle: 'Red Team / Pen Tester', department: 'Security & Cloud',
+        hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead', riskClass: 'A',
+        isAlwaysPresent: false,
+        ownedDomains:    ['penetration-testing', 'exploit-research', 'red-team', 'threat-modelling'],
+        triggerKeywords: ['pen test', 'exploit', 'red team', 'attack surface', 'threat model', 'OWASP', 'CVE'],
+        instructionFocus: 'You are the red team. You proactively attempt to find vulnerabilities in the application and infrastructure before attackers do. You produce detailed threat models and remediation reports.',
+      },
     );
   }
 
-  return result;
+  return blueprints;
+}
+
+// ── LLM instruction writer ────────────────────────────────────────────────────
+async function generateInstructions(
+  blueprint:   AgentBlueprint,
+  profile:     CodebaseProfile,
+  companyName: string,
+  workspaceId: string,
+): Promise<{ instructions: string; description: string }> {
+  const system = `You are writing the system prompt ("instructions") for an AI agent that will work inside ${companyName}.
+The agent's role is: ${blueprint.roleTitle}.
+You have deep knowledge of the project's codebase:
+${profile.projectSummary}
+Frameworks in use: ${profile.allFrameworks.join(', ') || 'none detected'}.
+Languages: ${profile.allLangs.join(', ')}.
+
+Write a concise but complete system prompt for this agent. The prompt must:
+1. Address the agent in second person ("You are the ${blueprint.roleTitle} for ${companyName}.").
+2. Be specific to THIS codebase — name the actual frameworks, repo names, and tech stack.
+3. Describe exactly what the agent owns, what decisions it makes, and who it reports to.
+4. End with a one-sentence description (prefixed "DESCRIPTION:") summarising the role in plain English.
+
+Output ONLY the system prompt followed by the DESCRIPTION line. No markdown, no headers.`;
+
+  const user = `Focus area for this agent: ${blueprint.instructionFocus}`;
+
+  try {
+    const raw = await callLlm(workspaceId, system, user);
+    const descMatch = raw.match(/DESCRIPTION:\s*(.+)$/m);
+    const description  = descMatch?.[1]?.trim() ?? `${blueprint.roleTitle} for ${companyName}.`;
+    const instructions = raw.replace(/DESCRIPTION:.+$/m, '').trim();
+    return { instructions, description };
+  } catch {
+    // Fallback: use instructionFocus directly if LLM is unavailable
+    return {
+      instructions: `You are the ${blueprint.roleTitle} for ${companyName}. ${blueprint.instructionFocus}`,
+      description:  `${blueprint.roleTitle} responsible for ${blueprint.ownedDomains.slice(0, 3).join(', ')}.`,
+    };
+  }
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+export async function generateTeamProposal(
+  profile:     CodebaseProfile,
+  companyName: string,
+  workspaceId: string,
+): Promise<ProposedSkill[]> {
+  nameIdx = 0;  // reset persona name counter for each run
+  const blueprints = buildBlueprints(profile);
+
+  // Build tempId map keyed by slug so we can resolve reportingManagerTempId
+  const tempIds = new Map<string, string>();
+  for (const bp of blueprints) tempIds.set(bp.slug, randomUUID());
+
+  // Generate instructions in parallel (capped at 5 concurrent to avoid rate limits)
+  const CONCURRENCY = 5;
+  const skills: ProposedSkill[] = [];
+
+  for (let i = 0; i < blueprints.length; i += CONCURRENCY) {
+    const batch = blueprints.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(bp => generateInstructions(bp, profile, companyName, workspaceId)),
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const bp     = batch[j];
+      const { instructions, description } = results[j];
+      const tempId = tempIds.get(bp.slug)!;
+      const managerTempId = bp.reportingManagerSlug
+        ? (tempIds.get(bp.reportingManagerSlug) ?? null)
+        : null;
+
+      skills.push({
+        tempId,
+        slug:                   bp.slug,
+        realName:               nextName(),
+        roleTitle:              bp.roleTitle,
+        department:             bp.department,
+        hierarchyLevel:         bp.hierarchyLevel,
+        reportingManagerTempId: managerTempId,
+        instructions,
+        description,
+        ownedDomains:           bp.ownedDomains,
+        ownedRepoPaths:         [],
+        triggerKeywords:        bp.triggerKeywords,
+        riskClass:              bp.riskClass,
+        isAlwaysPresent:        bp.isAlwaysPresent,
+        isAiGenerated:          true,
+      });
+    }
+  }
+
+  return skills;
 }

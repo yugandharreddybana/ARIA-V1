@@ -40,18 +40,18 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use(requestLogger);
   app.use(rateLimit({
     windowMs: env.RATE_LIMIT_WINDOW_MS,
-    max: env.RATE_LIMIT_MAX,
+    max:      env.RATE_LIMIT_MAX,
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders:   false,
   }));
   app.use(telemetryMiddleware);
 
   app.use('/metrics',              metricsRoutes);
   app.use('/api/health',           healthRoutes);
   app.use('/api/auth',             authRouter);
-  app.use('/api/onboarding',       onboardingRoutes);     // ← 6-step onboarding wizard
+  app.use('/api/onboarding',       onboardingRoutes);     // 6-step onboarding wizard
   app.use('/api/projects',         projectsRoutes);
-  app.use('/api/projects',         skillsRoutes);          // /:projectId/skills and /:projectId/teams
+  app.use('/api/projects',         skillsRoutes);         // /:projectId/skills and /:projectId/teams
   app.use('/api/analysis/jobs',    analysisRoutes);
   app.use('/api/graph',            graphRoutes);
   app.use('/api/tickets',          ticketsRoutes);
