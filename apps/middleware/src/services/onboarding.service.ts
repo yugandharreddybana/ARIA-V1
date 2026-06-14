@@ -1,304 +1,310 @@
 /**
  * onboarding.service.ts
  * ---------------------
- * Orchestrates the 6-step onboarding flow.
+ * Orchestrates all 6 onboarding steps.
  *
- * Step 1 ─ saveCompanyInfo       → updates workspace name + description
- * Step 2 ─ saveLlmConfig         → reuses workspace.service (already exists)
- * Step 3 ─ saveRepos             → creates project + projectRepos rows
- * Step 4 ─ saveScout             → saves scout persona, triggers async analysis
- * Step 5 ─ getProposal           → polls proposal status + returns ProposedSkill[]
- *         patchSkill             → edits a skill in the proposal JSON
- *         addSkill               → adds a new skill to the proposal
- *         deleteSkill            → removes a skill (guards isAlwaysPresent)
- * Step 6 ─ commitProposal        → writes all skills + teams to DB, marks onboarding complete
+ * Step 1 ─ saveCompanyInfo      → updates workspace name + description
+ * Step 2 ─ saveLlmConfig        → delegated to workspace.service (already exists)
+ * Step 3 ─ saveRepos            → creates project + project_repos rows
+ * Step 4 ─ saveScoutAndAnalyse  → saves scout persona, triggers repo analysis
+ *                                  + skill generation → stores in onboarding_proposals
+ * Step 5 ─ getProposal          → returns current ProposedSkill[] for the tree
+ *          patchSkill           → update one skill in the proposal
+ *          addSkill             → add a new custom skill
+ *          deleteSkill          → remove a skill (never allowed for isAlwaysPresent)
+ * Step 6 ─ commitProposal       → writes all skills + teams to DB, marks onboarding done
  */
 
-import { randomUUID } from 'crypto';
 import { db } from '@aria/db';
-import { workspaces, projects, projectRepos, skills, teams, teamMembers, onboardingProposals } from '@aria/db';
+import {
+  workspaces, projects, projectRepos,
+  onboardingProposals, skills, teams, teamMembers,
+} from '@aria/db';
 import { eq, and } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import { AppError } from '../middleware/error.middleware';
-import { buildCodebaseProfile } from './repoAnalysis.service';
-import { generateProposedSkills } from './skillFactory.service';
+import { buildCodebaseProfile, decryptGithubToken } from './repoAnalysis.service';
+import { buildProposedSkills } from './skillFactory.service';
 import type {
   OnboardingCompanyPayload,
   OnboardingRepoSelection,
   OnboardingScoutPayload,
   ProposedSkill,
-  ProposalPatchPayload,
+  ProposalSkillPatch,
   CommitProposalResponse,
-  OnboardingStatusResponse,
 } from '../types/onboarding.types';
 
-// ---- Helpers ---------------------------------------------------------------
-
-function requireWorkspace(workspaceId: string) {
-  return db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) }).then(ws => {
-    if (!ws) throw new AppError('Workspace not found', 404);
-    return ws;
-  });
-}
-
-function requireProposal(workspaceId: string) {
-  return db.query.onboardingProposals.findFirst({
-    where: eq(onboardingProposals.workspaceId, workspaceId),
-    orderBy: (t, { desc }) => [desc(t.createdAt)],
-  }).then(p => {
-    if (!p) throw new AppError('No onboarding proposal found — complete Step 3 first', 404);
-    return p;
-  });
-}
-
-// ---- Step 1 ----------------------------------------------------------------
-
-export async function saveCompanyInfo(
-  workspaceId: string,
-  payload: OnboardingCompanyPayload,
-): Promise<void> {
-  await requireWorkspace(workspaceId);
-  await db.update(workspaces)
+// ── Step 1 ───────────────────────────────────────────────────────────────────
+export async function saveCompanyInfo(workspaceId: string, payload: OnboardingCompanyPayload) {
+  const [ws] = await db
+    .update(workspaces)
     .set({ name: payload.companyName, companyDescription: payload.companyDescription, updatedAt: new Date() })
-    .where(eq(workspaces.id, workspaceId));
+    .where(eq(workspaces.id, workspaceId))
+    .returning();
+  if (!ws) throw new AppError('Workspace not found', 404);
+  return ws;
 }
 
-// ---- Step 3 ----------------------------------------------------------------
+// ── Step 3 ───────────────────────────────────────────────────────────────────
+export async function saveRepos(workspaceId: string, payload: OnboardingRepoSelection) {
+  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
+  if (!ws) throw new AppError('Workspace not found', 404);
+  if (!payload.repos.length) throw new AppError('Select at least one repository', 400);
 
-export async function saveRepos(
-  workspaceId: string,
-  payload: OnboardingRepoSelection,
-): Promise<{ projectId: string }> {
-  const ws = await requireWorkspace(workspaceId);
-
-  // Create the onboarding project (one project per onboarding)
-  const [project] = await db.insert(projects)
-    .values({ workspaceId, name: ws.name, description: ws.companyDescription ?? '', status: 'active' })
-    .returning();
+  // Create the project named after the workspace / company
+  const [project] = await db.insert(projects).values({
+    id:          randomUUID(),
+    workspaceId,
+    name:        ws.name,
+    description: ws.companyDescription ?? '',
+    status:      'onboarding',
+  }).returning();
 
   // Insert all selected repos
-  if (payload.repos.length > 0) {
-    await db.insert(projectRepos).values(
-      payload.repos.map(r => ({
-        projectId: project.id,
-        repoUrl:   r.repoUrl,
-        repoName:  r.fullName,   // stored as owner/repo for GitHub API calls
-        branch:    r.branch,
-      })),
-    );
-  }
+  const repoRows = payload.repos.map(r => ({
+    id:        randomUUID(),
+    projectId: project.id,
+    repoUrl:   r.repoUrl,
+    repoName:  r.repoName,
+    branch:    r.branch,
+  }));
+  await db.insert(projectRepos).values(repoRows);
 
-  return { projectId: project.id };
+  // Create a placeholder onboarding proposal
+  const [proposal] = await db.insert(onboardingProposals).values({
+    id:          randomUUID(),
+    workspaceId,
+    projectId:   project.id,
+    status:      'pending',
+  }).returning();
+
+  return { project, proposal };
 }
 
-// ---- Step 4 ----------------------------------------------------------------
-
-export async function saveScoutAndTriggerAnalysis(
+// ── Step 4 ───────────────────────────────────────────────────────────────────
+export async function saveScoutAndAnalyse(
   workspaceId: string,
   payload: OnboardingScoutPayload,
-): Promise<{ proposalId: string }> {
-  const ws = await requireWorkspace(workspaceId);
+): Promise<{ proposalId: string; status: 'pending' }> {
+  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
+  if (!ws) throw new AppError('Workspace not found', 404);
 
-  // Save scout persona
-  await db.update(workspaces)
-    .set({
-      scoutAgentName:        payload.scoutName,
-      scoutAgentDescription: payload.scoutDescription,
-      updatedAt:             new Date(),
-    })
-    .where(eq(workspaces.id, workspaceId));
+  // 1. Persist scout persona
+  await db.update(workspaces).set({
+    scoutAgentName:        payload.scoutName,
+    scoutAgentDescription: payload.scoutDescription,
+    updatedAt:             new Date(),
+  }).where(eq(workspaces.id, workspaceId));
 
-  // Find the project created in Step 3
-  const project = await db.query.projects.findFirst({
-    where: eq(projects.workspaceId, workspaceId),
-    orderBy: (t, { desc }) => [desc(t.createdAt)],
+  // 2. Find the pending proposal for this workspace
+  const proposal = await db.query.onboardingProposals.findFirst({
+    where: and(
+      eq(onboardingProposals.workspaceId, workspaceId),
+      eq(onboardingProposals.status, 'pending'),
+    ),
   });
-  if (!project) throw new AppError('Project not found — complete Step 3 first', 400);
+  if (!proposal) throw new AppError('No pending proposal found. Complete Step 3 first.', 400);
 
-  // Create a pending proposal row
-  const [proposal] = await db.insert(onboardingProposals)
-    .values({ workspaceId, projectId: project.id, status: 'pending' })
-    .returning();
+  // 3. Kick off analysis in background (non-blocking — respond immediately)
+  setImmediate(async () => {
+    try {
+      // Load repos for this project
+      const repos = await db.query.projectRepos.findMany({
+        where: eq(projectRepos.projectId, proposal.projectId!),
+      });
 
-  // Trigger async analysis (fire and forget — client polls GET /proposal)
-  void runAnalysisAndGenerate(workspaceId, project.id, proposal.id);
+      const selectedRepos = repos.map(r => ({
+        repoUrl:  r.repoUrl,
+        repoName: r.repoName,
+        fullName: r.repoUrl
+          .replace('https://github.com/', '')
+          .replace(/\.git$/, ''),
+        branch:   r.branch,
+      }));
 
-  return { proposalId: proposal.id };
-}
+      // Decrypt GitHub token
+      const ghToken = decryptGithubToken(ws.githubAccessTokenEncrypted);
 
-/**
- * Background job: analyse repos → generate skills → update proposal to 'ready'.
- * Errors are caught and stored in proposal.errorMessage with status 'failed'.
- */
-async function runAnalysisAndGenerate(
-  workspaceId: string,
-  projectId:   string,
-  proposalId:  string,
-): Promise<void> {
-  try {
-    const profile       = await buildCodebaseProfile(workspaceId, projectId);
-    const proposedSkills = await generateProposedSkills(workspaceId, profile);
+      // Analyse repos
+      const profile = await buildCodebaseProfile(selectedRepos, ghToken);
 
-    await db.update(onboardingProposals)
-      .set({
+      // Generate skill proposals
+      const proposedSkills = buildProposedSkills(profile, ws.name);
+
+      // Save to DB
+      await db.update(onboardingProposals).set({
         status:          'ready',
-        proposedSkills:  proposedSkills as unknown as Record<string, unknown>[],
-        codebaseProfile: profile as unknown as Record<string, unknown>,
+        proposedSkills:  proposedSkills as unknown as typeof onboardingProposals.$inferInsert['proposedSkills'],
+        codebaseProfile: profile as unknown as typeof onboardingProposals.$inferInsert['codebaseProfile'],
         updatedAt:       new Date(),
-      })
-      .where(eq(onboardingProposals.id, proposalId));
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await db.update(onboardingProposals)
-      .set({ status: 'failed', errorMessage: msg, updatedAt: new Date() })
-      .where(eq(onboardingProposals.id, proposalId));
-  }
+      }).where(eq(onboardingProposals.id, proposal.id));
+    } catch (err) {
+      await db.update(onboardingProposals).set({
+        status:       'failed',
+        errorMessage: err instanceof Error ? err.message : 'Unknown error',
+        updatedAt:    new Date(),
+      }).where(eq(onboardingProposals.id, proposal!.id));
+    }
+  });
+
+  return { proposalId: proposal.id, status: 'pending' };
 }
 
-// ---- Step 5 (poll + edit) --------------------------------------------------
-
+// ── Step 5: get proposal ────────────────────────────────────────────────────────
 export async function getProposal(workspaceId: string) {
-  const proposal = await requireProposal(workspaceId);
-  return {
-    proposalId:     proposal.id,
-    status:         proposal.status,
-    proposedSkills: (proposal.proposedSkills as ProposedSkill[]) ?? [],
-    errorMessage:   proposal.errorMessage,
-  };
+  const proposal = await db.query.onboardingProposals.findFirst({
+    where: eq(onboardingProposals.workspaceId, workspaceId),
+    orderBy: (p, { desc }) => [desc(p.createdAt)],
+  });
+  if (!proposal) throw new AppError('No onboarding proposal found', 404);
+  return proposal;
 }
 
-export async function patchSkill(
+// ── Step 5: patch one skill in the proposal ─────────────────────────────────────
+export async function patchProposalSkill(
   workspaceId: string,
-  tempId:      string,
-  patch:       ProposalPatchPayload,
-): Promise<ProposedSkill[]> {
-  const proposal = await requireProposal(workspaceId);
-  if (proposal.status !== 'ready') throw new AppError('Proposal is not ready for editing', 400);
-
-  const skills = (proposal.proposedSkills as ProposedSkill[]);
-  const idx = skills.findIndex(s => s.tempId === tempId);
-  if (idx === -1) throw new AppError('Skill not found', 404);
-
-  skills[idx] = { ...skills[idx], ...patch.skill };
-
-  await db.update(onboardingProposals)
-    .set({ proposedSkills: skills as unknown as Record<string, unknown>[], updatedAt: new Date() })
-    .where(eq(onboardingProposals.id, proposal.id));
-
-  return skills;
-}
-
-export async function addSkill(
-  workspaceId: string,
-  newSkill: Omit<ProposedSkill, 'tempId'>,
-): Promise<ProposedSkill[]> {
-  const proposal = await requireProposal(workspaceId);
-  if (proposal.status !== 'ready') throw new AppError('Proposal is not ready for editing', 400);
-
-  const updated = [
-    ...(proposal.proposedSkills as ProposedSkill[]),
-    { ...newSkill, tempId: randomUUID(), isAiGenerated: false },
-  ];
-
-  await db.update(onboardingProposals)
-    .set({ proposedSkills: updated as unknown as Record<string, unknown>[], updatedAt: new Date() })
-    .where(eq(onboardingProposals.id, proposal.id));
-
-  return updated;
-}
-
-export async function deleteSkill(
-  workspaceId: string,
-  tempId:      string,
-): Promise<ProposedSkill[]> {
-  const proposal = await requireProposal(workspaceId);
-  if (proposal.status !== 'ready') throw new AppError('Proposal is not ready for editing', 400);
+  tempId: string,
+  patch: ProposalSkillPatch,
+) {
+  const proposal = await getProposal(workspaceId);
+  if (proposal.status === 'committed') throw new AppError('Proposal already committed', 400);
 
   const current = (proposal.proposedSkills as ProposedSkill[]);
-  const target  = current.find(s => s.tempId === tempId);
-  if (!target)            throw new AppError('Skill not found', 404);
-  if (target.isAlwaysPresent) throw new AppError('C-suite agents cannot be deleted', 400);
+  const idx = current.findIndex(s => s.tempId === tempId);
+  if (idx === -1) throw new AppError(`Skill ${tempId} not found in proposal`, 404);
+
+  current[idx] = { ...current[idx], ...patch.skill };
+
+  await db.update(onboardingProposals).set({
+    proposedSkills: current as unknown as typeof onboardingProposals.$inferInsert['proposedSkills'],
+    updatedAt: new Date(),
+  }).where(eq(onboardingProposals.id, proposal.id));
+
+  return current[idx];
+}
+
+// ── Step 5: add a custom skill ─────────────────────────────────────────────────────
+export async function addProposalSkill(workspaceId: string, skill: ProposedSkill) {
+  const proposal = await getProposal(workspaceId);
+  if (proposal.status === 'committed') throw new AppError('Proposal already committed', 400);
+
+  const current = (proposal.proposedSkills as ProposedSkill[]);
+  const newSkill: ProposedSkill = { ...skill, isAiGenerated: false, tempId: skill.tempId || `custom-${randomUUID().slice(0,8)}` };
+  current.push(newSkill);
+
+  await db.update(onboardingProposals).set({
+    proposedSkills: current as unknown as typeof onboardingProposals.$inferInsert['proposedSkills'],
+    updatedAt: new Date(),
+  }).where(eq(onboardingProposals.id, proposal.id));
+
+  return newSkill;
+}
+
+// ── Step 5: delete a skill from the proposal ─────────────────────────────────
+export async function deleteProposalSkill(workspaceId: string, tempId: string) {
+  const proposal = await getProposal(workspaceId);
+  if (proposal.status === 'committed') throw new AppError('Proposal already committed', 400);
+
+  const current = (proposal.proposedSkills as ProposedSkill[]);
+  const target = current.find(s => s.tempId === tempId);
+  if (!target) throw new AppError(`Skill ${tempId} not found`, 404);
+  if (target.isAlwaysPresent) throw new AppError(`Cannot delete a core role (${target.roleTitle})`, 403);
 
   const updated = current.filter(s => s.tempId !== tempId);
 
-  await db.update(onboardingProposals)
-    .set({ proposedSkills: updated as unknown as Record<string, unknown>[], updatedAt: new Date() })
-    .where(eq(onboardingProposals.id, proposal.id));
-
-  return updated;
+  await db.update(onboardingProposals).set({
+    proposedSkills: updated as unknown as typeof onboardingProposals.$inferInsert['proposedSkills'],
+    updatedAt: new Date(),
+  }).where(eq(onboardingProposals.id, proposal.id));
 }
 
-// ---- Step 6 (commit) -------------------------------------------------------
+// ── Step 6: commit proposal → write skills + teams to DB ─────────────────────────
+export async function commitProposal(workspaceId: string): Promise<CommitProposalResponse> {
+  const proposal = await getProposal(workspaceId);
+  if (proposal.status === 'committed') throw new AppError('Already committed', 400);
+  if (proposal.status === 'pending')   throw new AppError('Analysis still running. Please wait.', 409);
+  if (proposal.status === 'failed')    throw new AppError('Analysis failed. Re-run from Step 4.', 400);
 
-export async function commitProposal(
-  workspaceId: string,
-): Promise<CommitProposalResponse> {
-  const proposal = await requireProposal(workspaceId);
-  if (proposal.status !== 'ready') throw new AppError('Proposal must be ready before committing', 400);
-  if (!proposal.projectId)        throw new AppError('Proposal has no associated project', 500);
+  const proposedSkills = proposal.proposedSkills as ProposedSkill[];
+  const projectId = proposal.projectId!;
 
-  const proposed = proposal.proposedSkills as ProposedSkill[];
-  const projectId = proposal.projectId;
+  // ── 1. Group skills by department → create teams ───────────────────────────────
+  const deptSet = new Set(proposedSkills.map(s => s.department));
+  const teamMap: Record<string, string> = {}; // department → team DB id
 
-  // --- 1. Group by department to create teams ---------------------------------
-  const deptToTeamId: Record<string, string> = {};
-  const deptNames = [...new Set(proposed.map(s => s.department))];
-
-  for (const dept of deptNames) {
-    const [team] = await db.insert(teams)
-      .values({ projectId, name: `${dept} Team`, department: dept })
-      .returning();
-    deptToTeamId[dept] = team.id;
-  }
-
-  // --- 2. Insert skills, building tempId → real DB id map --------------------
-  const tempIdToDbId: Record<string, string> = {};
-  // Insert in hierarchy order so reporting manager exists before direct reports
-  const sorted = [...proposed].sort((a, b) => a.hierarchyLevel - b.hierarchyLevel);
-
-  for (const s of sorted) {
-    const reportingManagerId = s.reportingManagerTempId
-      ? tempIdToDbId[s.reportingManagerTempId] ?? null
-      : null;
-
-    const [row] = await db.insert(skills).values({
-      projectId,
-      teamId:             deptToTeamId[s.department] ?? null,
-      slug:               s.slug,
-      realName:           s.realName,
-      roleTitle:          s.roleTitle,
-      department:         s.department,
-      hierarchyLevel:     s.hierarchyLevel,
-      reportingManagerId,
-      instructions:       s.instructions,
-      description:        s.description,
-      ownedDomains:       s.ownedDomains,
-      ownedRepoPaths:     s.ownedRepoPaths,
-      triggerKeywords:    s.triggerKeywords,
-      riskClass:          s.riskClass,
-      status:             'active',
-      idleMode:           'learning',
+  for (const dept of deptSet) {
+    const [team] = await db.insert(teams).values({
+      id: randomUUID(), projectId, name: dept, department: dept,
     }).returning();
-
-    tempIdToDbId[s.tempId] = row.id;
+    teamMap[dept] = team.id;
   }
 
-  // --- 3. Insert team members -----------------------------------------------
-  for (const s of sorted) {
-    const skillId = tempIdToDbId[s.tempId];
-    const teamId  = deptToTeamId[s.department];
-    if (!skillId || !teamId) continue;
+  // ── 2. Insert skills (two passes: first without reportingManagerId, then update) ──
+  // Pass 1: insert all skills, get their DB IDs
+  const tempIdToDbId: Record<string, string> = {};
 
-    const memberRole =
-      s.hierarchyLevel <= 3 ? 'lead' :
-      s.roleTitle.toLowerCase().includes('scrum') ? 'scrum_master' : 'member';
-
-    await db.insert(teamMembers).values({ teamId, skillId, role: memberRole });
+  for (const ps of proposedSkills) {
+    const [s] = await db.insert(skills).values({
+      id:             randomUUID(),
+      projectId,
+      teamId:         teamMap[ps.department],
+      slug:           ps.slug,
+      realName:       ps.realName,
+      roleTitle:      ps.roleTitle,
+      department:     ps.department,
+      hierarchyLevel: ps.hierarchyLevel,
+      description:    ps.description,
+      instructions:   ps.instructions,
+      ownedDomains:   ps.ownedDomains,
+      ownedRepoPaths: ps.ownedRepoPaths,
+      triggerKeywords: ps.triggerKeywords,
+      riskClass:      ps.riskClass,
+      status:         'active',
+    }).returning();
+    tempIdToDbId[ps.tempId] = s.id;
   }
 
-  // --- 4. Update proposal status + mark onboarding complete -----------------
+  // Pass 2: wire up reportingManagerId now that all DB IDs are known
+  for (const ps of proposedSkills) {
+    if (ps.reportingManagerTempId) {
+      const managerDbId = tempIdToDbId[ps.reportingManagerTempId];
+      if (managerDbId) {
+        await db.update(skills)
+          .set({ reportingManagerId: managerDbId })
+          .where(eq(skills.id, tempIdToDbId[ps.tempId]));
+      }
+    }
+  }
+
+  // ── 3. Wire team lead / scrum master onto each team ─────────────────────────────
+  for (const ps of proposedSkills) {
+    const isLead        = ps.roleTitle.toLowerCase().includes('lead') || ps.roleTitle.includes('CTO') || ps.roleTitle.includes('CPO');
+    const isScrumMaster = ps.roleTitle === 'Scrum Master';
+    if (isLead || isScrumMaster) {
+      const teamId = teamMap[ps.department];
+      if (teamId) {
+        await db.update(teams).set(
+          isLead ? { leadSkillId: tempIdToDbId[ps.tempId] } : { scrumMasterSkillId: tempIdToDbId[ps.tempId] },
+        ).where(eq(teams.id, teamId));
+      }
+    }
+    // Insert team_members junction row
+    await db.insert(teamMembers).values({
+      id:      randomUUID(),
+      teamId:  teamMap[ps.department],
+      skillId: tempIdToDbId[ps.tempId],
+      role:    ps.hierarchyLevel <= 3 ? 'lead' : ps.roleTitle === 'Scrum Master' ? 'scrum_master' : 'member',
+    });
+  }
+
+  // ── 4. Mark proposal committed + project active ───────────────────────────────
   await db.update(onboardingProposals)
     .set({ status: 'committed', updatedAt: new Date() })
     .where(eq(onboardingProposals.id, proposal.id));
+
+  await db.update(projects)
+    .set({ status: 'active', updatedAt: new Date() })
+    .where(eq(projects.id, projectId));
 
   await db.update(workspaces)
     .set({ onboardingCompletedAt: new Date(), updatedAt: new Date() })
@@ -306,39 +312,7 @@ export async function commitProposal(
 
   return {
     projectId,
-    skillCount: sorted.length,
-    teamCount:  deptNames.length,
-  };
-}
-
-// ---- Status (used by frontend to resume interrupted onboarding) -----------
-
-export async function getOnboardingStatus(
-  workspaceId: string,
-): Promise<OnboardingStatusResponse> {
-  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
-  if (!ws) throw new AppError('Workspace not found', 404);
-
-  const proposal = await db.query.onboardingProposals.findFirst({
-    where: eq(onboardingProposals.workspaceId, workspaceId),
-    orderBy: (t, { desc }) => [desc(t.createdAt)],
-  });
-
-  // Determine last completed step
-  let step = 0;
-  if (ws.name && ws.companyDescription)                       step = Math.max(step, 1);
-  if (ws.llmProvider && ws.llmModel)                          step = Math.max(step, 2);
-  if (proposal?.projectId)                                    step = Math.max(step, 3);
-  if (ws.scoutAgentName && ws.scoutAgentName !== 'Aria Scout') step = Math.max(step, 4);
-  if (proposal?.status === 'ready' || proposal?.status === 'committed') step = Math.max(step, 5);
-  if (proposal?.status === 'committed')                       step = 6;
-
-  return {
-    step,
-    companyName:         ws.name,
-    scoutAgentName:      ws.scoutAgentName ?? null,
-    proposalStatus:      proposal?.status ?? null,
-    proposalId:          proposal?.id ?? null,
-    onboardingCompleted: !!ws.onboardingCompletedAt,
+    skillCount: proposedSkills.length,
+    teamCount:  Object.keys(teamMap).length,
   };
 }

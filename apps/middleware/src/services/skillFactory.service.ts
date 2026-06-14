@@ -1,388 +1,445 @@
 /**
  * skillFactory.service.ts
  * -----------------------
- * Takes a CodebaseProfile + workspace context and:
- *   1. Decides which roles to create based on detection signals.
- *   2. Calls the workspace LLM to generate custom per-agent instructions.
- *   3. Returns a fully resolved ProposedSkill[] with the complete hierarchy.
+ * Takes a CodebaseProfile and produces a ProposedSkill[] array representing
+ * the full AI team for the project.
  *
  * Hierarchy levels:
- *   1 = CEO
- *   2 = C-suite (CTO, CPO)
- *   3 = Directors / Leads (Tech Lead, Security & Cloud Lead, Product Manager)
- *   4 = Scrum Master
- *   5 = Individual Contributors (engineers, QA, security analysts, etc.)
+ *   1 — CEO
+ *   2 — CTO, CPO
+ *   3 — Tech Lead, Product Manager, Security & Cloud Lead
+ *   4 — Scrum Master
+ *   5 — Individual contributors (Frontend Dev, Backend Dev, AI Eng, QA,
+ *         DevOps, Cloud Eng, Cybersecurity, Red Team)
+ *
+ * Always-present roles: CEO, CTO, CPO, Tech Lead, Product Manager,
+ *                        Scrum Master, Security & Cloud Lead.
+ * Conditional roles:     Frontend Dev, Backend Dev, AI/ML Engineer, QA,
+ *                        DevOps, Cloud Eng, Cybersecurity, Red Team.
  */
 
 import { randomUUID } from 'crypto';
-import { db } from '@aria/db';
-import { workspaces } from '@aria/db';
-import { eq } from 'drizzle-orm';
-import { decryptApiKey } from './workspace.service';
 import type { CodebaseProfile, ProposedSkill } from '../types/onboarding.types';
 
-// ---- LLM caller (OpenAI-compatible) ----------------------------------------
-
-async function callLlm(
-  workspaceId: string,
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
-  if (!ws) throw new Error('Workspace not found');
-
-  const provider  = ws.llmProvider  ?? 'ollama';
-  const model     = ws.llmModel     ?? 'qwen2.5-coder:7b';
-  const apiKey    = ws.llmApiKeyEncrypted ? decryptApiKey(ws.llmApiKeyEncrypted) : undefined;
-
-  let baseUrl: string;
-  switch (provider) {
-    case 'anthropic': baseUrl = 'https://api.anthropic.com/v1'; break;
-    case 'openai':    baseUrl = 'https://api.openai.com/v1';    break;
-    case 'nvidia':    baseUrl = ws.llmBaseUrl ?? 'https://integrate.api.nvidia.com/v1'; break;
-    case 'ollama':    baseUrl = (ws.llmBaseUrl ?? 'http://localhost:11434') + '/v1'; break;
-    default:          baseUrl = ws.llmBaseUrl ?? 'http://localhost:8000/v1';
-  }
-
-  // Anthropic uses a different API format
-  if (provider === 'anthropic') {
-    const res = await fetch(`${baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey ?? '',
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    const data = await res.json() as { content: { text: string }[] };
-    return data.content[0]?.text ?? '';
-  }
-
-  // OpenAI-compatible (OpenAI / NVIDIA NIM / Ollama / custom)
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey ?? 'ollama'}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userPrompt },
-      ],
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  const data = await res.json() as { choices: { message: { content: string } }[] };
-  return data.choices[0]?.message?.content ?? '';
+// ── Slug helper ───────────────────────────────────────────────────────────────────
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
-// ---- Persona name bank ------------------------------------------------------
-
-const PERSONA_NAMES: Record<string, string> = {
-  'ceo':                    'Alexandra Rhodes',
-  'cto':                    'Marcus Chen',
-  'cpo':                    'Priya Nair',
-  'tech-lead':              'Jordan Blake',
-  'security-cloud-lead':    'Zara Kim',
-  'product-manager':        'Daniel Park',
-  'scrum-master':           'Sofia Reyes',
-  'frontend-developer':     'Ethan Walsh',
-  'backend-developer':      'Layla Hassan',
-  'ai-ml-engineer':         'Ravi Sharma',
-  'fullstack-developer':    'Casey Morgan',
-  'mobile-developer':       'Mei Lin',
-  'devops-engineer':        'Owen Torres',
-  'cloud-engineer':         'Aisha Patel',
-  'cybersecurity-analyst':  'Viktor Novak',
-  'red-team-engineer':      'Nadia Volkov',
-  'qa-engineer':            'Sam Rivera',
+// ── Agent name bank (personas) ───────────────────────────────────────────────────
+const PERSONAS: Record<string, string> = {
+  'chief-executive-officer':     'Evelyn Hart',
+  'chief-technology-officer':    'Marcus Reed',
+  'chief-product-officer':       'Priya Anand',
+  'product-manager':             'Jordan Mills',
+  'tech-lead':                   'Liam Chen',
+  'scrum-master':                'Sofia Reyes',
+  'security-and-cloud-lead':     'Nathan Blake',
+  'frontend-developer':          'Aiko Tanaka',
+  'backend-developer':           'Omar Hassan',
+  'ai-ml-engineer':              'Zara Singh',
+  'qa-engineer':                 'Ethan Brooks',
+  'devops-engineer':             'Clara Novak',
+  'cloud-engineer':              'Dev Patel',
+  'cybersecurity-engineer':      'Rena Wolf',
+  'red-team-specialist':         'Kai Mercer',
+  'mobile-developer':            'Yuki Ito',
 };
 
-// ---- Instruction generator --------------------------------------------------
+// ── Build instructions per agent (project-aware) ─────────────────────────────
+function buildInstructions(roleSlug: string, profile: CodebaseProfile, companyName: string): string {
+  const fw = profile.allFrameworks.length ? profile.allFrameworks.slice(0, 6).join(', ') : 'the project stack';
+  const lang = profile.allLangs.length ? profile.allLangs.join(' / ') : 'the primary language';
+  const summary = profile.projectSummary;
 
-async function generateInstructions(
-  workspaceId: string,
-  companyName: string,
-  companyDescription: string,
-  profile: CodebaseProfile,
-  roleTitle: string,
-  department: string,
-  reportingTo: string | null,
-  ownedDomains: string[],
-): Promise<{ instructions: string; description: string }> {
-  const systemPrompt = `You are an expert AI agent configuration specialist.
-Your task is to write precise, actionable system instructions for an AI agent role in a software company.
-The instructions must be:
-- Specific to the actual tech stack and codebase described
-- Written in second person ("You are...")
-- Covering: identity, responsibilities, decision-making authority, collaboration rules, tools/repos owned, escalation paths
-- 300-500 words
-- Followed by a 1-2 sentence description for display in the org chart`;
+  const base = [
+    `You are an AI agent operating inside ${companyName}'s ARIA workspace.`,
+    `Project context: ${summary}`,
+    `Tech stack: ${fw}. Language(s): ${lang}.`,
+  ].join(' ');
 
-  const userPrompt = `Company: ${companyName}
-Company description: ${companyDescription}
+  const roleInstructions: Record<string, string> = {
+    'chief-executive-officer': [
+      base,
+      `Your role is Chief Executive Officer. You are NOT a task executor — you are the strategic apex of this AI organisation.`,
+      `Your responsibilities are: (1) Own the product vision, roadmap and business direction of ${companyName}. `,
+      `(2) Make final decisions on scope, priority and trade-offs when other agents escalate. `,
+      `(3) Review and approve sprint goals proposed by the Product Manager and Scrum Master. `,
+      `(4) Monitor overall project health, agent performance metrics, and flag strategic risks. `,
+      `(5) Communicate decisions clearly and concisely in plain business language — avoid technical jargon. `,
+      `(6) Escalate nothing — you are the final decision-maker. `,
+      `Do NOT write code, create tickets, or perform engineering tasks. `,
+      `When asked for a decision, reason about business impact first, then technical feasibility, then cost.`,
+    ].join(''),
 
-Codebase profile:
-${profile.projectSummary}
-Frameworks: ${profile.allFrameworks.join(', ') || 'None detected'}
-Languages: ${profile.allLangs.join(', ') || 'Unknown'}
-Has frontend: ${profile.hasFrontend}
-Has backend: ${profile.hasBackend}
-Has AI/ML: ${profile.hasAiMl}
-Has infrastructure: ${profile.hasInfra}
-Has CI/CD: ${profile.hasCiCd}
-Has cloud IaC: ${profile.hasCloud}
+    'chief-technology-officer': [
+      base,
+      `Your role is Chief Technology Officer. You own the entire technical architecture of ${companyName}. `,
+      `Responsibilities: (1) Define and enforce architectural standards across all ${profile.repos.map(r => r.repoName).join(', ')} repos. `,
+      `(2) Review major technical decisions from Team Leads and approve or redirect them. `,
+      `(3) Identify technical debt, performance bottlenecks, and security risks at the architecture level. `,
+      `(4) Report to CEO. Manage Tech Lead and Security & Cloud Lead. `,
+      `(5) Stay current with ${fw} best practices and enforce them. `,
+      `Do NOT write implementation code directly. Provide guidance, architecture diagrams, and decision records.`,
+    ].join(''),
 
-Role to configure:
-- Title: ${roleTitle}
-- Department: ${department}
-- Reports to: ${reportingTo ?? 'No one (top of hierarchy)'}
-- Owned domains: ${ownedDomains.join(', ')}
+    'chief-product-officer': [
+      base,
+      `Your role is Chief Product Officer. You own the product experience and roadmap for ${companyName}. `,
+      `Responsibilities: (1) Define and prioritise the product backlog in collaboration with the Product Manager. `,
+      `(2) Translate business goals from the CEO into actionable product requirements. `,
+      `(3) Review UX decisions, feature proposals, and user journey designs. `,
+      `(4) Report to CEO. Manage the Product Manager directly. `,
+      `Write clear, structured product requirements documents (PRDs). `,
+      `Do NOT manage engineering tasks directly — route through the Product Manager.`,
+    ].join(''),
 
-Write the full system instructions, then on a new line write "DESCRIPTION:" followed by a 1-2 sentence description.
-Return ONLY the instructions and description — no preamble or commentary.`;
+    'product-manager': [
+      base,
+      `Your role is Product Manager at ${companyName}. `,
+      `Responsibilities: (1) Break down CPO-approved features into user stories and acceptance criteria. `,
+      `(2) Maintain the sprint backlog and prioritise tasks with the Scrum Master. `,
+      `(3) Write clear ticket descriptions that the engineering team can implement without ambiguity. `,
+      `(4) Track sprint progress and report blockers to the CPO. `,
+      `(5) Report to CPO. Work closely with the Scrum Master. `,
+      `Format all requirements as: Background / Acceptance Criteria / Out of Scope.`,
+    ].join(''),
 
-  const raw = await callLlm(workspaceId, systemPrompt, userPrompt);
+    'tech-lead': [
+      base,
+      `Your role is Engineering Tech Lead at ${companyName}. `,
+      `Tech stack you are responsible for: ${fw} (${lang}). `,
+      `Responsibilities: (1) Break down sprint tickets into concrete engineering tasks. `,
+      `(2) Review all code produced by Frontend, Backend, AI/ML, and QA engineers. `,
+      `(3) Enforce code quality, testing standards, and architectural patterns in ${profile.repos.map(r => r.repoName).join(', ')}. `,
+      `(4) Unblock engineers and resolve technical disputes. `,
+      `(5) Report to CTO. Manage Frontend Dev, Backend Dev, AI/ML Engineer, QA Engineer. `,
+      `When reviewing code, check: correctness, performance, security, maintainability, test coverage.`,
+    ].join(''),
 
-  const descMatch = raw.match(/DESCRIPTION:\s*(.+)/s);
-  const description  = descMatch ? descMatch[1].trim().split('\n')[0].trim() : `${roleTitle} agent for ${companyName}.`;
-  const instructions = raw.replace(/DESCRIPTION:.*/s, '').trim();
+    'scrum-master': [
+      base,
+      `Your role is Scrum Master at ${companyName}. `,
+      `Responsibilities: (1) Facilitate sprint planning, daily standups, retrospectives, and reviews. `,
+      `(2) Remove blockers reported by any IC agent. `,
+      `(3) Ensure the team follows agile best practices. `,
+      `(4) Track velocity, burndown, and raise capacity concerns to the Product Manager. `,
+      `(5) Report to Tech Lead and Product Manager. `,
+      `Output sprint reports in this format: Sprint Goal / Completed / Incomplete / Blockers / Next Sprint.`,
+    ].join(''),
 
-  return { instructions, description };
+    'security-and-cloud-lead': [
+      base,
+      `Your role is Security & Cloud Lead at ${companyName}. `,
+      `Responsibilities: (1) Own the security posture and cloud infrastructure architecture. `,
+      `(2) Review all infrastructure changes (${profile.hasInfra ? 'Dockerfiles, IaC' : 'deployment configs'}). `,
+      `(3) Lead threat modelling sessions and coordinate Red Team and Blue Team activities. `,
+      `(4) Approve all changes to production cloud environments. `,
+      `(5) Report to CTO. Manage DevOps Engineer, Cloud Engineer, Cybersecurity Engineer, Red Team Specialist.`,
+    ].join(''),
+
+    'frontend-developer': [
+      base,
+      `Your role is Frontend Developer at ${companyName}. `,
+      `You specialise in ${profile.allFrameworks.filter(f => ['react','vue','next','nuxt','svelte','astro','angular'].includes(f.toLowerCase())).join(', ') || 'frontend technologies'}. `,
+      `Responsibilities: (1) Implement UI components and pages from design specs and ticket requirements. `,
+      `(2) Write unit and integration tests for all components. `,
+      `(3) Optimise for performance, accessibility (WCAG 2.1 AA), and responsive design. `,
+      `(4) Report to Tech Lead. `,
+      `When writing code: use TypeScript strictly, co-locate tests, document all exported functions.`,
+    ].join(''),
+
+    'backend-developer': [
+      base,
+      `Your role is Backend Developer at ${companyName}. `,
+      `You specialise in ${profile.allFrameworks.filter(f => ['express','fastify','nestjs','hapi','django','flask','rails','go','gin','fiber'].includes(f.toLowerCase())).join(', ') || 'backend technologies'}. `,
+      `Responsibilities: (1) Build and maintain API endpoints and business logic. `,
+      `(2) Own the database schema, migrations, and query optimisation. `,
+      `(3) Write integration and unit tests for all service layers. `,
+      `(4) Enforce API contracts and document endpoints. `,
+      `(5) Report to Tech Lead. `,
+      `When writing code: validate all inputs, handle errors gracefully, never expose internal stack traces.`,
+    ].join(''),
+
+    'ai-ml-engineer': [
+      base,
+      `Your role is AI/ML Engineer at ${companyName}. `,
+      `You work with: ${profile.allFrameworks.filter(f => ['torch','tensorflow','transformers','langchain','openai','anthropic','llama-index'].includes(f.toLowerCase())).join(', ') || 'AI/ML frameworks'}. `,
+      `Responsibilities: (1) Design, train, and deploy ML models and LLM pipelines. `,
+      `(2) Build and maintain RAG pipelines, embeddings, and vector stores. `,
+      `(3) Monitor model performance, drift, and inference costs. `,
+      `(4) Document all model cards, prompts, and evaluation benchmarks. `,
+      `(5) Report to Tech Lead. `,
+      `Always version-control prompts and model configs alongside code.`,
+    ].join(''),
+
+    'qa-engineer': [
+      base,
+      `Your role is QA Engineer at ${companyName}. `,
+      `Responsibilities: (1) Write and maintain E2E, integration, and regression test suites. `,
+      `(2) Review tickets and flag missing acceptance criteria before dev starts. `,
+      `(3) Perform exploratory testing on every release candidate. `,
+      `(4) File detailed bug reports with reproduction steps, expected vs actual, and severity. `,
+      `(5) Report to Tech Lead. `,
+      `Never approve a release that has open P0 or P1 bugs.`,
+    ].join(''),
+
+    'devops-engineer': [
+      base,
+      `Your role is DevOps Engineer at ${companyName}. `,
+      `You manage: CI/CD pipelines${profile.hasCiCd ? ' (existing workflows detected)' : ''}, build systems, and deployment automation. `,
+      `Responsibilities: (1) Build and maintain CI/CD pipelines for all repos. `,
+      `(2) Manage container builds (${profile.hasInfra ? 'Docker configs detected' : 'containerisation'}). `,
+      `(3) Monitor build health, flaky tests, and deployment failures. `,
+      `(4) Implement GitOps workflows and release automation. `,
+      `(5) Report to Security & Cloud Lead. `,
+      `Every pipeline must include: lint, test, build, security scan, deploy stages.`,
+    ].join(''),
+
+    'cloud-engineer': [
+      base,
+      `Your role is Cloud Engineer at ${companyName}. `,
+      `Responsibilities: (1) Design and maintain cloud infrastructure${profile.hasCloud ? ' (IaC configs detected)' : ''}. `,
+      `(2) Implement infrastructure-as-code for all environments (dev, staging, prod). `,
+      `(3) Optimise cloud costs and enforce resource tagging policies. `,
+      `(4) Manage secrets, IAM policies, and least-privilege access. `,
+      `(5) Report to Security & Cloud Lead. `,
+      `All infrastructure changes must go through pull request review before apply.`,
+    ].join(''),
+
+    'cybersecurity-engineer': [
+      base,
+      `Your role is Cybersecurity Engineer (Blue Team) at ${companyName}. `,
+      `Responsibilities: (1) Monitor systems for threats and anomalies. `,
+      `(2) Perform SAST/DAST scans on every release. `,
+      `(3) Maintain the vulnerability register and drive remediation. `,
+      `(4) Define and enforce security policies across all repos. `,
+      `(5) Report to Security & Cloud Lead. `,
+      `OWASP Top 10 compliance is mandatory on every backend endpoint.`,
+    ].join(''),
+
+    'red-team-specialist': [
+      base,
+      `Your role is Red Team Specialist (Offensive Security) at ${companyName}. `,
+      `Responsibilities: (1) Simulate adversarial attacks against the application and infrastructure. `,
+      `(2) Perform penetration testing on APIs, authentication flows, and cloud surfaces. `,
+      `(3) Produce detailed pentest reports with CVSS scores and remediation steps. `,
+      `(4) Work with the Cybersecurity Engineer to validate fixes. `,
+      `(5) Report to Security & Cloud Lead. `,
+      `All findings must be reported in: Vulnerability / CVSS / Steps to Reproduce / Impact / Recommendation format.`,
+    ].join(''),
+
+    'mobile-developer': [
+      base,
+      `Your role is Mobile Developer at ${companyName}. `,
+      `You specialise in ${profile.allFrameworks.filter(f => ['react-native','expo','flutter'].includes(f.toLowerCase())).join(', ') || 'mobile technologies'}. `,
+      `Responsibilities: (1) Build and maintain mobile applications. `,
+      `(2) Ensure feature parity with the web frontend where applicable. `,
+      `(3) Handle platform-specific optimisations (iOS and Android). `,
+      `(4) Report to Tech Lead. `,
+      `Test on both platforms before raising a PR.`,
+    ].join(''),
+  };
+
+  return roleInstructions[roleSlug] ?? `${base} Your role is ${roleSlug.replace(/-/g, ' ')} at ${companyName}. Perform your duties diligently and report to your manager.`;
 }
 
-// ---- Role definition --------------------------------------------------------
-
-interface RoleDef {
-  slug:                string;
-  roleTitle:           string;
-  department:          string;
-  hierarchyLevel:      number;
-  reportingManagerSlug: string | null;
-  ownedDomains:        string[];
-  triggerKeywords:     string[];
-  riskClass:           'A' | 'B' | 'C' | 'D';
-  isAlwaysPresent:     boolean;
-  condition:           (p: CodebaseProfile) => boolean;
+// ── Skill builder helper ─────────────────────────────────────────────────────────
+function makeSkill(opts: {
+  roleTitle:              string;
+  department:             string;
+  hierarchyLevel:         number;
+  reportingManagerTempId: string | null;
+  ownedDomains:           string[];
+  ownedRepoPaths:         string[];
+  triggerKeywords:        string[];
+  riskClass:              'A' | 'B' | 'C' | 'D';
+  isAlwaysPresent:        boolean;
+  profile:                CodebaseProfile;
+  companyName:            string;
+}): ProposedSkill {
+  const slug = slugify(opts.roleTitle);
+  return {
+    tempId:                 slug,
+    slug,
+    realName:               PERSONAS[slug] ?? opts.roleTitle,
+    roleTitle:              opts.roleTitle,
+    department:             opts.department,
+    hierarchyLevel:         opts.hierarchyLevel,
+    reportingManagerTempId: opts.reportingManagerTempId,
+    instructions:           buildInstructions(slug, opts.profile, opts.companyName),
+    description:            `${opts.roleTitle} — Level ${opts.hierarchyLevel}, ${opts.department}`,
+    ownedDomains:           opts.ownedDomains,
+    ownedRepoPaths:         opts.ownedRepoPaths,
+    triggerKeywords:        opts.triggerKeywords,
+    riskClass:              opts.riskClass,
+    isAlwaysPresent:        opts.isAlwaysPresent,
+    isAiGenerated:          true,
+  };
 }
 
-const ROLE_DEFINITIONS: RoleDef[] = [
-  // ---- Level 1: CEO ----
-  {
-    slug: 'ceo', roleTitle: 'Chief Executive Officer', department: 'C-Suite',
-    hierarchyLevel: 1, reportingManagerSlug: null,
-    ownedDomains: ['strategy', 'vision', 'product-direction', 'team-culture'],
-    triggerKeywords: ['vision', 'strategy', 'roadmap', 'company', 'mission', 'okr', 'milestone'],
-    riskClass: 'A', isAlwaysPresent: true, condition: () => true,
-  },
-  // ---- Level 2: C-Suite ----
-  {
-    slug: 'cto', roleTitle: 'Chief Technology Officer', department: 'C-Suite',
-    hierarchyLevel: 2, reportingManagerSlug: 'ceo',
-    ownedDomains: ['architecture', 'tech-strategy', 'engineering-standards'],
-    triggerKeywords: ['architecture', 'tech debt', 'engineering', 'infrastructure', 'scale', 'security'],
-    riskClass: 'A', isAlwaysPresent: true, condition: () => true,
-  },
-  {
-    slug: 'cpo', roleTitle: 'Chief Product Officer', department: 'C-Suite',
-    hierarchyLevel: 2, reportingManagerSlug: 'ceo',
-    ownedDomains: ['product-strategy', 'user-experience', 'feature-prioritisation', 'design'],
-    triggerKeywords: ['product', 'feature', 'user', 'ux', 'design', 'prioritise', 'backlog'],
-    riskClass: 'A', isAlwaysPresent: true, condition: () => true,
-  },
-  // ---- Level 3: Leads ----
-  {
-    slug: 'product-manager', roleTitle: 'Product Manager', department: 'Product',
-    hierarchyLevel: 3, reportingManagerSlug: 'cpo',
-    ownedDomains: ['sprint-planning', 'requirements', 'acceptance-criteria', 'stakeholder-comms'],
-    triggerKeywords: ['sprint', 'story', 'epic', 'requirement', 'acceptance', 'stakeholder', 'release'],
-    riskClass: 'B', isAlwaysPresent: true, condition: () => true,
-  },
-  {
-    slug: 'tech-lead', roleTitle: 'Engineering Team Lead', department: 'Engineering',
-    hierarchyLevel: 3, reportingManagerSlug: 'cto',
-    ownedDomains: ['code-review', 'engineering-decisions', 'tech-standards', 'developer-unblocking'],
-    triggerKeywords: ['code review', 'pr', 'pull request', 'tech decision', 'architecture', 'merge', 'linting'],
-    riskClass: 'B', isAlwaysPresent: true, condition: () => true,
-  },
-  {
-    slug: 'security-cloud-lead', roleTitle: 'Security & Cloud Lead', department: 'Security & Cloud',
-    hierarchyLevel: 3, reportingManagerSlug: 'cto',
-    ownedDomains: ['security-posture', 'cloud-architecture', 'compliance', 'incident-response'],
-    triggerKeywords: ['security', 'cloud', 'compliance', 'vulnerability', 'incident', 'infra', 'devops'],
-    riskClass: 'A', isAlwaysPresent: true, condition: () => true,
-  },
-  // ---- Level 4: Scrum Master ----
-  {
-    slug: 'scrum-master', roleTitle: 'Scrum Master', department: 'Engineering',
-    hierarchyLevel: 4, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['ceremony-facilitation', 'impediment-removal', 'sprint-health', 'team-velocity'],
-    triggerKeywords: ['standup', 'retrospective', 'sprint', 'ceremony', 'velocity', 'blocker', 'burndown'],
-    riskClass: 'B', isAlwaysPresent: true, condition: () => true,
-  },
-  // ---- Level 5: Individual Contributors ----
-  {
-    slug: 'frontend-developer', roleTitle: 'Frontend Developer', department: 'Engineering',
-    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['ui-components', 'client-side-logic', 'css', 'browser-performance'],
-    triggerKeywords: ['component', 'ui', 'css', 'html', 'browser', 'frontend', 'jsx', 'tsx', 'styling'],
-    riskClass: 'B', isAlwaysPresent: false, condition: p => p.hasFrontend,
-  },
-  {
-    slug: 'backend-developer', roleTitle: 'Backend Developer', department: 'Engineering',
-    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['api', 'database', 'server-logic', 'integrations'],
-    triggerKeywords: ['api', 'endpoint', 'database', 'query', 'migration', 'server', 'rest', 'graphql'],
-    riskClass: 'B', isAlwaysPresent: false, condition: p => p.hasBackend,
-  },
-  {
-    slug: 'fullstack-developer', roleTitle: 'Fullstack Developer', department: 'Engineering',
-    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['full-stack', 'api', 'ui', 'database'],
-    triggerKeywords: ['fullstack', 'full stack', 'api', 'component', 'database'],
-    riskClass: 'B', isAlwaysPresent: false,
-    // Only add fullstack if BOTH frontend and backend exist (replaces neither)
-    condition: p => p.hasFrontend && p.hasBackend,
-  },
-  {
-    slug: 'ai-ml-engineer', roleTitle: 'AI/ML Engineer', department: 'Engineering',
-    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['ml-models', 'ai-pipelines', 'data-processing', 'model-evaluation'],
-    triggerKeywords: ['model', 'training', 'inference', 'embedding', 'llm', 'ai', 'ml', 'dataset'],
-    riskClass: 'B', isAlwaysPresent: false, condition: p => p.hasAiMl,
-  },
-  {
-    slug: 'mobile-developer', roleTitle: 'Mobile Developer', department: 'Engineering',
-    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['mobile-app', 'app-store', 'native-apis', 'mobile-performance'],
-    triggerKeywords: ['mobile', 'ios', 'android', 'react native', 'flutter', 'expo'],
-    riskClass: 'B', isAlwaysPresent: false, condition: p => p.hasMobile,
-  },
-  {
-    slug: 'qa-engineer', roleTitle: 'QA Engineer', department: 'Engineering',
-    hierarchyLevel: 5, reportingManagerSlug: 'tech-lead',
-    ownedDomains: ['test-coverage', 'regression-testing', 'qa-automation', 'bug-triage'],
-    triggerKeywords: ['test', 'bug', 'qa', 'regression', 'e2e', 'unit test', 'coverage', 'jest', 'playwright'],
-    riskClass: 'B', isAlwaysPresent: false, condition: p => p.hasBackend || p.hasFrontend,
-  },
-  {
-    slug: 'devops-engineer', roleTitle: 'DevOps Engineer', department: 'Security & Cloud',
-    hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead',
-    ownedDomains: ['ci-cd', 'deployment', 'docker', 'pipelines', 'release-management'],
-    triggerKeywords: ['deploy', 'pipeline', 'ci', 'cd', 'docker', 'container', 'release', 'build'],
-    riskClass: 'C', isAlwaysPresent: false, condition: p => p.hasInfra || p.hasCiCd,
-  },
-  {
-    slug: 'cloud-engineer', roleTitle: 'Cloud Engineer', department: 'Security & Cloud',
-    hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead',
-    ownedDomains: ['cloud-infra', 'iac', 'cost-optimisation', 'cloud-security'],
-    triggerKeywords: ['aws', 'gcp', 'azure', 'terraform', 'pulumi', 'cloud', 'serverless', 'iac'],
-    riskClass: 'C', isAlwaysPresent: false, condition: p => p.hasCloud,
-  },
-  {
-    slug: 'cybersecurity-analyst', roleTitle: 'Cybersecurity Analyst (Blue Team)', department: 'Security & Cloud',
-    hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead',
-    ownedDomains: ['threat-monitoring', 'vulnerability-management', 'siem', 'compliance'],
-    triggerKeywords: ['security', 'vulnerability', 'cve', 'siem', 'compliance', 'audit', 'threat'],
-    riskClass: 'A', isAlwaysPresent: false, condition: p => p.hasInfra || p.hasCloud || p.hasCiCd,
-  },
-  {
-    slug: 'red-team-engineer', roleTitle: 'Red Team Engineer (Pen Tester)', department: 'Security & Cloud',
-    hierarchyLevel: 5, reportingManagerSlug: 'security-cloud-lead',
-    ownedDomains: ['penetration-testing', 'exploit-research', 'attack-simulation', 'security-gaps'],
-    triggerKeywords: ['pen test', 'exploit', 'attack', 'red team', 'owasp', 'injection', 'xss', 'csrf'],
-    riskClass: 'A', isAlwaysPresent: false, condition: p => p.hasInfra || p.hasCloud || p.hasBackend,
-  },
-];
+// ── Public API ───────────────────────────────────────────────────────────────────
+export function buildProposedSkills(profile: CodebaseProfile, companyName: string): ProposedSkill[] {
+  const skills: ProposedSkill[] = [];
 
-// ---- Main export ------------------------------------------------------------
+  // ── Level 1: CEO (always) ────────────────────────────────────────────────────
+  const ceo = makeSkill({
+    roleTitle: 'Chief Executive Officer', department: 'C-Suite',
+    hierarchyLevel: 1, reportingManagerTempId: null,
+    ownedDomains: ['strategy', 'vision', 'roadmap', 'company'],
+    ownedRepoPaths: [], triggerKeywords: ['ceo', 'strategy', 'vision', 'decision', 'roadmap', 'approve'],
+    riskClass: 'A', isAlwaysPresent: true, profile, companyName,
+  });
+  skills.push(ceo);
 
-/**
- * Generates the full ProposedSkill[] for a workspace based on its codebase.
- * Calls the LLM once per agent to generate custom instructions.
- */
-export async function generateProposedSkills(
-  workspaceId: string,
-  profile: CodebaseProfile,
-): Promise<ProposedSkill[]> {
-  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
-  if (!ws) throw new Error('Workspace not found');
+  // ── Level 2: CTO + CPO (always) ───────────────────────────────────────────────
+  const cto = makeSkill({
+    roleTitle: 'Chief Technology Officer', department: 'C-Suite',
+    hierarchyLevel: 2, reportingManagerTempId: ceo.tempId,
+    ownedDomains: ['architecture', 'technology', 'infrastructure', 'engineering'],
+    ownedRepoPaths: [], triggerKeywords: ['cto', 'architecture', 'tech stack', 'engineering decision'],
+    riskClass: 'A', isAlwaysPresent: true, profile, companyName,
+  });
+  const cpo = makeSkill({
+    roleTitle: 'Chief Product Officer', department: 'C-Suite',
+    hierarchyLevel: 2, reportingManagerTempId: ceo.tempId,
+    ownedDomains: ['product', 'ux', 'design', 'roadmap'],
+    ownedRepoPaths: [], triggerKeywords: ['cpo', 'product', 'feature', 'ux', 'design'],
+    riskClass: 'A', isAlwaysPresent: true, profile, companyName,
+  });
+  skills.push(cto, cpo);
 
-  const companyName        = ws.name;
-  const companyDescription = ws.companyDescription ?? 'A software company';
+  // ── Level 3: Tech Lead, PM, Security & Cloud Lead (always) ────────────────
+  const techLead = makeSkill({
+    roleTitle: 'Tech Lead', department: 'Engineering',
+    hierarchyLevel: 3, reportingManagerTempId: cto.tempId,
+    ownedDomains: ['code review', 'engineering', 'sprint', 'pull requests'],
+    ownedRepoPaths: profile.repos.map(r => r.repoName),
+    triggerKeywords: ['tech lead', 'code review', 'engineering', 'pr', 'architecture'],
+    riskClass: 'B', isAlwaysPresent: true, profile, companyName,
+  });
+  const pm = makeSkill({
+    roleTitle: 'Product Manager', department: 'Product',
+    hierarchyLevel: 3, reportingManagerTempId: cpo.tempId,
+    ownedDomains: ['backlog', 'tickets', 'requirements', 'sprint planning'],
+    ownedRepoPaths: [], triggerKeywords: ['product manager', 'backlog', 'requirements', 'user story', 'ticket'],
+    riskClass: 'B', isAlwaysPresent: true, profile, companyName,
+  });
+  const secCloudLead = makeSkill({
+    roleTitle: 'Security and Cloud Lead', department: 'Security & Cloud',
+    hierarchyLevel: 3, reportingManagerTempId: cto.tempId,
+    ownedDomains: ['security', 'cloud', 'infrastructure', 'compliance'],
+    ownedRepoPaths: [], triggerKeywords: ['security', 'cloud', 'infrastructure', 'compliance', 'vulnerability'],
+    riskClass: 'A', isAlwaysPresent: true, profile, companyName,
+  });
+  skills.push(techLead, pm, secCloudLead);
 
-  // 1. Filter roles based on codebase signals
-  const activeRoles = ROLE_DEFINITIONS.filter(r => r.condition(profile));
+  // ── Level 4: Scrum Master (always) ───────────────────────────────────────────────
+  const scrumMaster = makeSkill({
+    roleTitle: 'Scrum Master', department: 'Engineering',
+    hierarchyLevel: 4, reportingManagerTempId: techLead.tempId,
+    ownedDomains: ['sprint', 'agile', 'standup', 'retrospective'],
+    ownedRepoPaths: [], triggerKeywords: ['scrum', 'sprint', 'standup', 'velocity', 'blocker', 'retrospective'],
+    riskClass: 'B', isAlwaysPresent: true, profile, companyName,
+  });
+  skills.push(scrumMaster);
 
-  // 2. Build tempId map: slug -> tempId (needed for reportingManagerTempId)
-  const slugToTempId: Record<string, string> = {};
-  for (const role of activeRoles) {
-    slugToTempId[role.slug] = randomUUID();
+  // ── Level 5: ICs — conditional on codebase signals ─────────────────────────────
+  if (profile.hasFrontend) {
+    skills.push(makeSkill({
+      roleTitle: 'Frontend Developer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerTempId: techLead.tempId,
+      ownedDomains: ['ui', 'frontend', 'components', 'styling', 'accessibility'],
+      ownedRepoPaths: profile.repos.filter(r => r.hasFrontend).map(r => r.repoName),
+      triggerKeywords: ['frontend', 'ui', 'component', 'css', 'react', 'vue', 'next'],
+      riskClass: 'C', isAlwaysPresent: false, profile, companyName,
+    }));
   }
 
-  // 3. Generate instructions for each role (batch 4 at a time to not overload the LLM)
-  const proposedSkills: ProposedSkill[] = [];
-
-  for (let i = 0; i < activeRoles.length; i += 4) {
-    const batch = activeRoles.slice(i, i + 4);
-    const results = await Promise.all(
-      batch.map(async (role) => {
-        const reportingManagerSlug = role.reportingManagerSlug;
-        const reportingTo = reportingManagerSlug
-          ? activeRoles.find(r => r.slug === reportingManagerSlug)?.roleTitle ?? null
-          : null;
-
-        const { instructions, description } = await generateInstructions(
-          workspaceId,
-          companyName,
-          companyDescription,
-          profile,
-          role.roleTitle,
-          role.department,
-          reportingTo,
-          role.ownedDomains,
-        );
-
-        const reportingManagerTempId = reportingManagerSlug
-          ? slugToTempId[reportingManagerSlug] ?? null
-          : null;
-
-        const skill: ProposedSkill = {
-          tempId:                 slugToTempId[role.slug],
-          slug:                   role.slug,
-          realName:               PERSONA_NAMES[role.slug] ?? `Agent ${role.roleTitle}`,
-          roleTitle:              role.roleTitle,
-          department:             role.department,
-          hierarchyLevel:         role.hierarchyLevel,
-          reportingManagerTempId,
-          instructions,
-          description,
-          ownedDomains:           role.ownedDomains,
-          ownedRepoPaths:         [],
-          triggerKeywords:        role.triggerKeywords,
-          riskClass:              role.riskClass,
-          isAlwaysPresent:        role.isAlwaysPresent,
-          isAiGenerated:          true,
-        };
-
-        return skill;
-      }),
-    );
-    proposedSkills.push(...results);
+  if (profile.hasBackend) {
+    skills.push(makeSkill({
+      roleTitle: 'Backend Developer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerTempId: techLead.tempId,
+      ownedDomains: ['api', 'backend', 'database', 'services', 'middleware'],
+      ownedRepoPaths: profile.repos.filter(r => r.hasBackend).map(r => r.repoName),
+      triggerKeywords: ['backend', 'api', 'database', 'endpoint', 'migration', 'service'],
+      riskClass: 'B', isAlwaysPresent: false, profile, companyName,
+    }));
   }
 
-  // Sort by hierarchy level so the tree renders top-down
-  proposedSkills.sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.slug.localeCompare(b.slug));
+  if (profile.hasAiMl) {
+    skills.push(makeSkill({
+      roleTitle: 'AI/ML Engineer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerTempId: techLead.tempId,
+      ownedDomains: ['ai', 'ml', 'llm', 'models', 'embeddings', 'rag'],
+      ownedRepoPaths: profile.repos.filter(r => r.hasAiMl).map(r => r.repoName),
+      triggerKeywords: ['ai', 'ml', 'model', 'llm', 'embedding', 'rag', 'prompt', 'inference'],
+      riskClass: 'B', isAlwaysPresent: false, profile, companyName,
+    }));
+  }
 
-  return proposedSkills;
+  if (profile.hasMobile) {
+    skills.push(makeSkill({
+      roleTitle: 'Mobile Developer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerTempId: techLead.tempId,
+      ownedDomains: ['mobile', 'ios', 'android', 'react-native', 'flutter'],
+      ownedRepoPaths: profile.repos.filter(r => r.hasMobile).map(r => r.repoName),
+      triggerKeywords: ['mobile', 'ios', 'android', 'app', 'native'],
+      riskClass: 'C', isAlwaysPresent: false, profile, companyName,
+    }));
+  }
+
+  // QA: always present if there is any backend or frontend code
+  if (profile.hasBackend || profile.hasFrontend) {
+    skills.push(makeSkill({
+      roleTitle: 'QA Engineer', department: 'Engineering',
+      hierarchyLevel: 5, reportingManagerTempId: techLead.tempId,
+      ownedDomains: ['testing', 'qa', 'bugs', 'test suite', 'regression'],
+      ownedRepoPaths: profile.repos.map(r => r.repoName),
+      triggerKeywords: ['qa', 'test', 'bug', 'regression', 'e2e', 'acceptance'],
+      riskClass: 'B', isAlwaysPresent: false, profile, companyName,
+    }));
+  }
+
+  // DevOps: if CI/CD or Infra detected
+  if (profile.hasCiCd || profile.hasInfra) {
+    skills.push(makeSkill({
+      roleTitle: 'DevOps Engineer', department: 'Security & Cloud',
+      hierarchyLevel: 5, reportingManagerTempId: secCloudLead.tempId,
+      ownedDomains: ['ci/cd', 'pipelines', 'builds', 'deployments', 'docker'],
+      ownedRepoPaths: [], triggerKeywords: ['devops', 'ci', 'cd', 'pipeline', 'docker', 'deploy', 'build'],
+      riskClass: 'B', isAlwaysPresent: false, profile, companyName,
+    }));
+  }
+
+  // Cloud Eng: if cloud IaC detected
+  if (profile.hasCloud) {
+    skills.push(makeSkill({
+      roleTitle: 'Cloud Engineer', department: 'Security & Cloud',
+      hierarchyLevel: 5, reportingManagerTempId: secCloudLead.tempId,
+      ownedDomains: ['cloud', 'terraform', 'aws', 'gcp', 'azure', 'iac'],
+      ownedRepoPaths: [], triggerKeywords: ['cloud', 'terraform', 'iac', 'aws', 'gcp', 'azure', 'infrastructure'],
+      riskClass: 'B', isAlwaysPresent: false, profile, companyName,
+    }));
+  }
+
+  // Cybersecurity + Red Team: if infra or cloud or CI/CD detected
+  if (profile.hasInfra || profile.hasCloud || profile.hasCiCd) {
+    skills.push(makeSkill({
+      roleTitle: 'Cybersecurity Engineer', department: 'Security & Cloud',
+      hierarchyLevel: 5, reportingManagerTempId: secCloudLead.tempId,
+      ownedDomains: ['security', 'vulnerabilities', 'sast', 'dast', 'owasp'],
+      ownedRepoPaths: [], triggerKeywords: ['security', 'vulnerability', 'owasp', 'sast', 'dast', 'scan', 'cve'],
+      riskClass: 'A', isAlwaysPresent: false, profile, companyName,
+    }));
+    skills.push(makeSkill({
+      roleTitle: 'Red Team Specialist', department: 'Security & Cloud',
+      hierarchyLevel: 5, reportingManagerTempId: secCloudLead.tempId,
+      ownedDomains: ['penetration testing', 'red team', 'offensive security'],
+      ownedRepoPaths: [], triggerKeywords: ['pentest', 'red team', 'exploit', 'attack', 'offensive'],
+      riskClass: 'A', isAlwaysPresent: false, profile, companyName,
+    }));
+  }
+
+  return skills;
 }
