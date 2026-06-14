@@ -4,16 +4,16 @@ import { workspaces } from './workspaces';
 
 export const proposalStatusEnum = pgEnum('proposal_status', [
   'pending',    // analysis triggered, not yet complete
-  'ready',      // AI has generated the team — awaiting user review (Step 5)
+  'ready',      // AI has generated the team proposal, awaiting user review
   'committed',  // user clicked "Create Company" — skills written to DB
-  'failed',     // analysis or skill-generation failed
+  'failed',     // analysis or skill generation failed
 ]);
 
 /**
  * onboarding_proposals
  * One row per workspace onboarding run.
- * proposedSkills holds ProposedSkill[] JSON (see onboarding.types.ts).
- * Users review/edit in Step 5 before committing in Step 6.
+ * proposedSkills JSONB = ProposedSkill[] (see types/onboarding.types.ts)
+ * Users review/edit this in Step 5 before committing in Step 6.
  */
 export const onboardingProposals = pgTable('onboarding_proposals', {
   id:              uuid('id').primaryKey().defaultRandom(),
