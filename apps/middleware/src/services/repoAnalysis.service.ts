@@ -89,7 +89,7 @@ function extractDeps(pkgJson: string | null, requirementsTxt: string | null, goM
   return deps;
 }
 
-function detectPrimaryLang(paths: string[], deps: string[]): string {
+function detectPrimaryLang(paths: string[], _deps: string[]): string {
   const ext = (e: string) => paths.filter(p => p.endsWith(e)).length;
   const counts: [string, number][] = [
     ['TypeScript', ext('.ts') + ext('.tsx')],

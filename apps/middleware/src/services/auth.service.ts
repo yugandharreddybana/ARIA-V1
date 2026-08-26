@@ -67,7 +67,7 @@ export class AuthService {
     return this._issueTokens(user);
   }
 
-  async refresh(refreshToken: string, ipAddress?: string, userAgent?: string): Promise<{ accessToken: string }> {
+  async refresh(refreshToken: string, _ipAddress?: string, _userAgent?: string): Promise<{ accessToken: string }> {
     let payload: { sub: string; jti: string };
     try {
       payload = verifyRefreshToken(refreshToken);
