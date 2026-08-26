@@ -1,17 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockInsertReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'backlog', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-const mockUpdateReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'in_progress', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-
-const mockDb = {
-  query: {
-    skills:   { findFirst: vi.fn() },
-    projects: { findFirst: vi.fn() },
-    tickets:  { findFirst: vi.fn() },
-  },
-  insert: vi.fn(() => ({ values: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockInsertReturn) })) })),
-  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockUpdateReturn) })) })) })),
-};
+const { mockDb } = vi.hoisted(() => {
+  const mockInsertReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'backlog', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+  const mockUpdateReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'in_progress', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+  return {
+    mockDb: {
+      query: {
+        skills:   { findFirst: vi.fn() },
+        projects: { findFirst: vi.fn() },
+        tickets:  { findFirst: vi.fn() },
+      },
+      insert: vi.fn(() => ({ values: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockInsertReturn) })) })),
+      update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockUpdateReturn) })) })) })),
+    },
+  };
+});
 
 vi.mock('@aria/db', () => ({
   db: mockDb,
@@ -20,10 +23,17 @@ vi.mock('@aria/db', () => ({
   skills:   {},
 }));
 
+vi.mock('drizzle-orm', () => ({
+  // Columns are mocked as {} above, so return inert matchers — findFirst is
+  // stubbed per-test and never evaluates these.
+  eq:  vi.fn(() => ({})),
+  and: vi.fn(() => ({})),
+}));
+
 import { agentCreateTicket, agentUpdateTicketStatus } from '../services/agentTicket.service';
 
 describe('agentCreateTicket', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('throws 403 when skill not found in workspace', async () => {
     mockDb.query.skills.findFirst.mockResolvedValue(null);
@@ -85,7 +95,7 @@ describe('agentCreateTicket', () => {
 });
 
 describe('agentUpdateTicketStatus', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('throws 404 for unknown ticket', async () => {
     mockDb.query.tickets.findFirst.mockResolvedValue(null);

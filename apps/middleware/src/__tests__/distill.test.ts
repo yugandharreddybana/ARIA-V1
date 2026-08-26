@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { distillSchema, preflightSchema } from '../schemas/distill.schemas';
 
 describe('distill schemas', () => {
@@ -43,6 +43,12 @@ describe('preFlight estimator fallback', () => {
   // thrower to exercise that branch without spinning up Postgres.
   it('falls back to DEFAULT_RATIO (1.0) when distillation_runs is unreachable', async () => {
     process.env.DATABASE_URL = 'postgresql://localhost:1/aria_no_db_for_test';
+    // validateEnv() needs the full required set or it process.exit(1)s.
+    process.env.JWT_PRIVATE_KEY      ??= 'test-key';
+    process.env.JWT_PUBLIC_KEY       ??= 'test-key';
+    process.env.COOKIE_SECRET        ??= 'x'.repeat(32);
+    process.env.GITHUB_CLIENT_ID     ??= 'test-client-id';
+    process.env.GITHUB_CLIENT_SECRET ??= 'test-client-secret';
     // Lazy import after env override so getPgPool reads the bogus URL.
     const mod = await import('../services/distill.service');
     const r = await mod.preFlight({
