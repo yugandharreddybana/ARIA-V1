@@ -262,7 +262,8 @@ export default function SignupPage() {
     }
   };
 
-  const handleFinish = () => router.push('/dashboard');
+  // New workspaces continue into the 6-step company onboarding wizard.
+  const handleFinish = () => router.push('/onboarding');
 
   // ────────────────────────────────────────────────────────────────
   // Render
@@ -447,7 +448,7 @@ export default function SignupPage() {
                     Get a free API key at{' '}
                     <a href="https://build.nvidia.com" target="_blank" rel="noopener noreferrer"
                       className="underline text-aria-400 hover:text-aria-300">build.nvidia.com</a>
-                    {' '}→ Explore Models → any model → "Get API Key".
+                    {' '}→ Explore Models → any model → &quot;Get API Key&quot;.
                   </p>
                   <p>Keys always start with <code className="font-mono bg-aria-900/60 px-1 rounded">nvapi-</code>.</p>
                 </div>
@@ -551,7 +552,7 @@ export default function SignupPage() {
               <p className="text-sm font-medium">What happens next:</p>
               <ul className="space-y-2">
                 {[
-                  'Connect a GitHub repo in Projects to let ARIA analyse your codebase',
+                  'Describe your company and connect your GitHub repos',
                   'ARIA will propose a full AI engineering team based on your codebase',
                   'Start a session and your AI team begins working on real tickets',
                 ].map((item, i) => (
@@ -562,8 +563,8 @@ export default function SignupPage() {
                 ))}
               </ul>
             </div>
-            <Button variant="aria" className="w-full" size="lg" onClick={handleFinish}>
-              Go to Dashboard <ChevronRight className="h-4 w-4 ml-2" />
+            <Button variant="aria" className="w-full" size="lg" onClick={handleFinish} data-testid="signup-finish-btn">
+              Set up your AI company <ChevronRight className="h-4 w-4 ml-2" />
             </Button>
           </CardContent>
         </Card>

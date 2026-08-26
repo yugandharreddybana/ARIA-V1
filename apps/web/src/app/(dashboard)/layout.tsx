@@ -2,7 +2,10 @@
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useAuth } from '@/contexts/auth.context';
+import { api } from '@/lib/api';
+import type { OnboardingStatus } from '@aria/shared';
 import {
   BrainCircuit, LayoutDashboard, FolderKanban,
   Users, Ticket, Lightbulb, PlayCircle,
@@ -12,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { SessionStatus } from '@/components/SessionStatus';
 import { cn } from '@/lib/utils';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { href: Route; icon: typeof LayoutDashboard; label: string }[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/projects', icon: FolderKanban, label: 'Projects' },
   { href: '/dashboard/team', icon: Users, label: 'Skills & Teams' },
@@ -32,6 +35,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!isLoading && !isAuthenticated) {
       router.replace('/login');
     }
+  }, [isLoading, isAuthenticated, router]);
+
+  // Onboarding gate: workspaces that never finished the wizard are sent into
+  // it. Pre-wizard workspaces are backfilled as completed by migration V11.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    api<{ ok: boolean; data: OnboardingStatus }>('/onboarding/status')
+      .then(({ data }) => {
+        if (!cancelled && !data.completed) router.replace('/onboarding');
+      })
+      .catch(() => { /* status unavailable — do not block the dashboard */ });
+    return () => { cancelled = true; };
   }, [isLoading, isAuthenticated, router]);
 
   if (isLoading) {
