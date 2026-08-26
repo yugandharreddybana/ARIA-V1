@@ -29,9 +29,10 @@ export interface AgentCreateTicketParams {
 export async function agentCreateTicket(params: AgentCreateTicketParams) {
   const { sessionId, skillId, workspaceId, projectId } = params;
 
-  // Verify skill belongs to this workspace
+  // Skills are project-scoped (no workspaceId column) — workspace ownership
+  // is checked via skill → project → workspace.
   const skill = await db.query.skills.findFirst({
-    where: and(eq(skills.id, skillId), eq(skills.workspaceId, workspaceId)),
+    where: eq(skills.id, skillId),
   });
   if (!skill) throw new AppError('Skill not found or access denied', 403, 'FORBIDDEN');
 
@@ -40,6 +41,14 @@ export async function agentCreateTicket(params: AgentCreateTicketParams) {
     where: and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)),
   });
   if (!project) throw new AppError('Project not found or access denied', 404, 'NOT_FOUND');
+
+  // IDOR: the skill's own project must also be in the caller's workspace
+  if (skill.projectId !== projectId) {
+    const skillProject = await db.query.projects.findFirst({
+      where: and(eq(projects.id, skill.projectId), eq(projects.workspaceId, workspaceId)),
+    });
+    if (!skillProject) throw new AppError('Skill not found or access denied', 403, 'FORBIDDEN');
+  }
 
   if (!params.title?.trim())       throw new AppError('title required', 400, 'VALIDATION_ERROR');
   if (!params.description?.trim()) throw new AppError('description required', 400, 'VALIDATION_ERROR');
