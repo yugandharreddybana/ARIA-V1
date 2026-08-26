@@ -33,6 +33,7 @@ import type {
   ProposedSkill,
   ProposalSkillPatch,
   CommitProposalResponse,
+  OnboardingStatus,
 } from '../types/onboarding.types';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -51,6 +52,19 @@ async function getActiveProposal(workspaceId: string) {
     orderBy: (t, { desc }) => [desc(t.createdAt)],
   });
   return proposal;
+}
+
+// ─── Wizard routing gate ────────────────────────────────────────────────────
+export async function getStatus(workspaceId: string): Promise<OnboardingStatus> {
+  const ws = await getWorkspace(workspaceId);
+  const proposal = await getActiveProposal(workspaceId);
+  return {
+    completed:             ws.onboardingCompletedAt !== null,
+    onboardingCompletedAt: ws.onboardingCompletedAt?.toISOString() ?? null,
+    companyDescription:    ws.companyDescription ?? null,
+    githubConnected:       !!ws.githubAccessTokenEncrypted,
+    proposalStatus:        proposal?.status ?? null,
+  };
 }
 
 // ─── Step 1 ─────────────────────────────────────────────────────────────────
