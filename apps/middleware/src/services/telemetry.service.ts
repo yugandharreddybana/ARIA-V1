@@ -29,8 +29,11 @@ class Histogram {
       lines.push(`${name}_bucket{${labels}le="${b.le}"} ${b.count}`);
     }
     lines.push(`${name}_bucket{${labels}le="+Inf"} ${this.count}`);
-    lines.push(`${name}_sum{${labels.replace(/,$/, '')}} ${this.sum}`);
-    lines.push(`${name}_count{${labels.replace(/,$/, '')}} ${this.count}`);
+    // Prometheus text format: omit the braces entirely for unlabeled series
+    const bare = labels.replace(/,$/, '');
+    const suffix = bare ? `{${bare}}` : '';
+    lines.push(`${name}_sum${suffix} ${this.sum}`);
+    lines.push(`${name}_count${suffix} ${this.count}`);
     return lines.join('\n');
   }
 }

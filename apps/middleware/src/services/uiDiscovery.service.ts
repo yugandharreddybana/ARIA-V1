@@ -45,7 +45,7 @@ export class UiDiscoveryService {
     // Write the YAML mirror so the team can review via git.
     const dir = resolve(this.repoRoot, '.entiresystem/ui_discovery');
     mkdirSync(dir, { recursive: true });
-    const safeId = input.ticketId.replace(/[^a-zA-Z0-9_.\-]/g, '_');
+    const safeId = input.ticketId.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const yaml = [
       `ticket_id: ${JSON.stringify(input.ticketId)}`,
       `audience: ${JSON.stringify(input.audience)}`,

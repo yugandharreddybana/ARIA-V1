@@ -201,12 +201,12 @@ export default function GraphPage() {
         </div>
         <div className="flex items-center gap-2">
           <div data-testid="graph-level-switcher" className="flex items-center gap-1 mr-2 text-xs">
-            {[
+            {([
               { lvl: 1, label: 'Symbol' },
               { lvl: 2, label: 'Module' },
               { lvl: 3, label: 'Domain' },
               { lvl: 4, label: 'Decision' },
-            ].map(({ lvl, label }) => (
+            ] as const).map(({ lvl, label }) => (
               <button
                 key={lvl}
                 data-testid={`graph-level-${lvl}`}

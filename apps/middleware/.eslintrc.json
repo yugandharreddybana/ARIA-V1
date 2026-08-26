@@ -1,0 +1,23 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+  "env": { "node": true, "es2022": true },
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-empty": ["error", { "allowEmptyCatch": true }]
+  },
+  "ignorePatterns": ["dist/", "node_modules/"],
+  "overrides": [
+    {
+      "files": ["src/services/sanitizer.service.ts"],
+      "rules": {
+        "no-control-regex": "off",
+        "no-irregular-whitespace": "off"
+      }
+    }
+  ]
+}
