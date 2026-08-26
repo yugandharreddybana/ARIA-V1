@@ -15,6 +15,40 @@
 
 ## ✅ Completed Sprints
 
+### Onboarding Wizard — 6-step Team Genesis flow  *(verified: lint + unit + wizard E2E green)*
+**Branch**: `feat/onboarding-wizard` | **Spec**: §16 (Genesis) + §3 (personas)
+
+Closed the June-14 loop: the onboarding middleware (routes/services/Drizzle schema) had shipped
+without frontend, migration, Zod validation, or tests. This session finished it end-to-end:
+
+- **Web wizard** — `apps/web/src/app/onboarding/page.tsx`: Company → LLM config (reuses
+  `PATCH /api/workspace/llm-config`) → GitHub repo picker (clean GitHub-not-connected fallback
+  + manual repo-URL entry) → Scout persona (202, background analysis) → proposal review with
+  poll-until-ready + edit/add/delete (isAlwaysPresent roles protected) → commit → `/dashboard/team`.
+  Full `data-testid` coverage; new `ui/textarea.tsx` primitive.
+- **Routing gate** — `(dashboard)/layout.tsx` checks `GET /api/onboarding/status` and redirects
+  un-onboarded workspaces to `/onboarding`; signup finish now lands on `/onboarding`. Migration
+  V11 backfills `onboarding_completed_at` for pre-wizard workspaces so they skip it.
+- **Flyway V11** (`V11__onboarding_wizard.sql`) — the June-14 schema drift fix: workspaces
+  onboarding/LLM/GitHub/Jira columns + enums, `skills`/`teams`/`team_members` rebuilt to the
+  agent org-chart shape (FKs on tickets/memory_entries restored), `onboarding_proposals` table.
+- **Zod-strict schemas** (`schemas/onboarding.schemas.ts`) wired via `validate()` on every
+  onboarding endpoint; `errorHandler` now maps ZodError → 400 (was 500 for ALL validated routes).
+  New `GET /api/onboarding/status`. IDOR: workspaceId from JWT only.
+- **Fixes found during the audit**: `github.service.ts` phantom imports (never compiled);
+  truncated dead `teamGenesis.service.ts` deleted (superseded by repoAnalysis + skillFactory);
+  `agentTicket.service.ts` still assumed workspace-scoped skills; `next.config.ts` → `.mjs`
+  (Next 14 cannot boot from `.ts` config); middleware ESLint had no config (never ran).
+- **Types** — onboarding types moved to `packages/shared` (`types/onboarding.ts`); middleware
+  re-exports for stable imports.
+- **Tests** — Vitest `onboarding.test.ts` (15 cases: strict schemas incl. mass-assignment
+  rejection, status/delete-guard/commit-conflict service paths); Playwright `onboarding.spec.ts`
+  (4 cases × 3 devices = 12 green: gate both ways, full happy path, GitHub-not-connected).
+  Middleware suite 82/82 green (also repaired 4 pre-existing never-run failures: vi.mock
+  hoisting, missing test env, Prometheus `{}` on unlabeled series, unused imports).
+
+---
+
 ### Sprint 10 — Phase 5: Fleet & Speculation  *(code-complete, unverified — NO-RUN MODE)*
 **Branch**: `claude/aria-implementation-plan-4GHZI` | **Spec**: §17.4 + §18I + §8
 
@@ -473,6 +507,12 @@ Coverage table is auto-refreshed at the end of every sprint after `pnpm test --c
 
 ## 📝 Session Notes
 
+- **2026-08-26** — Onboarding wizard finished end-to-end (see ✅ entry above). Verified this
+  session: `pnpm lint` green (middleware ESLint config added — it had never run), middleware
+  Vitest 82/82, web + middleware `tsc --noEmit` green, `onboarding.spec.ts` 12/12 on the
+  device matrix against the live Next dev server with mocked external APIs. NOT verified:
+  full-stack run (Postgres/Ollama/GitHub OAuth not available in this environment), Flyway V11
+  against a live DB, Java build, other Playwright specs (need the full stack).
 - **2026-05-17** — Sprint 8 gap-fill (added `/api/llm/embed`, Pre-Flight Estimator wired into the Token
   Gateway via `expectedCompressionRatio`, EmbeddingClient retargeted) **+** Sprint 9 **code-complete,
   unverified** (NO-RUN MODE): SLO catalogue (ADR-0011), Flyway V9, Java incident + migration packages

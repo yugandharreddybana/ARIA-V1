@@ -8,6 +8,32 @@
 
 ## §A Session Journal (newest first)
 
+### 2026-08-26 — Onboarding wizard finished end-to-end (branch `feat/onboarding-wizard`)
+- The June-14 commit loop had shipped onboarding middleware (9 routes, onboarding/repoAnalysis/
+  skillFactory/github services, Drizzle schema) with **no frontend, no Flyway migration, no Zod,
+  no tests**. Audit also found real breakage: `github.service.ts` imported a type
+  (`GitHubRepoListItem`) and function (`decryptGithubToken`) that existed nowhere — the package
+  never compiled; `teamGenesis.service.ts` was truncated mid-template-literal (dead, unused —
+  deleted; repoAnalysis + skillFactory are the live pipeline); `agentTicket.service.ts` queried
+  `skills.workspaceId` which the reshaped skills schema no longer has (fixed via
+  skill → project → workspace); `next.config.ts` is unsupported by Next 14 so the web app could
+  not boot at all (→ `next.config.mjs`); middleware `eslint src/` had no config and matched no
+  files (config added, 10 latent errors fixed); `errorHandler` had no ZodError branch so every
+  validation failure on validated routes returned 500 (→ 400 + details).
+- Shipped: `apps/web/src/app/onboarding/page.tsx` (6 steps, polling, edit/add/delete proposal,
+  GitHub-not-connected fallback with manual repo URLs, full data-testids), onboarding gate in
+  `(dashboard)/layout.tsx` via new `GET /api/onboarding/status`, signup → `/onboarding`,
+  Flyway **V11** (workspaces onboarding/LLM/GitHub/Jira columns + enums + skills/teams/
+  team_members rebuild + `onboarding_proposals`; backfills `onboarding_completed_at=NOW()` for
+  pre-wizard workspaces so existing users skip the wizard), Zod-strict
+  `schemas/onboarding.schemas.ts` on every endpoint, onboarding types moved to
+  `packages/shared/src/types/onboarding.ts` (middleware re-exports), `ui/textarea.tsx`.
+- Tests: Vitest `onboarding.test.ts` 15 cases; Playwright `onboarding.spec.ts` 12/12 across the
+  device matrix (mocked external APIs, live Next dev server); middleware suite 82/82 after
+  repairing 4 never-run pre-existing failures (vi.mock hoisting → `vi.hoisted`, missing env in
+  distill test, Prometheus `{}` on unlabeled series, stale expectations).
+- OQ-001 untouched: CFO/Marketing/Business-Analytics roles remain gated, not generated.
+
 ### 2026-05-17 (late) — Sprint 10 code-complete (NO-RUN MODE)
 - Shipped V27.9 §17.4 + §18I end-to-end. **Flyway V10** introduces `agent_registry`,
   `fleet_outcomes`, `agent_heartbeats`, `contract_debts`, `shadow_branches`,
@@ -305,11 +331,42 @@
 - **`apps/web/src/app/(dashboard)/tickets/page.tsx`**, **`sessions/`, `team/`, `planning/`, `ai-strategy/`, `settings/`** |
   Sprint 4 pages | sha:tbd | UI shells with mock/static data. To be wired to live APIs in Sprint 5.
 
+- **`apps/web/src/app/onboarding/page.tsx`** | 6-step onboarding wizard | 2026-08-26 |
+  Company → LLM (reuses `/api/workspace/llm-config`) → repos (GitHub list + manual URL fallback)
+  → scout (202) → proposal review (2.5s poll until ready/failed; edit/add/delete;
+  `isAlwaysPresent` undeletable) → commit → `/dashboard/team`. Own auth guard (redirects to
+  /login; to /dashboard when status.completed). Resumes at step 5 when a proposal is
+  pending/ready. data-testids: `onboarding-step-{1..6}`, `company-*`, `llm-*`, `repo-*`,
+  `scout-*`, `proposal-*`, `skill-*`, `commit-btn`.
+
+- **`apps/web/src/app/(dashboard)/layout.tsx` onboarding gate** | 2026-08-26 |
+  After auth, fetches `GET /api/onboarding/status`; `!completed` → `router.replace('/onboarding')`.
+  Fails open (no redirect) if the call errors, so mocked/legacy specs are unaffected.
+
 ### apps/middleware (Express)
 - **`apps/middleware/src/app.ts`** | Express factory + route mounts | sha:`HEAD@S5` |
   Now exports `createApp(env)` factory in addition to the default app. Mounts all Sprint 1-4 routers plus
   Sprint 5 additions: `llmRoutes` at `/api/llm` and `orchestratorRoutes` at `/api/orchestrator`. Order
   unchanged: Helmet → CORS → JSON → cookies → request logger → global rate limit → routes → notFound → errorHandler.
+
+- **`apps/middleware/src/{routes/onboarding.routes.ts,schemas/onboarding.schemas.ts,services/onboarding.service.ts}`** | 6-step wizard API | 2026-08-26 |
+  `/api/onboarding`: GET `/status` (routing gate), POST `/company`, POST `/repos`, GET `/github/repos`,
+  POST `/scout` (202, fire-and-forget analysis), GET `/proposal`, PATCH/DELETE `/proposal/:tempId`,
+  POST `/proposal/skill`, POST `/commit`. All Zod-strict via `validate()`; workspaceId from JWT only.
+  Service: proposal state machine pending→ready→committed|failed on `onboarding_proposals`; commit
+  groups by department into teams, two-pass insert for self-referencing `reportingManagerId`, stamps
+  `onboardingCompletedAt`. Step 2 reuses `PATCH /api/workspace/llm-config` — no new route.
+
+- **`apps/middleware/src/services/{repoAnalysis,skillFactory,github}.service.ts`** | Team-genesis pipeline | 2026-08-26 |
+  repoAnalysis: GitHub tree + deps → `CodebaseProfile` signals. skillFactory: blueprint org chart
+  (CEO/CTO/CPO/leads always; ICs conditional on signals) + per-agent LLM instructions with offline
+  fallback. github: paginated `/user/repos` (300 cap, ponytail note), throws `GITHUB_NOT_CONNECTED`
+  when no token on workspace. `teamGenesis.service.ts` deleted (truncated, unused duplicate).
+
+- **`packages/db/flyway/migrations/V11__onboarding_wizard.sql`** | June-14 schema-drift fix | 2026-08-26 |
+  workspaces onboarding/LLM/GitHub/Jira columns + 6 enums; skills/teams/team_members rebuilt to the
+  Drizzle org-chart shape (tickets/memory_entries FKs restored); `onboarding_proposals`;
+  backfills `onboarding_completed_at=NOW()` for pre-wizard workspaces.
 
 - **`apps/middleware/src/index.ts`** | HTTP server + socket.io attach + graceful shutdown | sha:`HEAD@S5` |
   Creates the express app via factory, wraps in `http.createServer`, attaches socket.io via `createWsServer`,
