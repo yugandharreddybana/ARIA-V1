@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useAuth } from '@/contexts/auth.context';
 import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,7 +26,7 @@ function StatCard({
   icon: Icon, label, value, sub, href, iconColor,
 }: {
   icon: React.ElementType; label: string; value: string | number;
-  sub?: string; href?: string; iconColor?: string;
+  sub?: string; href?: Route; iconColor?: string;
 }) {
   const inner = (
     <Card className={href ? 'hover:border-aria-500/40 transition-colors cursor-pointer' : ''}>

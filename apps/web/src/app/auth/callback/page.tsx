@@ -1,10 +1,19 @@
 'use client';
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/auth.context';
 import { Loader2 } from 'lucide-react';
 
+// useSearchParams requires a Suspense boundary for static prerendering
 export default function AuthCallbackPage() {
+  return (
+    <Suspense>
+      <AuthCallback />
+    </Suspense>
+  );
+}
+
+function AuthCallback() {
   const router = useRouter();
   const params = useSearchParams();
   const { setToken } = useAuth();
