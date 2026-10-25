@@ -748,7 +748,7 @@ Schedule settings that go with §17: `ARIA_WORKDAYS` (`1,2,3,4,5`), `ARIA_TIMEZO
 
 ### 17.1 Activity log (V17)
 
-`ticket_events` is append-only. The app role may `SELECT` and `INSERT`. `UPDATE` always raises. `DELETE` raises unless the transaction sets `aria.purge_ticket_events=1`, which the ticket `BEFORE DELETE` trigger sets so a project or workspace cascade can purge. Each row stores `prev_hash` and `hash` (sha256 over the canonical fields, stable JSON `detail`, no `created_at`). A `BEFORE INSERT` trigger rejects a sequence gap and a hash that does not continue the chain. Sequence assignment takes `pg_advisory_xact_lock(hashtext(ticket_id))` (int4 hash; a collision is the ceiling).
+`ticket_events` is append-only. The app role may `SELECT` and `INSERT`. `UPDATE` always raises. `DELETE` raises unless `pg_trigger_depth() > 1`. Parent `BEFORE DELETE` triggers on tickets, projects, and workspaces call `SECURITY DEFINER` purge functions, and those functions reject a direct session call. A session GUC cannot bypass the trigger. Each row stores `prev_hash` and `hash` (sha256 over the canonical fields, stable JSON `detail`, no `created_at`). A `BEFORE INSERT` trigger rejects a sequence gap and a hash that does not continue the chain. Sequence assignment takes `pg_advisory_xact_lock(hashtext(ticket_id))` (int4 hash; a collision is the ceiling).
 
 Event types: `status_change`, `agent_action`, `progress`, `communication`, `run_ref`, `owner_decision`, `schedule`, `evidence`. The queue and each agent stage append through the same helper. Agents may append only `progress` and `communication`, and only when they are the assignee, have a run on the ticket, or own the flow.
 
