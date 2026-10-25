@@ -96,7 +96,11 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Run anti-test-dodging
         if: steps.diff.outputs.files != ''
-        run: pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts ${{ steps.diff.outputs.files }}
+        env:
+          GATE_FILES: ${{ steps.diff.outputs.files }}
+        run: |
+          mapfile -t files < <(printf '%s\n' "$GATE_FILES")
+          pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts "${files[@]}"
 
   anti-slop:
     needs: setup
@@ -120,7 +124,11 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Run anti-slop gate
         if: steps.diff.outputs.files != ''
-        run: pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts ${{ steps.diff.outputs.files }}
+        env:
+          GATE_FILES: ${{ steps.diff.outputs.files }}
+        run: |
+          mapfile -t files < <(printf '%s\n' "$GATE_FILES")
+          pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts "${files[@]}"
 
   e2e:
     needs: [typecheck, unit-tests]
@@ -147,7 +155,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - run: pnpm install --frozen-lockfile=false
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm -F @aria/e2e exec playwright install --with-deps chromium
       - name: Bring up stack
         run: |
           bash scripts/generate-keys.sh
@@ -171,10 +179,11 @@ jobs:
           node scripts/provider-stub.mjs > /tmp/aria-stub.log 2>&1 &
           nohup pnpm -F @aria/middleware dev > /tmp/aria-middleware.log 2>&1 &
           nohup pnpm -F @aria/web dev > /tmp/aria-web.log 2>&1 &
-          for i in $(seq 1 40); do
+          for i in $(seq 1 90); do
             curl -sf http://127.0.0.1:3001/api/health >/dev/null && curl -sf http://127.0.0.1:3000 >/dev/null && exit 0
             sleep 2
           done
           echo "stack did not become healthy" >&2
+          tail -n 80 /tmp/aria-stub.log /tmp/aria-middleware.log /tmp/aria-web.log >&2 || true
           exit 1
       - run: pnpm -F @aria/e2e exec playwright test tests/milestone1-setup.spec.ts tests/auth/landing.spec.ts tests/sprint1-auth.spec.ts tests/sprint2-projects.spec.ts tests/sprint3-analysis.spec.ts tests/sprint4-tickets.spec.ts tests/sprint4-sessions.spec.ts tests/sprint4-planning.spec.ts tests/sprint4-team.spec.ts tests/sprint4-settings.spec.ts tests/sprint4-ai.spec.ts --project=${{ matrix.project }}
