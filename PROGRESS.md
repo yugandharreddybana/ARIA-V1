@@ -6,6 +6,10 @@
 
 ---
 
+## Milestone 2 — agents doing real work through Cursor (planned)
+
+Plan: `docs/milestones/M2_PLAN.md`. Not started. Backend tasks B1–B18 can start now. Frontend tasks F1–F5 start after the UI simplification PR merges. Open owner questions are in §16 of the plan.
+
 ## Milestone 1 — foundation (this branch)
 
 Branch: `cursor/milestone-1-foundation-db70`. PR #5. Product spec: `docs/PRODUCT_SPEC.md`.
