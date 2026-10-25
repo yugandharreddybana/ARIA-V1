@@ -10,9 +10,11 @@ import { list as listLogs } from '../services/runs/runLogs';
 import { codeWorkerFor } from '../services/models/codeWorker';
 import { workspaceCursorKey } from '../services/models/cursorKey';
 import { assertOwnerInvariant, setOwners, type FlowLayer, type FlowRole } from '../services/flows/flowOwners';
-import { appendTicketEvent, eventsToMarkdown, listTicketEvents } from '../services/tickets/ticketEvents';
-import { readReport } from '../services/evidence/reports';
-import { getBranch, readGithubToken } from '../services/githubClient.service';
+import { appendTicketEvent, eventsToMarkdown, listTicketEvents, verifyChain } from '../services/tickets/ticketEvents';
+import { evidenceAllowsMerge, latestReports, readReport } from '../services/evidence/reports';
+import { workspaceMonthUsage } from '../services/runs/budget';
+import { validateEnv } from '../config/env';
+import { getBranch, githubFullName, readGithubToken } from '../services/githubClient.service';
 import { db, projects } from '@aria/db';
 import { and, eq } from 'drizzle-orm';
 
@@ -72,11 +74,29 @@ runsRouter.get('/:projectId/runs', async (req: AriaRequest, res, next) => {
     }
     params.push(limit);
     const rows = await getPgPool().query(
-      `SELECT id, status, activity, agent_id, ticket_id, pr_url, error_code, created_at
+      `SELECT id, status, activity, agent_id, ticket_id, parent_run_id, pr_url, pr_number, model_id,
+              tokens_reserved::int AS tokens_reserved, tokens_total::int AS tokens_total,
+              error_code, blocked_reason, external_url, started_at, finished_at, created_at
          FROM agent_runs WHERE ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
       params,
     );
     res.json({ runs: rows.rows });
+  } catch (err) { next(err); }
+});
+
+runsRouter.get('/:projectId/budget', async (req: AriaRequest, res, next) => {
+  try {
+    const project = await ownedProject(req.params.projectId, req.user!.workspaceId);
+    const env = validateEnv();
+    const usage = await workspaceMonthUsage(req.user!.workspaceId);
+    const limit = project.tokenBudgetMonthly ?? env.ARIA_MONTHLY_TOKEN_BUDGET;
+    res.json({
+      limit,
+      projectLimit: project.tokenBudgetMonthly,
+      used: usage.used,
+      reserved: usage.reserved,
+      warnAt: Math.floor(limit * env.TOKEN_BUDGET_WARN_RATIO),
+    });
   } catch (err) { next(err); }
 });
 
@@ -99,11 +119,11 @@ runsRouter.get('/:projectId/github-guard', async (req: AriaRequest, res, next) =
     let branch = { name: 'main', protected: true };
     try {
       const token = await readGithubToken(req.user!.workspaceId);
-      const repo = await getPgPool().query<{ repo_name: string }>(
-        `SELECT repo_name FROM project_repos WHERE project_id = $1::uuid LIMIT 1`,
+      const repo = await getPgPool().query<{ repo_name: string; repo_url: string }>(
+        `SELECT repo_name, repo_url FROM project_repos WHERE project_id = $1::uuid LIMIT 1`,
         [project.id],
       );
-      if (repo.rows[0]) branch = await getBranch(token, repo.rows[0].repo_name);
+      if (repo.rows[0]) branch = await getBranch(token, githubFullName(repo.rows[0].repo_name, repo.rows[0].repo_url));
     } catch {
       branch = { name: 'main', protected: false };
     }
@@ -267,7 +287,8 @@ ticketExtra.get('/:id/events', async (req: AriaRequest, res, next) => {
       afterSeq: cursor.data,
       limit: queryLimit(req.query.limit, 100, 500),
     });
-    res.json({ events });
+    const chain = verifyChain(await listTicketEvents(req.params.id, { limit: 5000 }));
+    res.json({ events, chain });
   } catch (err) { next(err); }
 });
 ticketExtra.get('/:id/events/export', async (req: AriaRequest, res, next) => {
@@ -301,6 +322,18 @@ ticketExtra.post('/:id/events', validate(eventSchema), async (req: AriaRequest, 
       detail: { ...(req.body.detail ?? {}), userId: req.user!.userId },
     });
     res.status(201).json({ event });
+  } catch (err) { next(err); }
+});
+ticketExtra.get('/:id/reports', async (req: AriaRequest, res, next) => {
+  try {
+    const ticket = await ticketInWorkspace(req.params.id, req.user!.workspaceId);
+    const latest = await latestReports(ticket.id);
+    const gate = await evidenceAllowsMerge(ticket.id);
+    res.json({
+      dev: latest.dev ? { valid: latest.dev.valid } : null,
+      qa: latest.qa ? { valid: latest.qa.valid } : null,
+      gate,
+    });
   } catch (err) { next(err); }
 });
 ticketExtra.get('/:id/reports/:file', async (req: AriaRequest, res, next) => {

@@ -150,6 +150,19 @@ export async function noteBudget(workspaceId: string, projectId: string | null, 
   if (used / limit >= ratio) emitProject(projectId, 'budget:warn', { projectId, used, limit });
 }
 
+export async function workspaceMonthUsage(workspaceId: string): Promise<{ used: number; reserved: number }> {
+  const result = await getPgPool().query<{ used: string; reserved: string }>(
+    `SELECT COALESCE(SUM(tokens_used), 0)::text AS used,
+            COALESCE(SUM(tokens_reserved), 0)::text AS reserved
+       FROM token_ledger WHERE session_id = $1::uuid`,
+    [monthlyBucketId(workspaceId)],
+  );
+  return {
+    used: Number(result.rows[0]?.used ?? 0),
+    reserved: Number(result.rows[0]?.reserved ?? 0),
+  };
+}
+
 async function usageOf(sessionId: string): Promise<number> {
   const result = await getPgPool().query<{ projected: string }>(
     `SELECT COALESCE(SUM(tokens_used + tokens_reserved), 0)::text AS projected

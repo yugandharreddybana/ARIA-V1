@@ -69,7 +69,7 @@ async function workspaceChoice(workspaceId: string) {
     provider: providerId(row?.llmProvider),
     model: row?.llmModel ?? null,
     tierModels: tierModelMap(row?.llmTierModels),
-    catalog: Array.isArray(row?.llmModelCatalog) ? row.llmModelCatalog.filter((id): id is string => typeof id === 'string') : [],
+    catalog: catalogIds(row?.llmModelCatalog),
   };
 }
 
@@ -109,6 +109,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
     projectId,
     companySize: project.companySize ?? null,
     companyMix: project.companyMix ?? null,
+    companySource: project.companySource,
     modelTiers: {
       planning: projectTaskTiers.planning ?? 'top',
       development: projectTaskTiers.development ?? 'auto',
@@ -117,6 +118,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
       provider: choice.provider,
       planningModel: companyRoute.planningModel,
       developmentModel: companyRoute.developmentModel,
+      catalog: choice.catalog,
     },
     agents: agents.map((row) => ({
       ...toView(row),
@@ -135,10 +137,20 @@ export async function getCompany(projectId: string, workspaceId: string) {
       flowKey: flow.flowKey,
       name: flow.name,
       kind: flow.kind,
+      layer: flow.layer,
       description: flow.description,
       entryPoints: flow.entryPoints,
     }))),
   };
+}
+
+function catalogIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (typeof item === 'string' && item.trim()) return [item];
+    if (item && typeof item === 'object' && 'id' in item && typeof item.id === 'string' && item.id.trim()) return [item.id];
+    return [];
+  });
 }
 
 export async function getKnowledge(projectId: string, workspaceId: string) {
