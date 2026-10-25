@@ -1,8 +1,8 @@
-import { pgTable, uuid, text, timestamp, jsonb, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, uniqueIndex, index, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import { agentRuns } from './agent-runs';
 import { projects } from './projects';
 import { workspaces } from './workspaces';
-import { skills } from './skills';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -15,6 +15,8 @@ export const knowledgeMaps = pgTable('knowledge_maps', {
   dataModel: jsonb('data_model').notNull().default([]),
   apis: jsonb('apis').notNull().default([]),
   summary: text('summary').notNull().default(''),
+  source: text('source').notNull().default('template'),
+  agentRunId: uuid('agent_run_id').references((): AnyPgColumn => agentRuns.id, { onDelete: 'set null' }),
   createdAt: tstz('created_at').notNull().defaultNow(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
 }, (t) => ({ projectIdx: uniqueIndex('knowledge_maps_project_uidx').on(t.projectId) }));
@@ -28,8 +30,7 @@ export const businessFlows = pgTable('business_flows', {
   kind: text('kind').notNull().default('other'),
   description: text('description').notNull().default(''),
   entryPoints: jsonb('entry_points').notNull().default([]),
-  ownerAgentId: uuid('owner_agent_id').references(() => skills.id, { onDelete: 'set null' }),
-  backupAgentId: uuid('backup_agent_id').references(() => skills.id, { onDelete: 'set null' }),
+  layer: text('layer').notNull().default('fullstack'),
   createdAt: tstz('created_at').notNull().defaultNow(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
 }, (t) => ({

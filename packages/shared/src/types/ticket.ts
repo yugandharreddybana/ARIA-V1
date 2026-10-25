@@ -8,6 +8,8 @@ export type TicketStatus =
   | 'ready_for_qa'
   | 'in_qa'
   | 'ready_for_review'
+  | 'awaiting_merge'
+  | 'blocked'
   | 'done'
   | 'rejected';
 export type EvidenceType = 'bug_report' | 'fix' | 'feature_design' | 'qa_verification';
@@ -27,6 +29,15 @@ export interface Ticket {
   jiraIssueKey?: string | null;
   createdBySkillId?: string | null;
   humanApproved: boolean;
+  statusReason?: string | null;
+  flowId?: string | null;
+  layer?: 'frontend' | 'backend' | 'fullstack' | null;
+  storyPoints?: number;
+  dueAt?: string | null;
+  workStartedAt?: string | null;
+  scheduleState?: 'not_started' | 'on_track' | 'at_risk' | 'overdue' | 'done';
+  ticketKey?: string;
+  splitSuggested?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -54,6 +65,9 @@ export interface CreateTicketRequest {
   type: TicketType;
   riskClass?: string;
   affectedDomains?: string[];
+  storyPoints?: number;
+  flowId?: string | null;
+  layer?: 'frontend' | 'backend' | 'fullstack' | null;
 }
 
 export interface UpdateTicketRequest {
@@ -62,4 +76,8 @@ export interface UpdateTicketRequest {
   humanApproved?: boolean;
   title?: string;
   description?: string;
+  storyPoints?: number;
+  flowId?: string | null;
+  layer?: 'frontend' | 'backend' | 'fullstack' | null;
+  action?: 'approve' | 'unblock' | 'reject';
 }

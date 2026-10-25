@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { analysisJobs, businessFlows, db, knowledgeMaps, projectRepos, projects, skills, teamMembers, teams, workspaces } from '@aria/db';
+import { analysisJobs, businessFlows, db, knowledgeMaps, projectRepos, projects, skills, teamMembers, workspaces } from '@aria/db';
 import { AppError } from '../middleware/error.middleware';
 import { generateCompany, type CompanyMix, type GeneratedAgent, type RoleKey } from './companyGenerator';
 import { logger } from '../config/logger';
 import { getPgPool } from './db.client';
-import { completeThroughGateway, loadWorkspaceLlm, providerId } from './guardedLlm.service';
+import { loadWorkspaceLlm, providerId } from './guardedLlm.service';
+import { applyCompanyRoster } from './activities/companyApply';
+import { decorateFlows, ownersOf, setOwners, type FlowLayer } from './flows/flowOwners';
+import { enqueue, blockQueuedForAgent, cancelRunningForAgent, unblockQueuedForAgent } from './runs/runQueue';
+import { codeWorkerFor } from './models/codeWorker';
+import { workspaceCursorKey } from './models/cursorKey';
 import { readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
 
 export interface AgentView {
@@ -50,7 +55,7 @@ function toView(row: typeof skills.$inferSelect): AgentView {
     instructions: row.instructions,
     description: row.description,
     skills: row.ownedDomains,
-    ownedFlowIds: row.ownedFlowIds,
+    ownedFlowIds: [],
     enabled: row.enabled,
     planningTier: readTier(row.modelTaskTiers, 'planning'),
     developmentTier: readTier(row.modelTaskTiers, 'development'),
@@ -125,16 +130,14 @@ export async function getCompany(projectId: string, workspaceId: string) {
         agentModelOverride: row.modelOverride,
       }),
     })),
-    flows: flows.map((flow) => ({
+    flows: await decorateFlows(flows.map((flow) => ({
       id: flow.id,
       flowKey: flow.flowKey,
       name: flow.name,
       kind: flow.kind,
       description: flow.description,
       entryPoints: flow.entryPoints,
-      ownerAgentId: flow.ownerAgentId,
-      backupAgentId: flow.backupAgentId,
-    })),
+    }))),
   };
 }
 
@@ -148,21 +151,20 @@ export async function getKnowledge(projectId: string, workspaceId: string) {
     map: stored ? {
       id: stored.id,
       summary: stored.summary,
+      source: stored.source,
       techStack: stored.techStack,
       modules: stored.modules,
       dataModel: stored.dataModel,
       apis: stored.apis,
     } : null,
-    flows: flows.map((flow) => ({
+    flows: await decorateFlows(flows.map((flow) => ({
       id: flow.id,
       flowKey: flow.flowKey,
       name: flow.name,
       kind: flow.kind,
       description: flow.description,
       entryPoints: flow.entryPoints,
-      ownerAgentId: flow.ownerAgentId,
-      backupAgentId: flow.backupAgentId,
-    })),
+    }))),
     jobs: jobs.map((job) => ({
       id: job.id,
       status: job.status,
@@ -229,114 +231,40 @@ export async function generateProjectCompany(
   if (!force && (sessions > 0 || tickets > 0)) {
     throw new AppError('Regeneration would remove sessions or tickets. Send force: true to continue.', 409, 'COMPANY_IN_USE');
   }
-  const { agents, flowOwners } = generateCompany({
+  const generated = generateCompany({
     size,
     mix,
     seed: projectId,
     flows: flowRows.map((flow) => ({ id: flow.id, flowKey: flow.flowKey, name: flow.name, kind: flow.kind })),
   });
-
-  await db.transaction(async (tx) => {
-  await tx.execute(sql`UPDATE business_flows SET owner_agent_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
-  await tx.execute(sql`UPDATE skills SET reporting_manager_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
-  await tx.execute(sql`DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE project_id = ${projectId}::uuid)`);
-  await tx.execute(sql`DELETE FROM skills WHERE project_id = ${projectId}::uuid`);
-  await tx.execute(sql`DELETE FROM teams WHERE project_id = ${projectId}::uuid`);
-
-  const deptIds = new Map<string, string>();
-  for (const department of new Set(agents.map((agent) => agent.department))) {
-    const [team] = await tx.insert(teams).values({
-      id: randomUUID(),
-      projectId,
-      name: department,
-      department,
-    }).returning();
-    deptIds.set(department, team.id);
-  }
-
-  const idByTemp = new Map<string, string>();
-  for (const agent of agents) {
-    const id = randomUUID();
-    idByTemp.set(agent.tempId, id);
-    await tx.insert(skills).values({
-      id,
-      projectId,
-      teamId: deptIds.get(agent.department) ?? null,
-      slug: agent.slug,
-      realName: agent.realName,
-      roleTitle: agent.roleTitle,
-      roleKey: agent.roleKey,
-      name: agent.realName,
-      role: agent.roleTitle,
-      model: planningModel,
-      department: agent.department,
-      hierarchyLevel: agent.hierarchyLevel,
-      description: agent.description,
-      instructions: agent.instructions,
-      ownedDomains: agent.skills,
-      ownedFlowIds: agent.ownedFlowIds,
-      enabled: agent.enabled,
-      status: 'active',
-      riskClass: 'B',
-      idleMode: 'learning',
-    });
-  }
-
-  for (const agent of agents) {
-    const id = idByTemp.get(agent.tempId);
-    if (!id) continue;
-    await tx.update(skills).set({
-      reportingManagerId: agent.managerTempId ? idByTemp.get(agent.managerTempId) ?? null : null,
-      backupAgentId: agent.backupTempId ? idByTemp.get(agent.backupTempId) ?? null : null,
-      updatedAt: new Date(),
-    }).where(eq(skills.id, id));
-    const teamId = deptIds.get(agent.department);
-    if (teamId) {
-      const memberRole = agent.hierarchyLevel <= 3 ? 'lead' : agent.roleKey === 'scrum_master' ? 'scrum_master' : 'member';
-      await tx.insert(teamMembers).values({ teamId, skillId: id, role: memberRole });
-    }
-  }
-
-  for (const [flowId, owners] of flowOwners) {
-    await tx.update(businessFlows).set({
-      ownerAgentId: idByTemp.get(owners.owner) ?? null,
-      backupAgentId: owners.backup ? idByTemp.get(owners.backup) ?? null : null,
-      updatedAt: new Date(),
-    }).where(and(eq(businessFlows.id, flowId), eq(businessFlows.projectId, projectId)));
-  }
-
-  await tx.update(projects).set({
-    companySize: size,
-    companyMix: mix,
-    updatedAt: new Date(),
-  }).where(eq(projects.id, projectId));
-  });
-
+  const roster = {
+    projectId,
+    size,
+    mix,
+    agents: generated.agents,
+    assignments: generated.flowAssignments,
+    planningModel,
+  };
   const llm = await loadWorkspaceLlm(workspaceId);
-  if (llm) {
-    const roster = agents.map((agent) => agent.roleTitle).join(', ');
-    try {
-      await completeThroughGateway({
-        workspaceId,
-        projectId,
-        agentId: 'company-generator',
-        skillSlug: 'ceo',
-        taskType: 'company_generation',
-        config: llm,
-        messages: [
-          { role: 'system', content: 'Reply with one sentence about this company plan. Do not invent repositories or secrets.' },
-          { role: 'user', content: `Size ${size}. Roles: ${roster}.` },
-        ],
-      });
-    } catch (err) {
-      logger.info('Company planning model was not completed', {
-        projectId,
-        message: err instanceof Error ? err.message.slice(0, 180) : 'skipped',
-      });
-    }
+  if (!llm) {
+    await applyCompanyRoster({ ...roster, source: 'template', force });
+    return { ...(await getCompany(projectId, workspaceId)), statusCode: 201 as const };
   }
-
-  return getCompany(projectId, workspaceId);
+  await applyCompanyRoster({ ...roster, source: 'template', force });
+  const prior = await getPgPool().query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM agent_runs WHERE project_id = $1::uuid AND activity = 'company_generation'`,
+    [projectId],
+  );
+  const queued = await enqueue({
+    workspaceId,
+    projectId,
+    activity: 'company_generation',
+    taskType: 'company_generation',
+    runtime: llm.provider === 'cursor' ? 'cursor_local' : 'chat',
+    idempotencyKey: `company:${projectId}:r${Number(prior.rows[0]?.n ?? 0) + 1}`,
+    input: { size, mix, force },
+  });
+  return { ...(await getCompany(projectId, workspaceId)), statusCode: 202 as const, runId: queued.id };
 }
 
 function tierPatch(existing: unknown, patch: { planningTier?: ModelTier | null; developmentTier?: ModelTier | null }) {
@@ -388,6 +316,23 @@ export async function updateAgent(projectId: string, workspaceId: string, agentI
     ...(patch.backupAgentId !== undefined ? { backupAgentId: patch.backupAgentId } : {}),
     updatedAt: new Date(),
   }).where(eq(skills.id, agentId));
+  if (patch.enabled === false) {
+    await blockQueuedForAgent(agentId, 'agent_off');
+    const running = await cancelRunningForAgent(agentId);
+    const cloud = running.filter((run) => run.external_agent_id && run.external_run_id);
+    if (cloud.length) {
+      try {
+        const apiKey = await workspaceCursorKey(workspaceId);
+        const worker = codeWorkerFor();
+        for (const run of cloud) {
+          await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
+        }
+      } catch (err) {
+        logger.info('Cloud cancel skipped', { agentId, message: err instanceof Error ? err.message.slice(0, 180) : 'skipped' });
+      }
+    }
+  }
+  if (patch.enabled === true) await unblockQueuedForAgent(agentId);
   const updated = await db.query.skills.findFirst({ where: eq(skills.id, agentId) });
   return toView(updated!);
 }
@@ -432,10 +377,17 @@ export async function createAgent(projectId: string, workspaceId: string, input:
     status: 'active',
     riskClass: 'B',
     ownedDomains: [],
-    ownedFlowIds: [],
   });
   const created = await db.query.skills.findFirst({ where: eq(skills.id, id) });
   return toView(created!);
+}
+
+function sqlRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === 'object' && Array.isArray((result as { rows?: unknown }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
 }
 
 export async function deleteAgent(projectId: string, workspaceId: string, agentId: string) {
@@ -446,22 +398,17 @@ export async function deleteAgent(projectId: string, workspaceId: string, agentI
   if (!existing) throw new AppError('Agent not found', 404, 'NOT_FOUND');
   const managerId = existing.reportingManagerId;
   await db.transaction(async (tx) => {
-    const owned = await tx.select().from(businessFlows).where(and(
-      eq(businessFlows.projectId, projectId),
-      eq(businessFlows.ownerAgentId, agentId),
-    ));
-    for (const flow of owned) {
-      const promoted = flow.backupAgentId && flow.backupAgentId !== agentId ? flow.backupAgentId : null;
-      await tx.update(businessFlows).set({
-        ownerAgentId: promoted,
-        backupAgentId: null,
-        updatedAt: new Date(),
-      }).where(eq(businessFlows.id, flow.id));
+    const owned = await tx.execute(sql`
+      DELETE FROM flow_owners WHERE agent_id = ${agentId}::uuid AND role = 'owner' RETURNING flow_id, layer
+    `);
+    const rows = sqlRows<{ flow_id: string; layer: string }>(owned);
+    for (const row of rows) {
+      await tx.execute(sql`
+        UPDATE flow_owners SET role = 'owner'
+         WHERE flow_id = ${row.flow_id}::uuid AND layer = ${row.layer} AND role = 'backup'
+      `);
     }
-    await tx.update(businessFlows).set({ backupAgentId: null, updatedAt: new Date() }).where(and(
-      eq(businessFlows.projectId, projectId),
-      eq(businessFlows.backupAgentId, agentId),
-    ));
+    await tx.execute(sql`DELETE FROM flow_owners WHERE agent_id = ${agentId}::uuid`);
     await tx.update(skills).set({ reportingManagerId: managerId }).where(and(
       eq(skills.projectId, projectId),
       eq(skills.reportingManagerId, agentId),
@@ -493,11 +440,16 @@ export async function assignFlow(projectId: string, workspaceId: string, flowId:
   if (!flow) throw new AppError('Flow not found', 404, 'NOT_FOUND');
   if (patch.ownerAgentId) await assertSameProjectAgent(projectId, patch.ownerAgentId, 'Owner');
   if (patch.backupAgentId) await assertSameProjectAgent(projectId, patch.backupAgentId, 'Backup');
-  await db.update(businessFlows).set({
-    ...(patch.ownerAgentId !== undefined ? { ownerAgentId: patch.ownerAgentId } : {}),
-    ...(patch.backupAgentId !== undefined ? { backupAgentId: patch.backupAgentId } : {}),
-    updatedAt: new Date(),
-  }).where(eq(businessFlows.id, flowId));
+  const layer = (flow.layer === 'frontend' || flow.layer === 'backend' || flow.layer === 'fullstack' ? flow.layer : 'fullstack') as FlowLayer;
+  const current = await ownersOf(flowId);
+  const next = current.filter((owner) => {
+    if (owner.layer !== layer) return true;
+    if (owner.role === 'owner') return patch.ownerAgentId === undefined;
+    return patch.backupAgentId === undefined;
+  });
+  if (patch.ownerAgentId) next.push({ agentId: patch.ownerAgentId, layer, role: 'owner' });
+  if (patch.backupAgentId) next.push({ agentId: patch.backupAgentId, layer, role: 'backup' });
+  await setOwners(flowId, next, projectId);
   return getCompany(projectId, workspaceId);
 }
 
@@ -519,6 +471,9 @@ export async function getSetupState(workspaceId: string) {
     llmConfigured,
     repoCount: repos.length,
     knowledgeReady: Boolean(knowledge.map) && !active,
+    knowledge: {
+      enrichment: active ? 'pending' as const : knowledge.map?.source === 'ai' ? 'ai' as const : 'template' as const,
+    },
     summary: knowledge.map?.summary ?? '',
     flows: knowledge.flows,
     jobs: knowledge.jobs,

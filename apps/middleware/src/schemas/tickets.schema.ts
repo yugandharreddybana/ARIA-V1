@@ -3,8 +3,10 @@ import { z } from 'zod';
 const TICKET_TYPES = ['bug', 'feature', 'tech_debt', 'incident', 'process'] as const;
 const TICKET_STATUSES = [
   'backlog', 'ready_for_dev', 'in_progress', 'ready_for_qa',
-  'in_qa', 'ready_for_review', 'done', 'rejected',
+  'in_qa', 'ready_for_review', 'awaiting_merge', 'blocked', 'done', 'rejected',
 ] as const;
+const STORY_POINTS = [1, 2, 3, 5, 8, 13] as const;
+const LAYERS = ['frontend', 'backend', 'fullstack'] as const;
 
 export const createTicketSchema = z.object({
   projectId:       z.string().uuid({ message: 'projectId must be a valid UUID' }),
@@ -13,6 +15,9 @@ export const createTicketSchema = z.object({
   type:            z.enum(TICKET_TYPES, { errorMap: () => ({ message: 'type must be one of: bug, feature, tech_debt, incident, process' }) }),
   riskClass:       z.enum(['A', 'B', 'C']).optional(),
   affectedDomains: z.array(z.string()).optional(),
+  storyPoints: z.number().int().refine((value) => (STORY_POINTS as readonly number[]).includes(value), 'storyPoints must be Fibonacci').optional(),
+  flowId: z.string().uuid().nullable().optional(),
+  layer: z.enum(LAYERS).nullable().optional(),
 });
 
 export const updateTicketSchema = z.object({
@@ -21,6 +26,10 @@ export const updateTicketSchema = z.object({
   humanApproved:   z.boolean().optional(),
   title:           z.string().min(1).max(500).optional(),
   description:     z.string().min(1).max(5000).optional(),
+  storyPoints:     z.number().int().refine((value) => (STORY_POINTS as readonly number[]).includes(value), 'storyPoints must be Fibonacci').optional(),
+  flowId:          z.string().uuid().nullable().optional(),
+  layer:           z.enum(LAYERS).nullable().optional(),
+  action:          z.enum(['approve', 'unblock', 'reject']).optional(),
 }).refine(
   data => Object.keys(data).length > 0,
   { message: 'At least one field must be provided for update' },

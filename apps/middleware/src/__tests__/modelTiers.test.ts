@@ -151,7 +151,7 @@ describe('model tier API', () => {
       mix: { business: 0, qa: 0, frontend: 0, backend: 0, fullstack: 0, junior: 0, aiml: 0, devops: 0, security: 0 },
       modelTiers: { planning: 'top', development: 'auto', autoModel: defaultTierModels('openai').auto },
     });
-    expect(company.status).toBe(201);
+    expect(company.status).toBe(202);
     expect(company.body.modelTiers.planningModel).toBe(defaultTierModels('openai').top);
     expect(company.body.modelTiers.developmentModel).toBe(defaultTierModels('openai').auto);
     expect(JSON.stringify(company.body)).not.toContain('aria-mock-key');

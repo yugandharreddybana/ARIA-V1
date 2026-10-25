@@ -7,6 +7,7 @@ import { createWsServer } from './ws';
 import { closePgPool } from './services/db.client';
 import { startSystemAlertsConsumer, stopSystemAlertsConsumer } from './services/systemAlerts.consumer';
 import { startAnalysisWorker, stopAnalysisWorker } from './services/analysisWorker.service';
+import { startRunWorker, stopRunWorker } from './services/runs/runWorker';
 
 const env = validateEnv();
 const PORT = env.MIDDLEWARE_PORT;
@@ -23,6 +24,7 @@ server.listen(PORT, host, () => {
 });
 
 startAnalysisWorker();
+startRunWorker();
 
 // V27.9 §17 — consume `system.alerts` from Redis and forward to the IncidentCommander.
 startSystemAlertsConsumer();
@@ -31,6 +33,7 @@ async function shutdown(signal: string): Promise<void> {
   logger.info(`${signal} received. Shutting down gracefully...`);
   stopSystemAlertsConsumer();
   stopAnalysisWorker();
+  stopRunWorker();
   io.close();
   server.close(async () => {
     await closePgPool();
@@ -45,5 +48,8 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT',  () => void shutdown('SIGINT'));
+process.on('unhandledRejection', (err) => {
+  logger.error('unhandledRejection', err);
+});
 
 export default app;

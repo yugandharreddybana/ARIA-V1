@@ -8,7 +8,7 @@ on:
 
 env:
   PNPM_VERSION: '9.1.0'
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
 
 jobs:
   setup:
@@ -175,6 +175,10 @@ jobs:
           export RATE_LIMIT_MAX=10000
           export GITHUB_CLIENT_ID=""
           export GITHUB_CLIENT_SECRET=""
+          export ARIA_CURSOR_LOCAL_MODE=stub
+          export RUN_WORKER_ENABLED=true
+          export ARIA_DATA_DIR=/tmp/aria-data
+          export ARIA_PUBLIC_URL=http://127.0.0.1:3001
           export NEXT_PUBLIC_MIDDLEWARE_URL="http://localhost:3001"
           node scripts/apply-migrations.cjs
           node scripts/provider-stub.mjs > /tmp/aria-stub.log 2>&1 &
@@ -188,3 +192,46 @@ jobs:
           tail -n 80 /tmp/aria-stub.log /tmp/aria-middleware.log /tmp/aria-web.log >&2 || true
           exit 1
       - run: pnpm -F @aria/e2e exec playwright test tests/milestone1-setup.spec.ts tests/auth/landing.spec.ts tests/sprint1-auth.spec.ts tests/sprint2-projects.spec.ts tests/sprint3-analysis.spec.ts tests/sprint4-tickets.spec.ts tests/sprint4-sessions.spec.ts tests/sprint4-planning.spec.ts tests/sprint4-team.spec.ts tests/sprint4-settings.spec.ts tests/sprint4-ai.spec.ts --project=${{ matrix.project }}
+
+  docker-images:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build middleware image
+        run: docker build -f Dockerfile.middleware -t aria-middleware:ci .
+      - name: Build web image
+        run: docker build -f Dockerfile.web -t aria-web:ci .
+      - name: Build backend image
+        run: docker build -f Dockerfile.backend -t aria-backend:ci .
+      - name: Boot the middleware image and run the planner child
+        run: docker run --rm --entrypoint node aria-middleware:ci /repo/scripts/docker-planner-smoke.mjs
+      - name: Start middleware, web, and backend against Postgres and Redis
+        run: |
+          set -euo pipefail
+          bash scripts/generate-keys.sh
+          export JWT_PRIVATE_KEY="$(base64 -w 0 private_key.pem)"
+          export JWT_PUBLIC_KEY="$(base64 -w 0 public_key.pem)"
+          rm -f private_key.pem public_key.pem
+          export COOKIE_SECRET="ci-cookie-secret-must-be-at-least-32"
+          export WORKSPACE_ENCRYPTION_KEY="ci-workspace-encryption-key-32chars"
+          export POSTGRES_USER=aria POSTGRES_PASSWORD=aria POSTGRES_DB=aria_dev
+          compose() { docker compose -f docker-compose.yml -f docker-compose.ci.yml "$@"; }
+          cleanup() { compose logs --tail 80 || true; compose down -v || true; }
+          trap cleanup EXIT
+          compose up -d --no-build --wait --wait-timeout 300 postgres redis backend middleware web
+          mw=""
+          for i in $(seq 1 30); do
+            mw="$(curl -fsS http://127.0.0.1:3001/api/health || true)"
+            echo "$mw" | grep -q '"status":"healthy"' && break
+            sleep 2
+          done
+          echo "$mw" | grep -q '"status":"healthy"'
+          curl -fsS http://127.0.0.1:8080/api/health | grep -q '"status":"healthy"'
+          web=""
+          for i in $(seq 1 30); do
+            web="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)"
+            [ "$web" = "200" ] && break
+            sleep 2
+          done
+          [ "$web" = "200" ]

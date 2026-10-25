@@ -15,5 +15,5 @@ export async function createTicket(req: AriaRequest, res: Response, next: NextFu
 }
 
 export async function updateTicket(req: AriaRequest, res: Response, next: NextFunction) {
-  try { res.json({ ticket: await svc.updateTicket(req.params.id, req.user!.workspaceId, req.body) }); } catch (e) { next(e); }
+  try { res.json({ ticket: await svc.updateTicket(req.params.id, req.user!.workspaceId, req.body, req.user!.userId) }); } catch (e) { next(e); }
 }

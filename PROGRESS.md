@@ -6,13 +6,74 @@
 
 ---
 
-## Milestone 2 — agents doing real work through Cursor (planned)
+## Milestone 2 — agent runs backend (this branch)
 
-Plan: `docs/milestones/M2_PLAN.md`. Not started. Backend tasks B1–B18 can start now. Frontend tasks F1–F5 start after the UI simplification PR merges. Open owner questions are in §16 of the plan.
+Branch: `cursor/m2-backend-1c0c`. Plan: `docs/milestones/M2_PLAN.md` (§17 is the ticket log, story points, and evidence). Product spec wins on conflict. Frontend tasks F1–F5 are not in this PR. Agents never merge.
 
-## UI simplification (this branch)
+### Pending owner confirmation
 
-Branch: `cursor/simplify-web-ui-d456`. UI in `apps/web`, plus the Playwright suite. Middleware only forwards the bearer token to the concept graph and proxies orchestrator session create. No schema changes.
+These are the plan §16 defaults, each a config setting, until the owner says otherwise:
+
+- `ARIA_CURSOR_KEY_TYPE=user`
+- `ARIA_MONTHLY_TOKEN_BUDGET=20000000` (tokens, not dollars)
+- `ARIA_MERGE_GUARD_MODE=block`
+- `ARIA_LOCAL_FALLBACK=off` (local worktree worker is not built)
+- `ARIA_AWAITING_MERGE_COUNTS_ACTIVE=false`
+- `ARIA_QA_BROWSER=false` and `ARIA_SECURITY_REVIEW=false`. Before/after screenshots are required in the evidence prompts. The visual-regression suite and the LLM security review stay M3.
+- `ARIA_MAX_REVIEW_FIX_ROUNDS=2` and `ARIA_MAX_QA_FIX_ROUNDS=2`
+- Schedule: `ARIA_WORKDAYS=1,2,3,4,5`, `ARIA_TIMEZONE=UTC`, workday `09:00`–`18:00`, risk ratio `0.8`
+
+### What landed
+
+- **B1.** Node 22 in engines, `.nvmrc`, Dockerfiles, and CI. `@cursor/sdk` `1.0.40`. Stub mode is refused in production.
+- **B2.** Flyway V15 `agent_runs` and `agent_run_logs`. Drizzle matches. `TicketStatus` includes `awaiting_merge` and `blocked`. Drift check passes.
+- **B3–B5.** Queue (`FOR UPDATE SKIP LOCKED`, 90s lease, 30s heartbeat, reaper), worker, redacted logs, runs API, monthly token buckets, agent OFF blocks queued runs and cancels running rows.
+- **B6.** Provider stub covers Cursor agents, SSE, usage, cancel, GitHub PRs, reviews, checks, and branches. Merge endpoints return 418. Vitest global setup points the suite at the stub.
+- **B7–B9.** Structured JSON with one retry. Cloud worker uses `bc-<run id>`, adopts a 409, and falls back to poll on 410. Local planning is a scrubbed child process. The live child calls `planWithCursorSdk` (`Agent.create`, plan mode, tool allowlist, empty `settingSources`). `ARIA_CURSOR_LOCAL_MODE=stub` stays the CI default and never imports the SDK. `resolveForRun` refreshes a catalog older than 24h, or an empty one, or a missing id, and blocks a missing agent pin with `MODEL_UNAVAILABLE`.
+- **B10.** V16 `flow_owners`. Dropped `business_flows.owner_agent_id`, `business_flows.backup_agent_id`, and `skills.owned_flow_ids`. `skills.backup_agent_id` stays (the agent's own backup). JSON still returns `ownerAgentId` / `backupAgentId` from the join table.
+- **B11–B12.** Knowledge-map and company runs enqueue. A validated AI roster (names, instructions, seat count, one CEO, acyclic managers) is applied with `company_source=ai`. Template fallback runs only after two failed validations, and the reason is logged. No LLM stays 201. Knowledge merge updates summary, tech stack, modules, APIs, data model, and flows. Unknown paths are dropped. Owner-edited flow layers stay. A schema-invalid plan leaves `source=template` and does not delete flows. A summary that omits a flow name still keeps that name.
+- **B13–B15.** Merge tripwire, COMMENT-only reviews, diff guards, develop / review / fix, round caps.
+- **B16.** QA stores a report and will not move a ticket to `awaiting_merge` without valid dev and QA evidence. `prWatcher` polls every 60s with `If-None-Match`. An owner merge moves the ticket to `done` and cancels queued runs. A closed or abandoned pull (closed, no `merged_at`) moves it to `rejected`. Both write a `status_change` ticket event.
+- **B17.** Config only. `REPO_ACCESS` blocks the run.
+- **B19.** V17 `ticket_events`, hash chain, timeline, Markdown/JSON export, agent append limited to tickets the agent is on.
+- **B20.** V18 story points (Fibonacci, default 1). `due_at` from working days. At-risk at 80% and overdue past `due_at`, each logged once. `GET /api/projects/:id/schedule`. Points above 8 set `splitSuggested`. Omitted points come from the planning agent when a workspace model is configured. The length heuristic is the fallback, including when the planner returns non-JSON. The event records `source` as `owner`, `planner`, or `heuristic`. `budget:warn` fires at 80% of the project limit.
+- **B21.** Dev and QA Markdown plus pdfkit PDFs in `ticket_reports`. Prompt templates require the sections. Gate sends invalid evidence back as a fix round. Content hash is an `evidence` event. Report links go on the PR comment. Downloads are workspace-scoped.
+
+### Review fix pass (PR #9, do not merge from the agent)
+
+Opus review items 1–23 and the re-review (8 remaining must-fixes, near-blocking, and should-fix) are addressed on `cursor/m2-backend-1c0c`. Not merged.
+
+- Cloud worker uses the workspace encrypted key, `repos[{url,startingRef,prUrl}]`, `{agent,run}`, SSE `event:` lines, `git.branches[].sha`, `GET /v1/agents/{id}/usage?runId=` `totalTokens`, and a timeout on every call. A usage `403 feature_unavailable` falls back to the estimate cap. A bad `Last-Event-ID` reconnects once, then polls. QA and fix runs attach the known pull request URL when the cloud reply omits it.
+- `Dockerfile.middleware` and `Dockerfile.web` copy `pnpm-workspace.yaml` and install with the lockfile. The runtime image has `git` and `HOST=0.0.0.0`. `@aria/db`, `@aria/shared`, and `@aria/config` compile to `dist` and export that JavaScript for Node, so `node dist/index.js` can load them. CI job `docker-images` builds the three images, runs the planner-child smoke, then starts postgres, redis, backend, middleware, and web with compose and checks `/api/health`.
+- Planning checks the repo out with async `git` (askpass token only on the git process, an in-process lock plus a lock file, unique worktree, timeouts) and strips `.cursor/{hooks,mcp,environment}.json`. The worktree is removed when the run finishes, fails, or times out. Tools `none` skip the checkout. A JSON-fix retry reuses the same worktree. `sandboxOptions` sits under `local`. The planner child exits after it replies and the parent kills the process group.
+- QA polls checks until they complete or `ARIA_QA_CHECK_TIMEOUT_MS` (default 30 minutes). Pending is not an immediate failure. Evidence accepts a QA report at the QA head and a dev report at that head or at the succeeded develop/fix commit QA built on. The stub changes the pull head SHA on every push.
+- Review line comments stay on diff hunks. Pull files page past 30. One project budget bucket is shared by planning and coding. Reservations are released on cancel, human status change, agent disable, and worker early return.
+- Ticket-event deletes are allowed only while a parent `BEFORE DELETE` trigger is on the stack and the client query is a top-level `DELETE FROM` workspaces, projects, or tickets. A temporary-table trigger does not match. The table owner can still `DISABLE TRIGGER`; these migrations do not `CREATE ROLE`. `aria_purge_ticket_events*` is `SECURITY DEFINER` and rejects a direct call. A session GUC is not consulted. Deleting a workspace that still has events succeeds.
+- A usage `403` estimates prompt, assistant, thinking, and tool-call text (`ceil(chars/4)`), and a stub `estimatedTokens` still replaces that total. V20 stores `budget_project_scoped` on the run so a later budget change releases the same ledger row. JSON-fix retries add their token usage. `.github/workflows/shadow-learning.yml` is valid YAML, uses Node 22, and a push runs a green no-op job instead of opening a pull request.
+- Drift check compares column types and unique indexes. Drizzle timestamps that mirror `TIMESTAMPTZ` set `withTimezone: true`.
+
+### Verified locally on 2026-10-25
+
+- `node scripts/check-schema-drift.cjs` passed.
+- `pnpm -F @aria/middleware exec tsc --noEmit` passed.
+- `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
+- `pnpm -F @aria/middleware test` — 24 files, 135 tests passed, including an empty worktrees directory after checkout and after a failed local run, the temporary-table delete rejection, a budget release after `token_budget_monthly` is cleared, and `ANTHROPIC_ENABLED=false` staying off.
+- `node` resolves `@aria/db` and `@aria/shared` to `packages/*/dist/index.js` and loads them.
+- V19's purge functions and V20's `budget_project_scoped` column were applied to the local database with `psql`. Flyway was not repaired. A fresh CI database applies the edited files from scratch.
+- Docker is not installed in this environment. The image boot and compose health check are the `docker-images` CI job.
+- Java sources were not changed. Java CI remains the check.
+
+### Open
+
+- `repoMirror` and `localWorktreeWorker` are not in this PR. `ARIA_LOCAL_FALLBACK` stays off.
+- Screenshot capture is a prompt requirement plus a stub PNG. Middleware does not run Playwright. `ARIA_QA_BROWSER` stays false. The visual-regression suite stays M3.
+- `smoke:cursor` has not been run against a real key. No scratch-repo ticket has gone through a live develop → owner merge. The SDK import is wired; CI still uses the stub.
+
+Non-goals that stay M3 or later: standup ceremony, merge-order coordinator, red/blue execution, ideas and proposals, the learning agent, the visual-regression suite, LLM security review, worker sub-agents, multi-tenant, GitHub webhooks. Frontend F1–F5, including the timeline UI, are still not in this PR. The simplified web shell from PR #8 is on main.
+
+## UI simplification (merged, PR #8)
+
+Branch: `cursor/simplify-web-ui-d456`, merged to main. UI in `apps/web`, plus the Playwright suite. Middleware only forwards the bearer token to the concept graph and proxies orchestrator session create. No schema changes.
 
 - Light theme by default, optional dark mode (`aria-theme` on `<html>`), one accent, system font, shared primitives (Button, Input, Card, Badge, Dialog, EmptyState, PageHeader, Table).
 - Sidebar is Projects, Company, Board, Runs, Settings. `/dashboard` redirects to `/projects`. `/sessions` redirects to `/runs`. `/board` renders the ticket board. Signup goes to `/setup`.
@@ -21,9 +82,9 @@ Branch: `cursor/simplify-web-ui-d456`. UI in `apps/web`, plus the Playwright sui
 - Dialogs are positioned with `dvw`/`dvh` so the panel stays inside the visible viewport on mobile.
 - No Playwright spec was deleted. `dashboard.spec.ts` now checks that `/dashboard` opens the projects home (the stat-card dashboard is gone). `apps/e2e/src/agent-kanban.spec.ts` moved to `apps/e2e/tests/agent-kanban.spec.ts` because the board still exists. Sprint 5+ specs were updated for the new labels, the orchestrator create proxy, and graph coverage 404s.
 - Concept graph screenshots were retaken with the Java backend up (Docker Compose, host network, existing Postgres). The map is empty (0 concept nodes). The knowledge map shows the Demo Shop flows.
-- Verified: `pnpm -F @aria/web exec tsc --noEmit`, `pnpm -F @aria/web lint`, `pnpm -F @aria/middleware exec tsc --noEmit`, anti-slop 10/10. Full Playwright suite (`--workers=1 --retries=0`): **510 passed** (170 on chromium-desktop, 170 on chromium-tablet, 170 on chromium-mobile) in 7.4m.
+- Verified on that branch: `pnpm -F @aria/web exec tsc --noEmit`, `pnpm -F @aria/web lint`, `pnpm -F @aria/middleware exec tsc --noEmit`, anti-slop 10/10. Full Playwright suite (`--workers=1 --retries=0`): **510 passed** (170 on chromium-desktop, 170 on chromium-tablet, 170 on chromium-mobile) in 7.4m.
 
-## Milestone 1 — foundation (this branch)
+## Milestone 1 — foundation (merged, PR #5)
 
 Branch: `cursor/milestone-1-foundation-db70`. PR #5. Product spec: `docs/PRODUCT_SPEC.md`.
 
@@ -54,7 +115,7 @@ Verified locally on 2026-10-25 (Postgres 16 + pgvector and Redis on the host; Do
 - Playwright, live mode against the stub, `BASE_URL=http://localhost:3000`, workers 1, retries 0: milestone + landing + sprint 1–4 on chromium-desktop, chromium-tablet, and chromium-mobile — **213 passed (3.7m)**.
 
 Decisions the owner needs:
-- Cursor still has no chat-completions API. Test Connection stores ids from `GET /v1/models`. Completions throw `CURSOR_NO_CHAT_API` after the queue selects the model. Milestone 2 (agent runs) is not started. Details: `docs/CURSOR_PROVIDER.md`.
+- Cursor still has no chat-completions API. Test Connection stores ids from `GET /v1/models`. Completions throw `CURSOR_NO_CHAT_API` after the queue selects the model. Agent runs are Milestone 2 (see the section above). Details: `docs/CURSOR_PROVIDER.md`.
 - Company size counts ON seats, including leadership. Documentation and the PR coordinator are extra OFF agents when they do not fit.
 - Company generation still dispatches one `company_generation` call. Cursor refuses it. The template org is what you edit.
 - `POST /api/projects/:id/teams` is still the older unvalidated team route. The review asked to disable the unvalidated skill-creation paths, and those return 410.

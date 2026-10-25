@@ -144,7 +144,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
           { role: 'user', content: draft.summary },
         ],
       });
-      if (extra.trim()) summary = extra.trim().slice(0, 2000);
+      if (extra.trim()) {
+        const extraText = extra.trim().slice(0, 1800);
+        const names = draft.flows.map((flow) => flow.name);
+        const missing = names.filter((name) => !extraText.toLowerCase().includes(name.toLowerCase()));
+        summary = missing.length ? `${extraText} Detected flows: ${names.join(', ')}.` : extraText;
+      }
     } catch (err) {
       logger.info('Knowledge enrichment skipped', { jobId: job.id, message: err instanceof Error ? err.message : 'skipped' });
     }
@@ -159,6 +164,28 @@ async function runJob(job: ClaimedJob): Promise<void> {
     updatedAt: new Date(),
   }).where(eq(analysisJobs.id, job.id));
   logger.info('Analysis job finished', { jobId: job.id, repo: job.repo_url, resultSummary });
+  const pending = await getPgPool().query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM analysis_jobs WHERE project_id = $1::uuid AND status IN ('queued', 'running')`,
+    [job.project_id],
+  );
+  if (Number(pending.rows[0]?.n ?? 0) === 0) {
+    try {
+      const map = await db.query.knowledgeMaps.findFirst({ where: eq(knowledgeMaps.projectId, job.project_id) });
+      const stamp = map?.updatedAt ? new Date(map.updatedAt).toISOString() : 'draft';
+      const { enqueue } = await import('./runs/runQueue');
+      await enqueue({
+        workspaceId: job.workspace_id,
+        projectId: job.project_id,
+        activity: 'knowledge_map',
+        taskType: 'knowledge_map',
+        runtime: 'cursor_local',
+        idempotencyKey: `km:${job.project_id}:${stamp}`,
+        input: { repoId: job.repo_id },
+      });
+    } catch (err) {
+      logger.info('Knowledge map run was not queued', { projectId: job.project_id, message: err instanceof Error ? err.message.slice(0, 160) : 'skipped' });
+    }
+  }
 }
 
 function replaceRepoSlice<T>(previous: Array<T & { repoId?: string }>, repoId: string, next: T[]): Array<T & { repoId?: string }> {
@@ -222,7 +249,9 @@ async function persistKnowledge(
       if (seen.has(row.flowKey)) continue;
       const previous = Array.isArray(row.entryPoints) ? row.entryPoints.filter((entry): entry is string => typeof entry === 'string') : [];
       const kept = previous.filter((entry) => !repoPaths.has(entry));
-      if (kept.length === 0 && !row.ownerAgentId && !row.backupAgentId) {
+      const owners = await getPgPool().query(`SELECT 1 FROM flow_owners WHERE flow_id = $1::uuid LIMIT 1`, [row.id]);
+      const hasOwner = owners.rows.length > 0;
+      if (kept.length === 0 && !hasOwner) {
         await tx.delete(businessFlows).where(eq(businessFlows.id, row.id));
       } else if (kept.length !== previous.length) {
         await tx.update(businessFlows).set({ entryPoints: kept, updatedAt: new Date() }).where(eq(businessFlows.id, row.id));

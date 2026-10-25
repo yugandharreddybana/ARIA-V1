@@ -1,4 +1,8 @@
-import { pgTable, text, uuid, doublePrecision, timestamp } from 'drizzle-orm/pg-core';
+import { customType, doublePrecision, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+
+const vector = customType<{ data: number[] | null }>({
+  dataType() { return 'vector(768)'; },
+});
 import { relations } from 'drizzle-orm';
 import { workspaces } from './workspaces';
 import { projects } from './projects';
@@ -15,6 +19,8 @@ export const conceptNodes = pgTable('concept_nodes', {
   filePath:    text('file_path'),
   summary:     text('summary'),
   metadata:    text('metadata'),
+  embedding:   vector('embedding'),
+  graphLevel:  integer('graph_level').notNull().default(1),
   createdAt:   tstz('created_at').notNull().defaultNow(),
   updatedAt:   tstz('updated_at').notNull().defaultNow(),
 });
@@ -29,6 +35,7 @@ export const conceptEdges = pgTable('concept_edges', {
   edgeType:     text('edge_type').notNull(),
   label:        text('label'),
   confidence:   doublePrecision('confidence'),
+  graphLevel:   integer('graph_level').notNull().default(1),
   createdAt:    tstz('created_at').notNull().defaultNow(),
 });
 

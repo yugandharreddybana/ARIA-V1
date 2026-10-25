@@ -77,6 +77,8 @@ export interface GatewayRequest {
    * Callers compute the ratio via `POST /api/distill/preflight` ahead of the dispatch.
    */
   expectedCompressionRatio?: number;
+  /** Overrides the process-wide session cap for this call (monthly run buckets). */
+  budgetMaxTokens?: number;
 }
 
 export interface GatewayResponse {
@@ -271,7 +273,7 @@ export class TokenGateway {
     // 3) Budget pre-flight check.
     const budget = await this.deps.ledger.getBudget(
       reqWithId.sessionId,
-      this.deps.maxSessionTokenBudget,
+      reqWithId.budgetMaxTokens ?? this.deps.maxSessionTokenBudget,
       this.deps.warnRatio,
       this.deps.hardRatio,
     );

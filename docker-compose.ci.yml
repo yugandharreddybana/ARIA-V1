@@ -1,0 +1,34 @@
+# CI boot of the images built by the docker-images job.
+# Prebuilt tags, no Ollama pull. Middleware listens on 0.0.0.0 and does not
+# start the run worker. NODE_ENV=production refuses the local planner stub.
+
+services:
+  backend:
+    image: aria-backend:ci
+    pull_policy: never
+  middleware:
+    image: aria-middleware:ci
+    pull_policy: never
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      RUN_WORKER_ENABLED: "false"
+      ANTHROPIC_ENABLED: "false"
+      ARIA_LLM_MODE: mock
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aria}:${POSTGRES_PASSWORD:-aria}@postgres:5432/${POSTGRES_DB:-aria_dev}
+      REDIS_URL: redis://redis:6379
+      BACKEND_URL: http://backend:8080
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      WORKSPACE_ENCRYPTION_KEY: ${WORKSPACE_ENCRYPTION_KEY}
+  web:
+    image: aria-web:ci
+    pull_policy: never

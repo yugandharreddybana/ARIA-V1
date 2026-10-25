@@ -1,5 +1,6 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, bigint, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import { agentRuns } from './agent-runs';
 import { workspaces } from './workspaces';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true });
@@ -14,6 +15,11 @@ export const projects = pgTable('projects', {
   companyMix: jsonb('company_mix'),
   modelTaskTiers: jsonb('model_task_tiers').$type<{ planning?: 'top' | 'auto'; development?: 'top' | 'auto' }>().notNull().default({ planning: 'top', development: 'auto' }),
   modelTierModels: jsonb('model_tier_models').$type<{ top?: string; auto?: string }>().notNull().default({}),
+  companySource: text('company_source').notNull().default('template'),
+  companyRunId: uuid('company_run_id').references((): AnyPgColumn => agentRuns.id, { onDelete: 'set null' }),
+  codeRuntime: text('code_runtime').notNull().default('cursor_cloud'),
+  tokenBudgetMonthly: bigint('token_budget_monthly', { mode: 'number' }),
+  mergeGuardAckAt: tstz('merge_guard_ack_at'),
   createdAt: tstz('created_at').notNull().defaultNow(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
 });
