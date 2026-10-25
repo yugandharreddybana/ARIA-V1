@@ -43,7 +43,7 @@ const envSchema = z.object({
   OLLAMA_EMBEDDING_MODEL: z.string().default('nomic-embed-text'),
 
   // Anthropic — gated by ANTHROPIC_ENABLED
-  ANTHROPIC_ENABLED: z.coerce.boolean().default(false),
+  ANTHROPIC_ENABLED: envFlag(false),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_DEFAULT_MODEL: z.string().default('claude-sonnet-4-6'),
   ANTHROPIC_HIGH_STAKES_MODEL: z.string().default('claude-opus-4-7'),

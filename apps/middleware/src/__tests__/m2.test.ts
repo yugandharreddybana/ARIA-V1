@@ -24,6 +24,7 @@ import { getPullFiles, githubRequest, MergeForbiddenError } from '../services/gi
 import { asRunError } from '../services/runs/errors';
 import { plannerCwd, releasePlannerWorktree, runLocalAgent, scrubbedEnv } from '../services/models/localAgentProcess';
 import { fallbackTokenEstimate } from '../services/models/codeWorker';
+import { parseEnv } from '../config/env';
 import { planWithCursorSdk } from '../services/models/cursorSdkPlanner';
 import { catalogIsStale } from '../services/models/resolveForRun';
 import { acceptCompanyPlan } from '../services/activities/companyRoster';
@@ -297,6 +298,12 @@ describe('pdf, hash, guards', () => {
       if (previous === undefined) delete process.env.ARIA_GITHUB_MODE;
       else process.env.ARIA_GITHUB_MODE = previous;
     }
+  });
+
+  it('treats ANTHROPIC_ENABLED=false as off', () => {
+    const parsed = parseEnv({ ...process.env, ANTHROPIC_ENABLED: 'false' });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.ANTHROPIC_ENABLED).toBe(false);
   });
 
   it('counts prompt and tool text when the usage total is missing', () => {
