@@ -50,6 +50,7 @@ export const agentRuns = pgTable('agent_runs', {
   errorCode: text('error_code'),
   errorMessage: text('error_message'),
   tokensReserved: bigint('tokens_reserved', { mode: 'number' }).notNull().default(0),
+  budgetProjectScoped: boolean('budget_project_scoped'),
   tokensInput: bigint('tokens_input', { mode: 'number' }),
   tokensOutput: bigint('tokens_output', { mode: 'number' }),
   tokensCacheRead: bigint('tokens_cache_read', { mode: 'number' }),

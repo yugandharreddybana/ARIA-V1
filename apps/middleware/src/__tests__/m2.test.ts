@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 const sdkCreate = vi.hoisted(() => vi.fn());
 vi.mock('@cursor/sdk', () => ({ Agent: { create: sdkCreate } }));
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -21,7 +22,8 @@ import { backoffMs, p90 } from '../services/runs/budget';
 import { redact } from '../services/runs/runLogs';
 import { getPullFiles, githubRequest, MergeForbiddenError } from '../services/githubClient.service';
 import { asRunError } from '../services/runs/errors';
-import { plannerCwd, runLocalAgent, scrubbedEnv } from '../services/models/localAgentProcess';
+import { plannerCwd, releasePlannerWorktree, runLocalAgent, scrubbedEnv } from '../services/models/localAgentProcess';
+import { fallbackTokenEstimate } from '../services/models/codeWorker';
 import { planWithCursorSdk } from '../services/models/cursorSdkPlanner';
 import { catalogIsStale } from '../services/models/resolveForRun';
 import { acceptCompanyPlan } from '../services/activities/companyRoster';
@@ -248,6 +250,31 @@ describe('pdf, hash, guards', () => {
     expect(existsSync(path.join(first, '.cursor', 'hooks.json'))).toBe(false);
     const gitfile = await readFile(path.join(first, '.git'), 'utf8');
     expect(gitfile).not.toContain(token);
+    const again = await plannerCwd({ stub: false, repoUrl: root, githubToken: token, reuseKey: 'json-fix' });
+    const reused = await plannerCwd({ stub: false, repoUrl: root, githubToken: token, reuseKey: 'json-fix' });
+    expect(reused).toBe(again);
+    expect(again).not.toBe(first);
+    await releasePlannerWorktree(again);
+    expect(existsSync(again)).toBe(true);
+    await releasePlannerWorktree(reused);
+    await releasePlannerWorktree(first);
+    await releasePlannerWorktree(second);
+    const worktrees = path.dirname(first);
+    expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
+    const skipped = await plannerCwd({ stub: false, repoUrl: `${root}-none`, tools: 'none' });
+    expect(path.basename(skipped)).toBe('planner-cwd');
+    const noneHash = createHash('sha256').update(`${root}-none`).digest('hex').slice(0, 16);
+    const data = process.env.ARIA_DATA_DIR || '/tmp/aria-data';
+    expect(existsSync(path.join(data, 'repos', noneHash, 'worktrees'))).toBe(false);
+    await expect(runLocalAgent({
+      prompt: 'Estimate story points',
+      stub: false,
+      timeoutMs: 8_000,
+      apiKey: 'not-a-real-key',
+      tools: 'read_only',
+      repoUrl: root,
+    })).rejects.toThrow();
+    expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -270,6 +297,11 @@ describe('pdf, hash, guards', () => {
       if (previous === undefined) delete process.env.ARIA_GITHUB_MODE;
       else process.env.ARIA_GITHUB_MODE = previous;
     }
+  });
+
+  it('counts prompt and tool text when the usage total is missing', () => {
+    expect(fallbackTokenEstimate('abcd', ['tool', 'note'])).toBe(1 + 1 + 1);
+    expect(fallbackTokenEstimate('', [])).toBe(0);
   });
 
   it('maps an invalid planner key to a non-retryable error', () => {

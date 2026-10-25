@@ -57,6 +57,7 @@ async function executeClaimed(run: AgentRunRow): Promise<void> {
         taken,
         external_agent_id: run.external_agent_id,
         external_run_id: run.external_run_id,
+        budget_project_scoped: projectScoped,
       }]);
     }
   };
@@ -89,7 +90,7 @@ async function executeClaimed(run: AgentRunRow): Promise<void> {
       return;
     }
     reserved = decision.reserved;
-    await markTokensReserved(run.id, reserved);
+    await markTokensReserved(run.id, reserved, projectScoped);
     const result = await dispatch(run, abort.signal);
     if (abort.signal.aborted) {
       await giveBack();

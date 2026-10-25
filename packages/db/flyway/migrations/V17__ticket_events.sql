@@ -1,7 +1,10 @@
--- Append-only ticket audit log. UPDATE and DELETE are blocked for every role.
--- A parent BEFORE DELETE trigger deletes the child rows first. The row trigger
--- allows that nested delete (pg_trigger_depth() > 1) and rejects a session
--- DELETE, a session GUC, and a direct call to the purge function.
+-- Append-only ticket audit log. UPDATE always raises.
+-- DELETE is allowed only when a parent BEFORE DELETE trigger is on the stack
+-- AND the client query is a top-level DELETE FROM workspaces, projects, or tickets.
+-- A nested delete from a temporary-table trigger does not match that query.
+-- The table owner can still DISABLE TRIGGER or add their own trigger. A non-owner
+-- app role is the real boundary; this migration does not CREATE ROLE because
+-- managed Postgres often has no CREATEROLE. A session GUC is not consulted.
 
 CREATE TABLE IF NOT EXISTS ticket_events (
   id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -60,6 +63,59 @@ CREATE TRIGGER ticket_events_chain
   BEFORE INSERT ON ticket_events
   FOR EACH ROW EXECUTE FUNCTION ticket_events_chain();
 
+CREATE OR REPLACE FUNCTION ticket_events_from_parent_delete() RETURNS boolean
+LANGUAGE plpgsql AS $$
+DECLARE
+  src text := current_query();
+  i int := 1;
+  n int := char_length(src);
+  out text := '';
+  ch text;
+  tag text;
+BEGIN
+  WHILE i <= n LOOP
+    ch := substr(src, i, 1);
+    IF substr(src, i, 2) = '--' THEN
+      i := i + 2;
+      WHILE i <= n AND substr(src, i, 1) <> E'\n' LOOP
+        i := i + 1;
+      END LOOP;
+    ELSIF substr(src, i, 2) = '/*' THEN
+      i := i + 2;
+      WHILE i < n AND substr(src, i, 2) <> '*/' LOOP
+        i := i + 1;
+      END LOOP;
+      i := i + 2;
+    ELSIF ch = '''' THEN
+      i := i + 1;
+      WHILE i <= n LOOP
+        IF substr(src, i, 2) = '''''' THEN
+          i := i + 2;
+        ELSIF substr(src, i, 1) = '''' THEN
+          i := i + 1;
+          EXIT;
+        ELSE
+          i := i + 1;
+        END IF;
+      END LOOP;
+      out := out || ' ';
+    ELSIF ch = '$' AND substring(substr(src, i, 64) FROM '^\$[A-Za-z0-9_]*\$') IS NOT NULL THEN
+      tag := substring(substr(src, i, 64) FROM '^\$[A-Za-z0-9_]*\$');
+      i := i + char_length(tag);
+      WHILE i <= n AND substr(src, i, char_length(tag)) IS DISTINCT FROM tag LOOP
+        i := i + 1;
+      END LOOP;
+      i := i + char_length(tag);
+      out := out || ' ';
+    ELSE
+      out := out || ch;
+      i := i + 1;
+    END IF;
+  END LOOP;
+  RETURN btrim(out) ~* '^delete[[:space:]]+from[[:space:]]+(only[[:space:]]+)?(public[[:space:]]*\.[[:space:]]*)?(tickets|projects|workspaces)\M[^;]*$';
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION ticket_events_immutable() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -67,7 +123,7 @@ BEGIN
     RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
   END IF;
   IF TG_OP = 'DELETE' THEN
-    IF pg_trigger_depth() <= 1 THEN
+    IF pg_trigger_depth() <= 1 OR NOT ticket_events_from_parent_delete() THEN
       RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
     END IF;
     RETURN OLD;

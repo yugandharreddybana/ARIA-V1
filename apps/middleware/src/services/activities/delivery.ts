@@ -170,7 +170,7 @@ async function finishCloud(
     if (cursor) {
       void getPgPool().query(`UPDATE agent_runs SET stream_cursor = $2, updated_at = NOW() WHERE id = $1::uuid`, [run.id, cursor]);
     }
-  }, { apiKey, repoUrl: repo.repoUrl, capTokens: cap, signal: options.signal });
+  }, { apiKey, repoUrl: repo.repoUrl, capTokens: cap, signal: options.signal, prompt });
   const usage = await worker.usage(ref, apiKey);
   if (usage?.unavailable) await checkMidRun(snap.estimatedTokens ?? 0, cap);
   else if (usage?.total != null && usage.total > cap) {

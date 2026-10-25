@@ -44,11 +44,12 @@ These are the plan §16 defaults, each a config setting, until the owner says ot
 Opus review items 1–23 and the re-review (8 remaining must-fixes, near-blocking, and should-fix) are addressed on `cursor/m2-backend-1c0c`. Not merged.
 
 - Cloud worker uses the workspace encrypted key, `repos[{url,startingRef,prUrl}]`, `{agent,run}`, SSE `event:` lines, `git.branches[].sha`, `GET /v1/agents/{id}/usage?runId=` `totalTokens`, and a timeout on every call. A usage `403 feature_unavailable` falls back to the estimate cap. A bad `Last-Event-ID` reconnects once, then polls. QA and fix runs attach the known pull request URL when the cloud reply omits it.
-- `Dockerfile.middleware` and `Dockerfile.web` copy `pnpm-workspace.yaml` and install with the lockfile. The runtime image has `git`. CI job `docker-images` builds the middleware, web, and backend images and boots the middleware image with `scripts/docker-planner-smoke.mjs`.
-- Planning checks the repo out with async `git` (askpass token only on the git process, per-repo lock, unique worktree, timeouts) and strips `.cursor/{hooks,mcp,environment}.json`. `sandboxOptions` sits under `local`. The planner child exits after it replies and the parent kills the process group.
+- `Dockerfile.middleware` and `Dockerfile.web` copy `pnpm-workspace.yaml` and install with the lockfile. The runtime image has `git` and `HOST=0.0.0.0`. `@aria/db`, `@aria/shared`, and `@aria/config` compile to `dist` and export that JavaScript for Node, so `node dist/index.js` can load them. CI job `docker-images` builds the three images, runs the planner-child smoke, then starts postgres, redis, backend, middleware, and web with compose and checks `/api/health`.
+- Planning checks the repo out with async `git` (askpass token only on the git process, an in-process lock plus a lock file, unique worktree, timeouts) and strips `.cursor/{hooks,mcp,environment}.json`. The worktree is removed when the run finishes, fails, or times out. Tools `none` skip the checkout. A JSON-fix retry reuses the same worktree. `sandboxOptions` sits under `local`. The planner child exits after it replies and the parent kills the process group.
 - QA polls checks until they complete or `ARIA_QA_CHECK_TIMEOUT_MS` (default 30 minutes). Pending is not an immediate failure. Evidence accepts a QA report at the QA head and a dev report at that head or at the succeeded develop/fix commit QA built on. The stub changes the pull head SHA on every push.
 - Review line comments stay on diff hunks. Pull files page past 30. One project budget bucket is shared by planning and coding. Reservations are released on cancel, human status change, agent disable, and worker early return.
-- Ticket-event deletes are allowed only while a parent `BEFORE DELETE` trigger is on the stack (`pg_trigger_depth() > 1`). `aria_purge_ticket_events*` is `SECURITY DEFINER` and rejects a direct call. A session GUC cannot bypass the trigger. Deleting a workspace that still has events succeeds.
+- Ticket-event deletes are allowed only while a parent `BEFORE DELETE` trigger is on the stack and the client query is a top-level `DELETE FROM` workspaces, projects, or tickets. A temporary-table trigger does not match. The table owner can still `DISABLE TRIGGER`; these migrations do not `CREATE ROLE`. `aria_purge_ticket_events*` is `SECURITY DEFINER` and rejects a direct call. A session GUC is not consulted. Deleting a workspace that still has events succeeds.
+- A usage `403` estimates prompt, assistant, thinking, and tool-call text (`ceil(chars/4)`), and a stub `estimatedTokens` still replaces that total. V20 stores `budget_project_scoped` on the run so a later budget change releases the same ledger row. JSON-fix retries add their token usage. `.github/workflows/shadow-learning.yml` is valid YAML, uses Node 22, and a push runs a green no-op job instead of opening a pull request.
 - Drift check compares column types and unique indexes. Drizzle timestamps that mirror `TIMESTAMPTZ` set `withTimezone: true`.
 
 ### Verified locally on 2026-10-25
@@ -56,8 +57,10 @@ Opus review items 1–23 and the re-review (8 remaining must-fixes, near-blockin
 - `node scripts/check-schema-drift.cjs` passed.
 - `pnpm -F @aria/middleware exec tsc --noEmit` passed.
 - `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
-- `pnpm -F @aria/middleware test` — 24 files, 132 tests passed, including the re-review cases (worktree, child exit, file pages, check wait, usage 403, ledger release on cancel / human status / agent off, workspace purge).
-- Docker is not installed in this environment. The image boot is the `docker-images` CI job.
+- `pnpm -F @aria/middleware test` — 24 files, 134 tests passed, including an empty worktrees directory after checkout and after a failed local run, the temporary-table delete rejection, and a budget release after `token_budget_monthly` is cleared.
+- `node` resolves `@aria/db` and `@aria/shared` to `packages/*/dist/index.js` and loads them.
+- V19's purge functions and V20's `budget_project_scoped` column were applied to the local database with `psql`. Flyway was not repaired. A fresh CI database applies the edited files from scratch.
+- Docker is not installed in this environment. The image boot and compose health check are the `docker-images` CI job.
 - Java sources were not changed. Java CI remains the check.
 
 ### Open

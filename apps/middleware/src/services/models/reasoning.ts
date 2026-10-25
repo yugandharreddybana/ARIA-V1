@@ -4,7 +4,7 @@ import { loadWorkspaceLlm } from '../guardedLlm.service';
 import { completeChat } from '../llmProvider.service';
 import { Sanitizer } from '../sanitizer.service';
 import { parseWithRetry } from './structuredOutput';
-import { runLocalAgent } from './localAgentProcess';
+import { plannerCwd, releasePlannerWorktree, runLocalAgent } from './localAgentProcess';
 import { checkMidRun, estimateFor } from '../runs/budget';
 import { RunError } from '../runs/errors';
 import { getPgPool } from '../db.client';
@@ -50,24 +50,34 @@ function cursorLocalReasoner(workspaceId: string): ReasoningModel {
       if (!stub && repoUrl) {
         try { githubToken = await readGithubToken(workspaceId); } catch { githubToken = null; }
       }
+      const tools = req.tools ?? (req.run.activity === 'company_generation' || req.run.activity === 'story_points' ? 'none' : 'read_only');
+      const cwd = await plannerCwd({ stub, repoUrl, githubToken, tools, reuseKey: req.run.id });
       const ask = async (extra: string) => runLocalAgent({
         prompt: extra ? `${req.instructions}\n${extra}` : req.instructions,
         stub,
         timeoutMs: 20 * 60 * 1000,
         apiKey,
         modelId: req.run.model_id || 'auto',
-        tools: req.tools ?? (req.run.activity === 'company_generation' || req.run.activity === 'story_points' ? 'none' : 'read_only'),
+        tools,
         repoUrl,
         githubToken,
+        cwd,
       });
       try {
         const first = await ask('');
-        const parsed = await parseWithRetry(req.schema, first.text, async (issues) => (await ask(`Fix the JSON. Issues: ${issues}`)).text);
-        const tokens = first.usage?.total;
-        return { ...parsed, tokensTotal: tokens };
+        let retryTokens = 0;
+        const parsed = await parseWithRetry(req.schema, first.text, async (issues) => {
+          const retry = await ask(`Fix the JSON. Issues: ${issues}`);
+          retryTokens += retry.usage?.total ?? 0;
+          return retry.text;
+        });
+        const tokensTotal = first.usage?.total == null && !parsed.retried ? undefined : (first.usage?.total ?? 0) + retryTokens;
+        return { ...parsed, tokensTotal };
       } catch (err) {
         if (err instanceof RunError && err.code !== 'SCHEMA_INVALID') throw err;
         throw new RunError('SCHEMA_INVALID', err instanceof Error ? err.message : 'schema invalid', false);
+      } finally {
+        await releasePlannerWorktree(cwd);
       }
     },
   };

@@ -44,13 +44,14 @@ export interface AgentRunRow {
   error_message: string | null;
   tokens_reserved: number;
   tokens_total: number | null;
+  budget_project_scoped: boolean | null;
 }
 
 const COLUMNS = `id, workspace_id, project_id, agent_id, ticket_id, parent_run_id, activity, task_type, runtime,
   status, blocked_reason, priority, idempotency_key, attempt, max_attempts, model_id, model_params,
   external_agent_id, external_run_id, external_url, stream_cursor, repo_id, base_ref, head_sha, branch,
   pr_url, pr_number, input, prompt_text, result_text, result_json, output_source, error_code, error_message,
-  tokens_reserved::int AS tokens_reserved, tokens_total::int AS tokens_total`;
+  tokens_reserved::int AS tokens_reserved, tokens_total::int AS tokens_total, budget_project_scoped`;
 
 function mapRow(row: AgentRunRow): AgentRunRow {
   return { ...row, input: (row.input ?? {}) as Record<string, unknown>, tokens_reserved: Number(row.tokens_reserved ?? 0) };
@@ -295,16 +296,21 @@ export interface HeldRun {
   taken: number;
   external_agent_id: string | null;
   external_run_id: string | null;
+  budget_project_scoped?: boolean | null;
 }
 
 export async function releaseHeldRuns(runs: HeldRun[]): Promise<void> {
   for (const run of runs) {
     if (run.taken <= 0) continue;
-    const budget = await getPgPool().query<{ scoped: boolean }>(
-      `SELECT token_budget_monthly IS NOT NULL AS scoped FROM projects WHERE id = $1::uuid`,
-      [run.project_id],
-    );
-    await releaseRun(run.workspace_id, run.activity, run.taken, run.agent_id, run.project_id, Boolean(budget.rows[0]?.scoped));
+    let scoped = run.budget_project_scoped;
+    if (scoped == null) {
+      const budget = await getPgPool().query<{ scoped: boolean }>(
+        `SELECT token_budget_monthly IS NOT NULL AS scoped FROM projects WHERE id = $1::uuid`,
+        [run.project_id],
+      );
+      scoped = Boolean(budget.rows[0]?.scoped);
+    }
+    await releaseRun(run.workspace_id, run.activity, run.taken, run.agent_id, run.project_id, scoped);
   }
 }
 
@@ -330,7 +336,7 @@ export async function cancelForTicket(client: PoolClient, ticketId: string): Pro
   const result = await client.query<HeldRun>(
     `WITH prev AS (
        SELECT id, workspace_id, project_id, agent_id, activity, tokens_reserved,
-              external_agent_id, external_run_id
+              external_agent_id, external_run_id, budget_project_scoped
          FROM agent_runs
         WHERE ticket_id = $1::uuid AND status IN ('queued', 'running', 'blocked')
         FOR UPDATE
@@ -341,7 +347,8 @@ export async function cancelForTicket(client: PoolClient, ticketId: string): Pro
        FROM prev
       WHERE a.id = prev.id
       RETURNING prev.id, prev.workspace_id, prev.project_id, prev.agent_id, prev.activity,
-                prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id`,
+                prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id,
+                prev.budget_project_scoped`,
     [ticketId],
   );
   return result.rows.map((row) => ({ ...row, taken: Number(row.taken) }));
@@ -354,7 +361,7 @@ export async function cancel(id: string): Promise<AgentRunRow | null> {
     const held = await client.query<HeldRun>(
       `WITH prev AS (
          SELECT id, workspace_id, project_id, agent_id, activity, tokens_reserved,
-                external_agent_id, external_run_id
+                external_agent_id, external_run_id, budget_project_scoped
            FROM agent_runs
           WHERE id = $1::uuid AND status IN ('queued', 'running', 'blocked')
           FOR UPDATE
@@ -366,7 +373,8 @@ export async function cancel(id: string): Promise<AgentRunRow | null> {
          FROM prev
         WHERE a.id = prev.id
         RETURNING prev.workspace_id, prev.project_id, prev.agent_id, prev.activity,
-                  prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id, prev.id`,
+                  prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id,
+                  prev.id, prev.budget_project_scoped`,
       [id],
     );
     const rowResult = await client.query<AgentRunRow>(
@@ -388,8 +396,15 @@ export async function cancel(id: string): Promise<AgentRunRow | null> {
   }
 }
 
-export async function markTokensReserved(id: string, tokens: number): Promise<void> {
-  await getPgPool().query(`UPDATE agent_runs SET tokens_reserved = $2, updated_at = NOW() WHERE id = $1::uuid`, [id, tokens]);
+export async function markTokensReserved(id: string, tokens: number, projectScoped?: boolean): Promise<void> {
+  if (projectScoped == null) {
+    await getPgPool().query(`UPDATE agent_runs SET tokens_reserved = $2, updated_at = NOW() WHERE id = $1::uuid`, [id, tokens]);
+    return;
+  }
+  await getPgPool().query(
+    `UPDATE agent_runs SET tokens_reserved = $2, budget_project_scoped = $3, updated_at = NOW() WHERE id = $1::uuid`,
+    [id, tokens, projectScoped],
+  );
 }
 
 export async function reap(): Promise<number> {
@@ -424,17 +439,21 @@ export async function reap(): Promise<number> {
       if ((updated.rowCount ?? 0) > 0) {
         reaped += 1;
         if (run.tokens_reserved > 0) {
-          const budget = await client.query<{ token_budget_monthly: string | null }>(
-            `SELECT token_budget_monthly::text FROM projects WHERE id = $1::uuid`,
-            [run.project_id],
-          );
+          let projectScoped = run.budget_project_scoped;
+          if (projectScoped == null) {
+            const budget = await client.query<{ token_budget_monthly: string | null }>(
+              `SELECT token_budget_monthly::text FROM projects WHERE id = $1::uuid`,
+              [run.project_id],
+            );
+            projectScoped = budget.rows[0]?.token_budget_monthly != null;
+          }
           released.push({
             workspaceId: run.workspace_id,
             activity: run.activity,
             tokens: run.tokens_reserved,
             agentId: run.agent_id,
             projectId: run.project_id,
-            projectScoped: budget.rows[0]?.token_budget_monthly != null,
+            projectScoped,
           });
         }
       }
@@ -475,7 +494,7 @@ export async function cancelRunningForAgent(agentId: string): Promise<HeldRun[]>
     const result = await client.query<HeldRun>(
       `WITH prev AS (
          SELECT id, workspace_id, project_id, agent_id, activity, tokens_reserved,
-                external_agent_id, external_run_id
+                external_agent_id, external_run_id, budget_project_scoped
            FROM agent_runs
           WHERE agent_id = $1::uuid AND status = 'running'
           FOR UPDATE
@@ -486,7 +505,8 @@ export async function cancelRunningForAgent(agentId: string): Promise<HeldRun[]>
          FROM prev
         WHERE a.id = prev.id
         RETURNING prev.id, prev.workspace_id, prev.project_id, prev.agent_id, prev.activity,
-                  prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id`,
+                  prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id,
+                  prev.budget_project_scoped`,
       [agentId],
     );
     await client.query('COMMIT');

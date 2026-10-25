@@ -8,7 +8,7 @@ import { listTicketEvents, verifyChain } from '../services/tickets/ticketEvents'
 import { storeReport, evidenceAllowsMerge } from '../services/evidence/reports';
 import { applyTransition } from '../services/tickets/ticketActions';
 import { scanSchedule } from '../services/tickets/ticketActions';
-import { claimById, enqueue, markTokensReserved } from '../services/runs/runQueue';
+import { cancel, claimById, enqueue, markTokensReserved } from '../services/runs/runQueue';
 import { processRunById } from '../services/runs/runWorker';
 import { monthlyBucketId, reserveRun, releaseRun } from '../services/runs/budget';
 import { onProjectEvent } from '../services/runs/hub';
@@ -80,6 +80,24 @@ describe('ticket events, schedule, and evidence gate', () => {
       [ticketId],
     )).rejects.toThrow(/append-only/);
     await expect(pool.query(`SELECT aria_purge_ticket_events($1::uuid)`, [ticketId])).rejects.toThrow(/append-only|permission denied/);
+    const client = await pool.connect();
+    try {
+      await client.query(`CREATE TEMP TABLE aria_event_trap (n int)`);
+      await client.query(
+        `CREATE FUNCTION pg_temp.aria_trap() RETURNS trigger LANGUAGE plpgsql AS $fn$
+         BEGIN
+           DELETE FROM ticket_events WHERE ticket_id = '${ticketId}'::uuid;
+           RETURN NEW;
+         END
+         $fn$`,
+      );
+      await client.query(`CREATE TRIGGER aria_trap BEFORE INSERT ON aria_event_trap FOR EACH ROW EXECUTE FUNCTION pg_temp.aria_trap()`);
+      await expect(client.query(`INSERT INTO aria_event_trap VALUES (1)`)).rejects.toThrow(/append-only/);
+    } finally {
+      await client.query(`DROP TABLE IF EXISTS aria_event_trap`);
+      await client.query(`DROP FUNCTION IF EXISTS pg_temp.aria_trap()`);
+      client.release();
+    }
     const before = await pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ticket_events WHERE ticket_id = $1::uuid`, [ticketId]);
     expect(Number(before.rows[0].n)).toBeGreaterThan(0);
     await pool.query(`DELETE FROM workspaces WHERE id = $1::uuid`, [owner.workspaceId]);
@@ -459,6 +477,30 @@ describe('planner output, pull watcher, budget, and claim race', () => {
     const disabled = await request(app).patch(`/api/projects/${projectId}/agents/${agentId}`).set(owner.auth).send({ enabled: false });
     expect(disabled.status).toBe(200);
     expect(await ledger()).toBe('0');
+  });
+
+  it('releases the bucket stored on the run after the project budget is cleared', async () => {
+    const owner = await signup(`m2-scope-${Date.now()}@aria.dev`);
+    const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Scope' });
+    const projectId = project.body.project.id as string;
+    await getPgPool().query(`UPDATE projects SET token_budget_monthly = 1000000 WHERE id = $1::uuid`, [projectId]);
+    const queued = await enqueue({
+      workspaceId: owner.workspaceId, projectId, activity: 'review', taskType: 'code_review', runtime: 'cursor_local',
+      idempotencyKey: `scope-${Date.now()}`,
+    });
+    expect(await claimById(queued.id, 'scope-worker')).not.toBeNull();
+    const reserved = await reserveRun({
+      workspaceId: owner.workspaceId, agentId: null, activity: 'review', projectBudget: 1_000_000, agentBudget: null, projectId,
+    });
+    expect(reserved.ok).toBe(true);
+    await markTokensReserved(queued.id, reserved.reserved, true);
+    await getPgPool().query(`UPDATE projects SET token_budget_monthly = NULL WHERE id = $1::uuid`, [projectId]);
+    expect(await cancel(queued.id)).not.toBeNull();
+    const left = await getPgPool().query<{ n: string }>(
+      `SELECT COALESCE(SUM(tokens_reserved), 0)::text AS n FROM token_ledger WHERE session_id = $1::uuid`,
+      [monthlyBucketId(owner.workspaceId)],
+    );
+    expect(left.rows[0].n).toBe('0');
   });
 
   it('refreshes a stale catalog and blocks a missing pin', async () => {

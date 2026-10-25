@@ -92,6 +92,8 @@ export async function evidenceAllowsMerge(ticketId: string, headSha?: string | n
   if (!dev) {
     const builtOn = result.rows.find((row) => row.kind === 'dev' && row.valid && row.commit_sha);
     if (builtOn) {
+      // The succeeded develop/fix head is the commit the QA report was written against.
+      // This is not a git ancestry walk; the repo is not cloned on this path.
       const parent = await getPgPool().query(
         `SELECT 1 FROM agent_runs
           WHERE ticket_id = $1::uuid AND activity IN ('develop', 'fix')

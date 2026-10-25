@@ -5,7 +5,7 @@
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm --filter @aria/shared --filter @aria/config --filter @aria/db build && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",

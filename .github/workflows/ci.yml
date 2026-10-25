@@ -206,3 +206,33 @@ jobs:
         run: docker build -f Dockerfile.backend -t aria-backend:ci .
       - name: Boot the middleware image and run the planner child
         run: docker run --rm --entrypoint node aria-middleware:ci /repo/scripts/docker-planner-smoke.mjs
+      - name: Start middleware, web, and backend against Postgres and Redis
+        run: |
+          set -euo pipefail
+          bash scripts/generate-keys.sh
+          export JWT_PRIVATE_KEY="$(base64 -w 0 private_key.pem)"
+          export JWT_PUBLIC_KEY="$(base64 -w 0 public_key.pem)"
+          rm -f private_key.pem public_key.pem
+          export COOKIE_SECRET="ci-cookie-secret-must-be-at-least-32"
+          export WORKSPACE_ENCRYPTION_KEY="ci-workspace-encryption-key-32chars"
+          export POSTGRES_USER=aria POSTGRES_PASSWORD=aria POSTGRES_DB=aria_dev
+          compose() { docker compose -f docker-compose.yml -f docker-compose.ci.yml "$@"; }
+          cleanup() { compose down -v || true; }
+          trap cleanup EXIT
+          compose up -d --no-build --wait --wait-timeout 300 postgres redis backend middleware web
+          mw=""
+          for i in $(seq 1 30); do
+            mw="$(curl -fsS http://127.0.0.1:3001/api/health || true)"
+            echo "$mw" | grep -q '"status":"healthy"' && break
+            sleep 2
+          done
+          echo "$mw" | grep -q '"status":"healthy"'
+          curl -fsS http://127.0.0.1:8080/api/health | grep -q '"status":"healthy"'
+          web=""
+          for i in $(seq 1 30); do
+            web="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)"
+            [ "$web" = "200" ] && break
+            sleep 2
+          done
+          [ "$web" = "200" ]
+          compose logs --tail 80 || true

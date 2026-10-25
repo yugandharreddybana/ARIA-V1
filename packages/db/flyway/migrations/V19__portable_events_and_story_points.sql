@@ -1,5 +1,61 @@
--- Re-apply the ticket-event purge. Deletes are allowed only while a parent
--- BEFORE DELETE trigger is on the stack. A session GUC cannot bypass that.
+-- Re-apply the ticket-event purge for databases that already ran V17.
+-- DELETE is allowed only for a parent BEFORE DELETE whose client query is a
+-- top-level DELETE FROM workspaces, projects, or tickets. A temporary-table
+-- trigger does not match. The table owner can still DISABLE TRIGGER. This
+-- migration does not CREATE ROLE. A session GUC is not consulted.
+
+CREATE OR REPLACE FUNCTION ticket_events_from_parent_delete() RETURNS boolean
+LANGUAGE plpgsql AS $$
+DECLARE
+  src text := current_query();
+  i int := 1;
+  n int := char_length(src);
+  out text := '';
+  ch text;
+  tag text;
+BEGIN
+  WHILE i <= n LOOP
+    ch := substr(src, i, 1);
+    IF substr(src, i, 2) = '--' THEN
+      i := i + 2;
+      WHILE i <= n AND substr(src, i, 1) <> E'\n' LOOP
+        i := i + 1;
+      END LOOP;
+    ELSIF substr(src, i, 2) = '/*' THEN
+      i := i + 2;
+      WHILE i < n AND substr(src, i, 2) <> '*/' LOOP
+        i := i + 1;
+      END LOOP;
+      i := i + 2;
+    ELSIF ch = '''' THEN
+      i := i + 1;
+      WHILE i <= n LOOP
+        IF substr(src, i, 2) = '''''' THEN
+          i := i + 2;
+        ELSIF substr(src, i, 1) = '''' THEN
+          i := i + 1;
+          EXIT;
+        ELSE
+          i := i + 1;
+        END IF;
+      END LOOP;
+      out := out || ' ';
+    ELSIF ch = '$' AND substring(substr(src, i, 64) FROM '^\$[A-Za-z0-9_]*\$') IS NOT NULL THEN
+      tag := substring(substr(src, i, 64) FROM '^\$[A-Za-z0-9_]*\$');
+      i := i + char_length(tag);
+      WHILE i <= n AND substr(src, i, char_length(tag)) IS DISTINCT FROM tag LOOP
+        i := i + 1;
+      END LOOP;
+      i := i + char_length(tag);
+      out := out || ' ';
+    ELSE
+      out := out || ch;
+      i := i + 1;
+    END IF;
+  END LOOP;
+  RETURN btrim(out) ~* '^delete[[:space:]]+from[[:space:]]+(only[[:space:]]+)?(public[[:space:]]*\.[[:space:]]*)?(tickets|projects|workspaces)\M[^;]*$';
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION ticket_events_immutable() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -8,7 +64,7 @@ BEGIN
     RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
   END IF;
   IF TG_OP = 'DELETE' THEN
-    IF pg_trigger_depth() <= 1 THEN
+    IF pg_trigger_depth() <= 1 OR NOT ticket_events_from_parent_delete() THEN
       RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
     END IF;
     RETURN OLD;

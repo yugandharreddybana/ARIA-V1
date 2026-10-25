@@ -58,7 +58,7 @@ export interface CodeWorker {
     ref: ExternalRef,
     cursor: string | null,
     onEvent: (kind: string, text: string, cursor: string | null) => void,
-    auth: CloudAuth & { capTokens?: number; signal?: AbortSignal },
+    auth: CloudAuth & { capTokens?: number; signal?: AbortSignal; prompt?: string },
   ): Promise<CodeRunSnapshot>;
   usage(ref: ExternalRef, apiKey: string): Promise<TokenUsage | null>;
   cancel(ref: ExternalRef, apiKey: string): Promise<void>;
@@ -275,11 +275,15 @@ export function cursorCloudWorker(): CodeWorker {
   };
 }
 
+export function fallbackTokenEstimate(prompt: string, extra: string[]): number {
+  return Math.ceil(prompt.length / 4) + extra.reduce((sum, part) => sum + Math.ceil(part.length / 4), 0);
+}
+
 async function streamRun(
   ref: ExternalRef,
   cursor: string | null,
   onEvent: (kind: string, text: string, cursor: string | null) => void,
-  auth: CloudAuth & { capTokens?: number; signal?: AbortSignal },
+  auth: CloudAuth & { capTokens?: number; signal?: AbortSignal; prompt?: string },
   retryBadCursor: boolean,
 ): Promise<CodeRunSnapshot> {
   const apiKey = auth.apiKey;
@@ -308,7 +312,9 @@ async function streamRun(
   const reader = stream.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let result: CodeRunSnapshot = { status: 'running', branches: [], estimatedTokens: 0 };
+  const extra: string[] = [];
+  let frozen = false;
+  let result: CodeRunSnapshot = { status: 'running', branches: [], estimatedTokens: fallbackTokenEstimate(auth.prompt ?? '', extra) };
   let assistants = 0;
   const apply = async (sse: SseEvent) => {
     let payload: { text?: string; status?: string; git?: { branches?: GitBranch[] }; message?: string; estimatedTokens?: number } = {};
@@ -322,12 +328,23 @@ async function streamRun(
     }
     if (sse.event === 'assistant' && payload.text) {
       onEvent('assistant', payload.text, sse.id);
-      result.estimatedTokens = (result.estimatedTokens ?? 0) + Math.ceil(payload.text.length / 4);
+      extra.push(payload.text);
     }
-    if (typeof payload.estimatedTokens === 'number') result.estimatedTokens = payload.estimatedTokens;
-    if (sse.event === 'thinking' && payload.text) onEvent('status', payload.text, sse.id);
+    if (sse.event === 'thinking' && payload.text) {
+      onEvent('status', payload.text, sse.id);
+      extra.push(payload.text);
+    }
     if (sse.event === 'heartbeat') onEvent('status', 'heartbeat', sse.id);
-    if (sse.event === 'tool_call') onEvent('tool', sse.data.slice(0, 500), sse.id);
+    if (sse.event === 'tool_call') {
+      onEvent('tool', sse.data.slice(0, 500), sse.id);
+      extra.push(sse.data);
+    }
+    if (typeof payload.estimatedTokens === 'number') {
+      frozen = true;
+      result.estimatedTokens = payload.estimatedTokens;
+    } else if (!frozen) {
+      result.estimatedTokens = fallbackTokenEstimate(auth.prompt ?? '', extra);
+    }
     if (sse.event === 'error') onEvent('error', payload.message || payload.text || sse.data, sse.id);
     if (sse.event === 'status' || sse.event === 'result' || sse.event === 'done') {
       const branches = Array.isArray(payload.git?.branches) ? payload.git.branches : result.branches;
