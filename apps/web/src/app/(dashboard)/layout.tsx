@@ -3,25 +3,29 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/auth.context';
-import {
-  BrainCircuit, LayoutDashboard, FolderKanban,
-  Users, Ticket, Lightbulb, PlayCircle,
-  Bot, Settings, LogOut, Loader2, Menu
-} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SessionStatus } from '@/components/SessionStatus';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { cn } from '@/lib/utils';
+import { LoadingState } from '@/components/ui/empty-state';
 
 const NAV_ITEMS = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/projects', icon: FolderKanban, label: 'Projects' },
-  { href: '/dashboard/team', icon: Users, label: 'Skills & Teams' },
-  { href: '/tickets', icon: Ticket, label: 'Tickets' },
-  { href: '/planning', icon: Lightbulb, label: 'Planning' },
-  { href: '/sessions', icon: PlayCircle, label: 'Sessions' },
-  { href: '/ai-strategy', icon: Bot, label: 'AI Strategy' },
-  { href: '/settings', icon: Settings, label: 'Settings' },
+  { href: '/projects', label: 'Projects' },
+  { href: '/company', label: 'Company' },
+  { href: '/board', label: 'Board' },
+  { href: '/runs', label: 'Runs' },
+  { href: '/settings', label: 'Settings' },
 ];
+
+function isActive(href: string, pathname: string) {
+  if (href === '/projects') {
+    return pathname === '/projects' || (pathname.startsWith('/projects/') && !pathname.includes('/company'));
+  }
+  if (href === '/company') return pathname === '/company' || pathname.includes('/company');
+  if (href === '/board') return pathname === '/board' || pathname === '/tickets';
+  if (href === '/runs') return pathname === '/runs' || pathname === '/sessions';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -41,8 +45,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-aria-500" />
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <LoadingState label="Loading your workspace…" />
       </div>
     );
   }
@@ -50,71 +54,67 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="flex min-h-screen bg-background">
       {navOpen && (
         <button
           type="button"
-          className="fixed inset-0 z-30 bg-background/70 md:hidden"
+          className="fixed inset-0 z-30 bg-foreground/40 md:hidden"
           aria-label="Close navigation"
           onClick={() => setNavOpen(false)}
         />
       )}
       <aside className={cn(
-        'w-60 border-r border-border/50 flex-col bg-card/30 fixed inset-y-0 left-0 z-40',
+        'fixed inset-y-0 left-0 z-40 w-60 flex-col border-r bg-card',
         navOpen ? 'flex' : 'hidden',
         'md:flex',
       )}>
-        <div className="flex items-center gap-2.5 h-16 px-5 border-b border-border/50">
-          <BrainCircuit className="h-5 w-5 text-aria-500" />
-          <span className="font-bold tracking-tight">ARIA</span>
-          <span className="text-xs text-muted-foreground ml-auto">v0.1</span>
+        <div className="flex h-14 items-center px-5">
+          <Link href="/projects" className="text-sm font-semibold tracking-tight">ARIA</Link>
         </div>
 
-        <div className="px-3 pt-3">
-          <SessionStatus />
-        </div>
-
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
-            const isActive = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
+        <nav className="flex-1 space-y-1 px-3 py-2" aria-label="Main">
+          {NAV_ITEMS.map(({ href, label }) => {
+            const active = isActive(href, pathname);
             return (
-              <Link key={href} href={href}
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-aria-900/60 text-aria-300'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                  'block rounded-md px-3 py-2 text-sm',
+                  active ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
                 )}
               >
-                <Icon className="h-4 w-4 flex-shrink-0" />
                 {label}
               </Link>
             );
           })}
         </nav>
 
-        <div className="border-t border-border/50 p-3">
-          <div className="flex items-center gap-3 px-2 py-2 rounded-md">
-            <div className="h-7 w-7 rounded-full bg-aria-800 flex items-center justify-center text-xs font-bold text-aria-200 flex-shrink-0">
+        <div className="space-y-3 border-t p-3">
+          <SessionStatus />
+          <ThemeToggle compact />
+          <div className="flex items-center gap-3 px-1">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-medium">
               {user?.name?.[0]?.toUpperCase() ?? 'U'}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{user?.name}</p>
-              <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{user?.name}</p>
+              <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" onClick={logout} title="Sign out">
-              <LogOut className="h-3.5 w-3.5" />
+            <Button variant="ghost" size="sm" onClick={logout} title="Sign out">
+              Sign out
             </Button>
           </div>
         </div>
       </aside>
 
-      <main className="flex-1 md:ml-60 min-h-screen">
-        <div className="md:hidden flex items-center h-12 px-3 border-b border-border">
-          <Button type="button" variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setNavOpen(true)}>
-            <Menu className="h-4 w-4" />
+      <main className="min-h-screen flex-1 md:ml-60">
+        <div className="flex h-12 items-center border-b px-3 md:hidden">
+          <Button type="button" variant="ghost" size="sm" aria-label="Open navigation" onClick={() => setNavOpen(true)}>
+            Menu
           </Button>
-          <span className="font-semibold ml-2">ARIA</span>
+          <span className="ml-2 text-sm font-semibold">ARIA</span>
         </div>
         {children}
       </main>

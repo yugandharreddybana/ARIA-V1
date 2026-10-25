@@ -1,22 +1,20 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+async function stubSession(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('aria_token', 'e2e-stub-token'));
+  await page.route('**/api/auth/me', route => route.fulfill({
+    json: { user: { id: '1', name: 'Test User', email: 'test@aria.dev', workspaceId: 'ws1' } },
+  }));
+}
 
 test.describe('Projects page', () => {
-  test.beforeEach(async ({ page }) => {
-    // Stub auth — set fake token cookie so protected route passes
-    await page.goto('/');
-    await page.evaluate(() => {
-      document.cookie = 'aria_access_token=test; path=/';
-      localStorage.setItem('aria_user', JSON.stringify({ id: '1', name: 'Test User', email: 'test@aria.dev', workspaceId: 'ws1' }));
-    });
-  });
-
   test('redirects to login when unauthenticated', async ({ page }) => {
-    await page.context().clearCookies();
     await page.goto('/projects');
     await expect(page).toHaveURL(/\/login/);
   });
 
   test('renders empty state when no projects', async ({ page }) => {
+    await stubSession(page);
     // API returns { projects: [] } — not { data: [] }
     await page.route('**/api/projects', route => route.fulfill({ json: { projects: [] } }));
     await page.goto('/projects');
@@ -24,6 +22,7 @@ test.describe('Projects page', () => {
   });
 
   test('renders project list', async ({ page }) => {
+    await stubSession(page);
     await page.route('**/api/projects', route => route.fulfill({
       // API returns { projects: [...] } — not { data: [...] }
       json: { projects: [{ id: '1', name: 'My App', description: 'Test', status: 'active', workspaceId: 'ws1', createdAt: '', updatedAt: '' }] },
@@ -33,15 +32,17 @@ test.describe('Projects page', () => {
   });
 
   test('opens create project modal', async ({ page }) => {
+    await stubSession(page);
     await page.route('**/api/projects', route => route.fulfill({ json: { projects: [] } }));
     await page.goto('/projects');
     await page.getByRole('button', { name: /new project/i }).click();
-    await expect(page.getByText('New Project')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New project' })).toBeVisible();
     // Modal label is "Name" (htmlFor="pname") — not "Project name"
     await expect(page.getByLabel('Name')).toBeVisible();
   });
 
   test('creates a project and shows it in list', async ({ page }) => {
+    await stubSession(page);
     const newProject = { id: '2', name: 'ARIA Core', description: '', status: 'active', workspaceId: 'ws1', createdAt: '', updatedAt: '' };
     await page.route('**/api/projects', async route => {
       if (route.request().method() === 'GET') {
@@ -82,6 +83,7 @@ test.describe('GitHub OAuth', () => {
 
 test.describe('Project detail + repo connect', () => {
   test('shows connect repo button on project detail page', async ({ page }) => {
+    await stubSession(page);
     await page.route('**/api/projects/1', route => route.fulfill({
       json: { project: { id: '1', name: 'ARIA Core', status: 'active', workspaceId: 'ws1', repos: [], createdAt: '', updatedAt: '' } },
     }));
@@ -92,6 +94,7 @@ test.describe('Project detail + repo connect', () => {
   });
 
   test('connect repo modal appears on button click', async ({ page }) => {
+    await stubSession(page);
     await page.route('**/api/projects/1', route => route.fulfill({
       json: { project: { id: '1', name: 'ARIA Core', status: 'active', workspaceId: 'ws1', repos: [], createdAt: '', updatedAt: '' } },
     }));
@@ -99,7 +102,7 @@ test.describe('Project detail + repo connect', () => {
     await page.goto('/projects/1');
     await page.getByRole('button', { name: /connect repo/i }).click();
     // Modal title and label verified against ConnectRepoModal in [id]/page.tsx
-    await expect(page.getByText('Connect Repository')).toBeVisible();
-    await expect(page.getByLabel('GitHub Repository URL')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Connect repository' })).toBeVisible();
+    await expect(page.getByLabel('GitHub repository URL')).toBeVisible();
   });
 });

@@ -29,13 +29,13 @@ async function ensureTestUser(): Promise<void> {
 }
 
 export async function revealNav(page: Page): Promise<void> {
-  const dashboard = page.locator('aside').getByRole('link', { name: /^dashboard$/i });
+  const projects = page.locator('aside').getByRole('link', { name: /^projects$/i });
   try {
-    await dashboard.waitFor({ state: 'visible', timeout: 3_000 });
+    await projects.waitFor({ state: 'visible', timeout: 3_000 });
     return;
   } catch {
     await page.getByRole('button', { name: 'Open navigation' }).click();
-    await dashboard.waitFor({ state: 'visible' });
+    await projects.waitFor({ state: 'visible' });
   }
 }
 
@@ -76,7 +76,7 @@ export async function signup(
   const confirm = page.locator('[name="confirm"]');
   if (await confirm.count()) await confirm.fill(password);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
+  await page.waitForURL(/\/(setup|projects|dashboard)/, { timeout: 15_000 });
   return { email, password };
 }
 
@@ -87,15 +87,10 @@ export async function signup(
  */
 export async function createProject(page: Page, name: string): Promise<void> {
   await page.goto('/projects');
-  await page.waitForSelector('button', { timeout: 10_000 });
   await page.getByRole('button', { name: /new project/i }).click();
-  await page.waitForSelector('[id="pname"], [name="name"], input[placeholder*="project" i]', { timeout: 5_000 });
-  // Fill whichever name input is present
-  const nameInput = page.locator('[id="pname"]').or(page.locator('input[placeholder*="platform" i]')).first();
-  await nameInput.fill(name);
-  await page.getByRole('button', { name: /^create$/i }).click();
-  // Wait for the project card to appear in the list
-  await page.waitForSelector(`text=${name}`, { timeout: 10_000 });
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  await page.getByText(name, { exact: true }).first().waitFor({ timeout: 10_000 });
 }
 
 /**

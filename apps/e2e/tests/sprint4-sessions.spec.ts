@@ -6,12 +6,12 @@ test.describe('Sprint 4 — Sessions', () => {
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('S4-SS01: sessions page loads with heading', async ({ page }) => {
-    await page.goto('/sessions');
-    await expect(page.getByRole('heading', { name: /sessions/i })).toBeVisible();
+    await page.goto('/runs');
+    await expect(page.getByRole('heading', { name: /runs/i })).toBeVisible();
   });
 
   test('S4-SS02: empty state renders when no sessions exist', async ({ page }) => {
-    await page.goto('/sessions');
+    await page.goto('/runs');
     // Either session cards or an empty-state message should be present
     const cards   = page.locator('[data-testid="session-card"]');
     const empty   = page.getByText(/no sessions/i);
@@ -24,7 +24,7 @@ test.describe('Sprint 4 — Sessions', () => {
   });
 
   test('S4-SS03: start new session button is visible', async ({ page }) => {
-    await page.goto('/sessions');
+    await page.goto('/runs');
     await expect(
       page.locator('[data-testid="new-session-btn"], button:has-text("New Session"), button:has-text("Start")'),
     ).toBeVisible();

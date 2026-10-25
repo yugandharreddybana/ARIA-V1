@@ -12,6 +12,10 @@ function getToken(req: AriaRequest): string {
   return token;
 }
 
+export async function create(req: AriaRequest, res: Response, next: NextFunction): Promise<void> {
+  try { res.status(201).json({ success: true, data: await orchestratorProxy.create(req.body, getToken(req)) }); }
+  catch (err) { next(err); }
+}
 export async function start(req: AriaRequest, res: Response, next: NextFunction): Promise<void> {
   try { res.json({ success: true, data: await orchestratorProxy.start(req.params.id, getToken(req)) }); }
   catch (err) { next(err); }

@@ -26,7 +26,7 @@ async function createProject(request: import('@playwright/test').APIRequestConte
   });
   expect(res.ok()).toBeTruthy();
   const body = await res.json();
-  return body.data?.id ?? body.id;
+  return body.project?.id ?? body.data?.id ?? body.id;
 }
 
 test('S5-05 create → start → pause → stop transitions', async ({ page, request }) => {
@@ -78,7 +78,8 @@ test('S5-06 IDOR — another user cannot read a session they did not create', as
     headers: { Authorization: `Bearer ${ownerToken}` },
     data: { projectId, mode: 'precision', environment: 'dev', missionType: 'feature' },
   });
-  const sessionId = (await createRes.json()).id ?? (await createRes.json()).data?.id;
+  const created = await createRes.json();
+  const sessionId = created.id ?? created.data?.id;
 
   // Sign in as a different user in a separate page context.
   await page.context().clearCookies();

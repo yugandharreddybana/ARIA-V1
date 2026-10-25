@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageHeader } from '@/components/ui/page-header';
+import { cn } from '@/lib/utils';
 
 type ProviderId = 'cursor' | 'gemini' | 'groq' | 'ollama' | 'openai' | 'anthropic' | 'openai_compatible';
 
@@ -36,6 +38,33 @@ interface SetupState {
 }
 
 const EMPTY_MIX = { business: 1, qa: 2, frontend: 1, backend: 1, fullstack: 1, junior: 1, aiml: 0, devops: 0, security: 0 };
+
+const STEP_LABELS = ['Project', 'Model', 'GitHub', 'Knowledge', 'Company'] as const;
+
+function Stepper({ step }: { step: number }) {
+  return (
+    <ol className="mb-8 flex flex-wrap gap-x-4 gap-y-2" aria-label="Setup steps">
+      {STEP_LABELS.map((label, index) => {
+        const number = index + 1;
+        const current = number === step;
+        const done = number < step;
+        return (
+          <li key={label} className="flex items-center gap-2 text-sm" aria-current={current ? 'step' : undefined}>
+            <span className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-full border text-xs',
+              current && 'border-primary bg-primary text-primary-foreground',
+              done && 'border-primary text-primary',
+              !current && !done && 'border-border text-muted-foreground',
+            )}>
+              {number}
+            </span>
+            <span className={current ? 'font-medium' : 'text-muted-foreground'}>{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export default function SetupPage() {
   const [step, setStep] = useState(1);
@@ -212,9 +241,14 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">Set up your company</h1>
-      <p className="text-sm text-muted-foreground mb-6">Project, model, repository, knowledge map, then the org chart.</p>
+    <div className="mx-auto max-w-3xl p-4 md:p-8">
+      <PageHeader
+        title="Set up your company"
+        description="One step at a time. You can leave and come back — setup resumes where you stopped."
+      />
+      <div className="mt-6">
+        <Stepper step={step} />
+      </div>
       {error && <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>}
 
       {step === 1 && (

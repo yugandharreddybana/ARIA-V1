@@ -65,10 +65,14 @@ export function Select({ value, defaultValue, onValueChange, children }: SelectP
 }
 
 export const SelectTrigger = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, children, ...props }, ref) => (
+  ({ className, children, ...props }, ref) => {
+    const listId = React.useId();
+    return (
     <div
       ref={ref}
       role="combobox"
+      aria-expanded={false}
+      aria-controls={listId}
       tabIndex={0}
       className={cn(
         'flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm',
@@ -78,8 +82,10 @@ export const SelectTrigger = React.forwardRef<HTMLDivElement, React.HTMLAttribut
     >
       {children}
       <ChevronDown className="h-4 w-4 opacity-50" />
+      <span id={listId} className="sr-only" />
     </div>
-  ),
+    );
+  },
 );
 SelectTrigger.displayName = 'SelectTrigger';
 

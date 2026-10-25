@@ -68,8 +68,11 @@ test.describe('Sprint 1 — Authentication', () => {
     await login(page);
     await revealNav(page);
     await expect(page.locator('aside').getByText('ARIA', { exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: /dashboard/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /tickets/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^projects$/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^board$/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^company$/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^runs$/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^settings$/i })).toBeVisible();
   });
 
   test('S1-11: Logout clears session and redirects to login', async ({ page }) => {
