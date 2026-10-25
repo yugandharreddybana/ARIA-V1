@@ -21,3 +21,6 @@ anti_patterns:
     captured_at: "2026-05-16T00:00:00Z"
 
 failure_stories: []
+  - text: "Milestone 2: agent runs backend (Cursor planning + coding, queue, budget, flow ownership) (#9) (sha 1b6e555)"
+    veracity: ai-only
+    captured_at: "2026-10-25T12:08:42.636Z"
