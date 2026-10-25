@@ -8,7 +8,7 @@ import { listTicketEvents, verifyChain } from '../services/tickets/ticketEvents'
 import { storeReport, evidenceAllowsMerge } from '../services/evidence/reports';
 import { applyTransition } from '../services/tickets/ticketActions';
 import { scanSchedule } from '../services/tickets/ticketActions';
-import { claimById, enqueue } from '../services/runs/runQueue';
+import { claimById, enqueue, markTokensReserved } from '../services/runs/runQueue';
 import { processRunById } from '../services/runs/runWorker';
 import { monthlyBucketId, reserveRun, releaseRun } from '../services/runs/budget';
 import { onProjectEvent } from '../services/runs/hub';
@@ -59,6 +59,34 @@ describe('ticket events, schedule, and evidence gate', () => {
     const other = await signup(`m2-other-${Date.now()}@aria.dev`);
     const denied = await request(app).get(`/api/tickets/${ticket.id}/events`).set(other.auth);
     expect(denied.status).toBe(404);
+    const badCursor = await request(app).get(`/api/tickets/${ticket.id}/events?cursor=abc`).set(owner.auth);
+    expect(badCursor.status).toBe(400);
+    const badAgent = await request(app).get(`/api/tickets/${ticket.id}/events?agentId=not-a-uuid`).set(owner.auth);
+    expect(badAgent.status).toBe(400);
+  });
+
+  it('rejects a session purge and still deletes a workspace that has events', async () => {
+    const owner = await signup(`m2-purge-${Date.now()}@aria.dev`);
+    const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Purge' });
+    const projectId = project.body.project.id as string;
+    const created = await request(app).post('/api/tickets').set(owner.auth).send({
+      projectId, title: 'Keep the log', description: 'Events must survive a session GUC.', type: 'feature', storyPoints: 1,
+    });
+    const ticketId = created.body.ticket.id as string;
+    const pool = getPgPool();
+    await expect(pool.query(
+      `WITH bypass AS (SELECT set_config('aria.purge_ticket_events', '1', true))
+       DELETE FROM ticket_events WHERE ticket_id = $1::uuid`,
+      [ticketId],
+    )).rejects.toThrow(/append-only/);
+    await expect(pool.query(`SELECT aria_purge_ticket_events($1::uuid)`, [ticketId])).rejects.toThrow(/append-only|permission denied/);
+    const before = await pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ticket_events WHERE ticket_id = $1::uuid`, [ticketId]);
+    expect(Number(before.rows[0].n)).toBeGreaterThan(0);
+    await pool.query(`DELETE FROM workspaces WHERE id = $1::uuid`, [owner.workspaceId]);
+    const workspace = await pool.query(`SELECT 1 FROM workspaces WHERE id = $1::uuid`, [owner.workspaceId]);
+    expect(workspace.rowCount).toBe(0);
+    const events = await pool.query(`SELECT 1 FROM ticket_events WHERE workspace_id = $1::uuid`, [owner.workspaceId]);
+    expect(events.rowCount).toBe(0);
   });
 
   it('flags overdue once and blocks awaiting_merge without evidence', async () => {
@@ -92,6 +120,22 @@ describe('ticket events, schedule, and evidence gate', () => {
     await getPgPool().query(`UPDATE tickets SET status = 'in_qa' WHERE id = $1`, [ticketId]);
     expect((await evidenceAllowsMerge(ticketId, 'abc')).ok).toBe(true);
     expect((await evidenceAllowsMerge(ticketId, 'def')).ok).toBe(false);
+    const parent = await enqueue({
+      workspaceId: ticket.rows[0].workspace_id,
+      projectId,
+      ticketId,
+      activity: 'develop',
+      taskType: 'develop',
+      runtime: 'cursor_cloud',
+      idempotencyKey: `ancestor-${ticketId}`,
+    });
+    await getPgPool().query(`UPDATE agent_runs SET status = 'succeeded', head_sha = 'abc' WHERE id = $1::uuid`, [parent.id]);
+    await storeReport({
+      workspaceId: ticket.rows[0].workspace_id, projectId, ticketId, ticketKey: ticket.rows[0].ticket_key,
+      kind: 'qa', markdown: qaReport, storyPoints: 2, agents: ['qa'], runId: null, commitSha: 'qahead',
+    });
+    expect((await evidenceAllowsMerge(ticketId, 'qahead')).ok).toBe(true);
+    expect((await evidenceAllowsMerge(ticketId, 'no-such-head')).ok).toBe(false);
     await expect(applyTransition(ticketId, 'qa_passed', { actorKind: 'system', commitSha: 'abc' })).resolves.toMatchObject({ status: 'awaiting_merge' });
     const pdf = await request(app).get(`/api/tickets/${ticketId}/reports/dev.pdf`).set(owner.auth);
     expect(pdf.status).toBe(200);
@@ -335,6 +379,86 @@ describe('planner output, pull watcher, budget, and claim race', () => {
     expect(winners).toHaveLength(1);
     expect(winners[0]?.id).toBe(queued.id);
     await getPgPool().query(`UPDATE agent_runs SET status = 'cancelled' WHERE id = $1`, [queued.id]);
+
+    const sharedWorkspace = '33333333-3333-4333-8333-333333333399';
+    const sharedProject = '44444444-4444-4444-8444-444444444499';
+    await getPgPool().query(`DELETE FROM token_ledger WHERE session_id = $1::uuid`, [monthlyBucketId(sharedWorkspace)]);
+    const points = await reserveRun({
+      workspaceId: sharedWorkspace, agentId: null, activity: 'story_points', projectBudget: 70_000, agentBudget: null, projectId: sharedProject,
+    });
+    expect(points.ok).toBe(true);
+    const companyBudget = await reserveRun({
+      workspaceId: sharedWorkspace, agentId: null, activity: 'company_generation', projectBudget: 70_000, agentBudget: null, projectId: sharedProject,
+    });
+    expect(companyBudget.ok).toBe(false);
+    expect(companyBudget.code).toBe('BUDGET_EXCEEDED');
+    await releaseRun(sharedWorkspace, 'story_points', points.reserved, null, sharedProject, true);
+    const cleared = await getPgPool().query<{ n: string }>(
+      `SELECT COALESCE(SUM(tokens_reserved), 0)::text AS n FROM token_ledger WHERE session_id = $1::uuid`,
+      [monthlyBucketId(sharedWorkspace)],
+    );
+    expect(cleared.rows[0].n).toBe('0');
+
+    const busy = await signup(`m2-one-running-${Date.now()}@aria.dev`);
+    const busyProject = await request(app).post('/api/setup/project').set(busy.auth).send({ name: 'One running' });
+    const busyProjectId = busyProject.body.project.id as string;
+    const roster = await request(app).post(`/api/projects/${busyProjectId}/company`).set(busy.auth).send({ size: 3, mix: zeroMix });
+    const agentId = (roster.body.agents as Array<{ id: string }>)[0].id;
+    const firstRun = await enqueue({
+      workspaceId: busy.workspaceId, projectId: busyProjectId, agentId, activity: 'review', taskType: 'code_review', runtime: 'cursor_local',
+      idempotencyKey: `one-a-${Date.now()}`,
+    });
+    const secondRun = await enqueue({
+      workspaceId: busy.workspaceId, projectId: busyProjectId, agentId, activity: 'review', taskType: 'code_review', runtime: 'cursor_local',
+      idempotencyKey: `one-b-${Date.now()}`,
+    });
+    expect(await claimById(firstRun.id, 'one-worker')).not.toBeNull();
+    expect(await claimById(secondRun.id, 'other-worker')).toBeNull();
+    await getPgPool().query(`UPDATE agent_runs SET status = 'cancelled' WHERE id = ANY($1::uuid[])`, [[firstRun.id, secondRun.id]]);
+  });
+
+  it('returns reserved tokens when a human changes status and when an agent is turned off', async () => {
+    const owner = await signup(`m2-release-${Date.now()}@aria.dev`);
+    const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Release' });
+    const projectId = project.body.project.id as string;
+    await getPgPool().query(`UPDATE projects SET token_budget_monthly = 1000000 WHERE id = $1::uuid`, [projectId]);
+    const company = await request(app).post(`/api/projects/${projectId}/company`).set(owner.auth).send({ size: 3, mix: zeroMix });
+    const agentId = (company.body.agents as Array<{ id: string }>)[0].id;
+    const ledger = async () => {
+      const row = await getPgPool().query<{ n: string }>(
+        `SELECT COALESCE(SUM(tokens_reserved), 0)::text AS n FROM token_ledger WHERE session_id = $1::uuid`,
+        [monthlyBucketId(owner.workspaceId)],
+      );
+      return row.rows[0].n;
+    };
+    const hold = async (ticketId: string, key: string) => {
+      const queued = await enqueue({
+        workspaceId: owner.workspaceId, projectId, agentId, ticketId,
+        activity: 'review', taskType: 'code_review', runtime: 'cursor_local', idempotencyKey: key,
+      });
+      expect(await claimById(queued.id, `worker-${key}`)).not.toBeNull();
+      const reserved = await reserveRun({
+        workspaceId: owner.workspaceId, agentId, activity: 'review', projectBudget: 1_000_000, agentBudget: null, projectId,
+      });
+      expect(reserved.ok).toBe(true);
+      await markTokensReserved(queued.id, reserved.reserved);
+      expect(Number(await ledger())).toBeGreaterThan(0);
+    };
+    const first = await request(app).post('/api/tickets').set(owner.auth).send({
+      projectId, title: 'Human stop', description: 'Cancel the reservation.', type: 'feature', storyPoints: 1,
+    });
+    await hold(first.body.ticket.id as string, `human-${Date.now()}`);
+    const moved = await request(app).patch(`/api/tickets/${first.body.ticket.id as string}`).set(owner.auth).send({ status: 'blocked' });
+    expect(moved.status).toBe(200);
+    expect(await ledger()).toBe('0');
+
+    const second = await request(app).post('/api/tickets').set(owner.auth).send({
+      projectId, title: 'Agent off', description: 'Release when the agent is disabled.', type: 'feature', storyPoints: 1,
+    });
+    await hold(second.body.ticket.id as string, `off-${Date.now()}`);
+    const disabled = await request(app).patch(`/api/projects/${projectId}/agents/${agentId}`).set(owner.auth).send({ enabled: false });
+    expect(disabled.status).toBe(200);
+    expect(await ledger()).toBe('0');
   });
 
   it('refreshes a stale catalog and blocks a missing pin', async () => {

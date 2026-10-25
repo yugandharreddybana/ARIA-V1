@@ -111,13 +111,25 @@ describe('review acceptance', () => {
 
   it('drives develop, review, and QA to awaiting_merge, then the owner merge', async () => {
     const { owner, projectId } = await projectWithRepo('pipeline', 'acme/demo-app');
-    const ticketId = await openTicket(owner.auth, projectId, 'Ship the guard', 'Close the gate. [[stub:ui]]');
+    const ticketId = await openTicket(owner.auth, projectId, 'Ship the guard', 'Close the gate. [[stub:ui]] [[stub:omit_pr]]');
     expect(await dispatchReadyTickets()).toBeGreaterThanOrEqual(1);
     await drain(projectId, 8);
     const row = await ticketStatus(ticketId);
     expect(row.status).toBe('awaiting_merge');
     expect(row.pr_number).toBeTruthy();
     expect(row.head_sha).toBeTruthy();
+    const heads = await getPgPool().query<{ activity: string; head_sha: string | null }>(
+      `SELECT activity, head_sha FROM agent_runs
+        WHERE ticket_id = $1::uuid AND activity IN ('develop', 'qa') AND status = 'succeeded'
+        ORDER BY created_at`,
+      [ticketId],
+    );
+    const developHead = heads.rows.find((item) => item.activity === 'develop')?.head_sha;
+    const qaHead = heads.rows.find((item) => item.activity === 'qa')?.head_sha;
+    expect(developHead).toBeTruthy();
+    expect(qaHead).toBeTruthy();
+    expect(qaHead).not.toBe(developHead);
+    expect(row.head_sha).toBe(qaHead);
     const base = process.env.GITHUB_API_BASE || '';
     const files = await fetch(`${base}/repos/acme/demo-app/pulls/${row.pr_number}/files`).then((res) => res.json()) as Array<{ filename: string }>;
     const names = files.map((file) => file.filename);
@@ -221,6 +233,15 @@ describe('review acceptance', () => {
     expect((await getRun(streamRun.rows[0].id))?.status).toBe('succeeded');
     expect((await request(app).patch(`/api/tickets/${expired}`).set(owner.auth).send({ action: 'reject' })).status).toBe(200);
 
+    const overCap = await openTicket(owner.auth, projectId, 'Usage hidden', '[[stub:usage=403]][[stub:estimate=9000000]]');
+    await dispatchReadyTickets();
+    const capRun = await getPgPool().query<{ id: string }>(
+      `SELECT id FROM agent_runs WHERE ticket_id = $1::uuid AND activity = 'develop' AND status = 'queued'`,
+      [overCap],
+    );
+    await processRunById(capRun.rows[0].id);
+    expect((await getRun(capRun.rows[0].id))?.error_code).toBe('BUDGET_EXCEEDED');
+
     const broken = await openTicket(owner.auth, projectId, 'Cloud error', '[[stub:error]]');
     await dispatchReadyTickets();
     const errorRun = await getPgPool().query<{ id: string }>(
@@ -234,12 +255,25 @@ describe('review acceptance', () => {
     expect(retried?.attempt).toBeGreaterThan(0);
     await quiet(owner.workspaceId);
 
+    const previousPoll = process.env.ARIA_QA_CHECK_POLL_MS;
+    const previousTimeout = process.env.ARIA_QA_CHECK_TIMEOUT_MS;
+    process.env.ARIA_QA_CHECK_POLL_MS = '40';
+    process.env.ARIA_QA_CHECK_TIMEOUT_MS = '90000';
+    const settled = await openTicket(owner.auth, projectId, 'Checks settle', '[[stub:checks=settle]]');
+    await dispatchReadyTickets();
+    await drain(projectId, 12);
+    expect((await ticketStatus(settled)).status).toBe('awaiting_merge');
+    process.env.ARIA_QA_CHECK_TIMEOUT_MS = '200';
     const pending = await openTicket(owner.auth, projectId, 'Checks pending', '[[stub:checks=pending]]');
     await dispatchReadyTickets();
     await drain(projectId, 12);
     expect((await ticketStatus(pending)).status).not.toBe('awaiting_merge');
     const qaLog = await listTicketEvents(pending, { limit: 40 });
     expect(qaLog.some((event) => event.summary.includes('qa_failed'))).toBe(true);
+    if (previousPoll === undefined) delete process.env.ARIA_QA_CHECK_POLL_MS;
+    else process.env.ARIA_QA_CHECK_POLL_MS = previousPoll;
+    if (previousTimeout === undefined) delete process.env.ARIA_QA_CHECK_TIMEOUT_MS;
+    else process.env.ARIA_QA_CHECK_TIMEOUT_MS = previousTimeout;
     await quiet(owner.workspaceId);
   }, 90_000);
 
@@ -275,12 +309,26 @@ describe('review acceptance', () => {
       `SELECT id FROM agent_runs WHERE ticket_id = $1::uuid AND activity = 'develop' AND status = 'queued'`,
       [ticketId],
     );
+    const before = await getPgPool().query<{ n: string }>(
+      `SELECT COALESCE(SUM(tokens_reserved), 0)::text AS n FROM token_ledger WHERE session_id = $1::uuid`,
+      [monthlyBucketId(owner.workspaceId)],
+    );
     const pending = processRunById(develop.rows[0].id);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    let reserved = 0;
+    for (let attempt = 0; attempt < 50 && reserved === 0; attempt += 1) {
+      reserved = (await getRun(develop.rows[0].id))?.tokens_reserved ?? 0;
+      if (reserved === 0) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(reserved).toBeGreaterThan(0);
     const cancelled = await request(app).post(`/api/runs/${develop.rows[0].id}/cancel`).set(owner.auth);
     expect(cancelled.status).toBe(200);
     await pending;
     expect((await getRun(develop.rows[0].id))?.status).toBe('cancelled');
+    const after = await getPgPool().query<{ n: string }>(
+      `SELECT COALESCE(SUM(tokens_reserved), 0)::text AS n FROM token_ledger WHERE session_id = $1::uuid`,
+      [monthlyBucketId(owner.workspaceId)],
+    );
+    expect(after.rows[0].n).toBe(before.rows[0].n);
     await quiet(owner.workspaceId);
   }, 30_000);
 

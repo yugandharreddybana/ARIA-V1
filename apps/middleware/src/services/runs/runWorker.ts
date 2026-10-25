@@ -11,7 +11,7 @@ import { dispatchReadyTickets } from '../tickets/ticketDispatcher';
 import { applyTransition, scanSchedule } from '../tickets/ticketActions';
 import { LeaseLost, RunError, asRunError } from './errors';
 import { append, flush } from './runLogs';
-import { block, claim, claimById, fail, heartbeat, markTokensReserved, reap, releaseLeases, succeed, type AgentRunRow, type RunRuntime } from './runQueue';
+import { block, claim, claimById, consumeReservation, fail, heartbeat, markTokensReserved, reap, releaseHeldRuns, releaseLeases, succeed, type AgentRunRow, type RunRuntime } from './runQueue';
 
 const BLOCKING = new Set(['BUDGET_EXCEEDED', 'MERGE_GUARD', 'REPO_ACCESS', 'KEY_INVALID', 'USAGE_LIMIT', 'MODEL_UNAVAILABLE', 'NO_CHANGES', 'CANCELLED']);
 
@@ -43,6 +43,23 @@ async function executeClaimed(run: AgentRunRow): Promise<void> {
   beat.unref?.();
   let reserved = 0;
   let projectScoped = false;
+  const giveBack = async () => {
+    if (!reserved) return;
+    const taken = await consumeReservation(run.id);
+    reserved = 0;
+    if (taken > 0) {
+      await releaseHeldRuns([{
+        id: run.id,
+        workspace_id: run.workspace_id,
+        project_id: run.project_id,
+        agent_id: run.agent_id,
+        activity: run.activity,
+        taken,
+        external_agent_id: run.external_agent_id,
+        external_run_id: run.external_run_id,
+      }]);
+    }
+  };
   try {
     if (abort.signal.aborted) return;
     run.model_id = await resolveForRun(run);
@@ -74,9 +91,15 @@ async function executeClaimed(run: AgentRunRow): Promise<void> {
     reserved = decision.reserved;
     await markTokensReserved(run.id, reserved);
     const result = await dispatch(run, abort.signal);
-    if (abort.signal.aborted) return;
+    if (abort.signal.aborted) {
+      await giveBack();
+      return;
+    }
     const alive = await heartbeat(run.id, workerId);
-    if (!alive) return;
+    if (!alive) {
+      await giveBack();
+      return;
+    }
     const recorded = result.tokensTotal == null ? reserved : result.tokensTotal;
     const wrote = await succeed(run.id, workerId, {
       result_text: result.result_text ?? result.text,
@@ -90,7 +113,10 @@ async function executeClaimed(run: AgentRunRow): Promise<void> {
       external_run_id: result.external_run_id,
       result_json: result.result_json,
     });
-    if (!wrote) return;
+    if (!wrote) {
+      await giveBack();
+      return;
+    }
     await settleRun({
       workspaceId: run.workspace_id,
       activity: run.activity,
@@ -102,7 +128,10 @@ async function executeClaimed(run: AgentRunRow): Promise<void> {
       projectScoped,
     });
   } catch (err) {
-    if (abort.signal.aborted || err instanceof LeaseLost) return;
+    if (abort.signal.aborted || err instanceof LeaseLost) {
+      await giveBack();
+      return;
+    }
     const runError = asRunError(err);
     await append(run.id, 'error', runError.message);
     const wrote = BLOCKING.has(runError.code) || !runError.retryable

@@ -45,7 +45,7 @@ export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 
     [run.project_id],
   );
   const model = await reasoningFor(run.workspace_id);
-  const marker = typeof run.input.fixture === 'string' ? `\n${run.input.fixture}` : '';
+  const marker = process.env.NODE_ENV === 'production' || typeof run.input.fixture !== 'string' ? '' : `\n${run.input.fixture}`;
   let accepted: Awaited<ReturnType<typeof acceptCompanyPlan>> = null;
   let reason = 'planner did not return a roster';
   for (let attempt = 1; attempt <= 2 && !accepted; attempt++) {
@@ -89,6 +89,7 @@ export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 
       planningModel: run.model_id || 'planner',
       source: 'ai',
       runId: run.id,
+      force: run.input.force === true,
     });
     emitProject(run.project_id, 'company:updated', { projectId: run.project_id, source: 'ai' });
     return { outputSource: 'ai', text: 'ai company applied' };
@@ -102,6 +103,7 @@ export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 
     planningModel: run.model_id || 'template',
     source: 'template',
     runId: run.id,
+    force: run.input.force === true,
   });
   await append(run.id, 'status', `template company applied after two failed validations: ${reason}`);
   emitProject(run.project_id, 'company:updated', { projectId: run.project_id, source: 'template' });

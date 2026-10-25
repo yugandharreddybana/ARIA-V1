@@ -148,18 +148,15 @@ export class MergeForbiddenError extends AppError {
 
 const FORBIDDEN_PATH = /\/pulls\/\d+\/merge(?:$|[/?])|\/merges(?:$|[/?])|\/git\/refs\//;
 
-export async function githubRequest(
+async function githubFetch(
   token: string,
   method: string,
   path: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
-): Promise<{ status: number; json: unknown; etag: string | null }> {
+): Promise<Response> {
   if (FORBIDDEN_PATH.test(path)) throw new MergeForbiddenError();
-  if (isMockToken(token) && method === 'GET' && path.includes('/branches/')) {
-    return { status: 200, json: { name: 'main', protected: true }, etag: null };
-  }
-  const res = await fetch(`${githubApiBase()}${path}`, {
+  return fetch(`${githubApiBase()}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -172,6 +169,20 @@ export async function githubRequest(
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(20_000),
   });
+}
+
+export async function githubRequest(
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<{ status: number; json: unknown; etag: string | null }> {
+  if (FORBIDDEN_PATH.test(path)) throw new MergeForbiddenError();
+  if (isMockToken(token) && method === 'GET' && path.includes('/branches/')) {
+    return { status: 200, json: { name: 'main', protected: true }, etag: null };
+  }
+  const res = await githubFetch(token, method, path, body, extraHeaders);
   if (res.status === 304) return { status: 304, json: null, etag: res.headers.get('etag') };
   const json = res.status === 204 ? null : await res.json().catch(() => null);
   return { status: res.status, json, etag: res.headers.get('etag') };
@@ -226,22 +237,22 @@ export async function createReview(
 export async function getPullFiles(token: string, fullName: string, number: number): Promise<string[]> {
   const { owner, repo } = parseRepoFullName(fullName);
   if (isMockToken(token)) return ['apps/middleware/src/services/tickets/ticketPipeline.ts'];
-  const res = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/pulls/${number}/files`);
-  const body = res.json as Array<{ filename?: string }> | null;
-  return Array.isArray(body) ? body.map((file) => file.filename || '').filter(Boolean) : [];
+  const names: string[] = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const res = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
+    const body = res.json as Array<{ filename?: string }> | null;
+    const batch = Array.isArray(body) ? body.map((file) => file.filename || '').filter(Boolean) : [];
+    names.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return names;
 }
 
 export async function getPullDiff(token: string, fullName: string, number: number): Promise<string> {
   const { owner, repo } = parseRepoFullName(fullName);
-  if (isMockToken(token)) return 'diff --git a/apps/middleware/src/services/tickets/ticketPipeline.ts b/apps/middleware/src/services/tickets/ticketPipeline.ts\n';
-  const res = await fetch(`${githubApiBase()}/repos/${owner}/${repo}/pulls/${number}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github.diff',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'aria-v1',
-    },
-    signal: AbortSignal.timeout(20_000),
+  if (isMockToken(token)) return 'diff --git a/apps/middleware/src/services/tickets/ticketPipeline.ts b/apps/middleware/src/services/tickets/ticketPipeline.ts\n@@ -1 +1 @@\n-old\n+new\n';
+  const res = await githubFetch(token, 'GET', `/repos/${owner}/${repo}/pulls/${number}`, undefined, {
+    Accept: 'application/vnd.github.diff',
   });
   if (!res.ok) throw new AppError(`GitHub diff failed (HTTP ${res.status})`, 502, 'GITHUB_ERROR');
   return (await res.text()).slice(0, 200_000);

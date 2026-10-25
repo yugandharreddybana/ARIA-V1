@@ -79,15 +79,29 @@ export async function evidenceAllowsMerge(ticketId: string, headSha?: string | n
     sha = head.rows[0]?.head_sha ?? null;
   }
   if (!sha) return { ok: false, reason: 'pull request head is unknown' };
-  const result = await getPgPool().query<{ kind: ReportKind; valid: boolean; markdown: string }>(
-    `SELECT DISTINCT ON (kind) kind, valid, markdown
+  const result = await getPgPool().query<{ kind: ReportKind; valid: boolean; markdown: string; commit_sha: string | null }>(
+    `SELECT kind, valid, markdown, commit_sha
        FROM ticket_reports
-      WHERE ticket_id = $1::uuid AND commit_sha = $2
-      ORDER BY kind, created_at DESC`,
-    [ticketId, sha],
+      WHERE ticket_id = $1::uuid
+      ORDER BY created_at DESC
+      LIMIT 40`,
+    [ticketId],
   );
-  const dev = result.rows.find((row) => row.kind === 'dev') ?? null;
-  const qa = result.rows.find((row) => row.kind === 'qa') ?? null;
+  const qa = result.rows.find((row) => row.kind === 'qa' && row.commit_sha === sha) ?? null;
+  let dev = result.rows.find((row) => row.kind === 'dev' && row.commit_sha === sha) ?? null;
+  if (!dev) {
+    const builtOn = result.rows.find((row) => row.kind === 'dev' && row.valid && row.commit_sha);
+    if (builtOn) {
+      const parent = await getPgPool().query(
+        `SELECT 1 FROM agent_runs
+          WHERE ticket_id = $1::uuid AND activity IN ('develop', 'fix')
+            AND status = 'succeeded' AND head_sha = $2
+          LIMIT 1`,
+        [ticketId, builtOn.commit_sha],
+      );
+      if (parent.rowCount) dev = builtOn;
+    }
+  }
   if (!dev?.valid) return { ok: false, reason: 'developer evidence is missing or invalid for this pull request head' };
   if (!qa?.valid) return { ok: false, reason: 'qa evidence is missing or invalid for this pull request head' };
   const parsed = validateReport('qa', qa.markdown);

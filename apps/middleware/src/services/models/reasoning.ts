@@ -5,8 +5,10 @@ import { completeChat } from '../llmProvider.service';
 import { Sanitizer } from '../sanitizer.service';
 import { parseWithRetry } from './structuredOutput';
 import { runLocalAgent } from './localAgentProcess';
+import { checkMidRun, estimateFor } from '../runs/budget';
 import { RunError } from '../runs/errors';
 import { getPgPool } from '../db.client';
+import { readGithubToken } from '../githubClient.service';
 import type { AgentRunRow } from '../runs/runQueue';
 
 export interface PlanRequest<T> {
@@ -44,6 +46,10 @@ function cursorLocalReasoner(workspaceId: string): ReasoningModel {
       if (!llm?.apiKey && !stub) throw new RunError('KEY_INVALID', 'Workspace has no Cursor key', false);
       const apiKey = llm?.apiKey || 'stub';
       const repoUrl = await plannerRepoUrl(req.run.project_id, stub);
+      let githubToken: string | null = null;
+      if (!stub && repoUrl) {
+        try { githubToken = await readGithubToken(workspaceId); } catch { githubToken = null; }
+      }
       const ask = async (extra: string) => runLocalAgent({
         prompt: extra ? `${req.instructions}\n${extra}` : req.instructions,
         stub,
@@ -52,6 +58,7 @@ function cursorLocalReasoner(workspaceId: string): ReasoningModel {
         modelId: req.run.model_id || 'auto',
         tools: req.tools ?? (req.run.activity === 'company_generation' || req.run.activity === 'story_points' ? 'none' : 'read_only'),
         repoUrl,
+        githubToken,
       });
       try {
         const first = await ask('');
@@ -75,6 +82,11 @@ async function plannerRepoUrl(projectId: string, stub: boolean): Promise<string 
   return row.rows[0]?.repo_url ?? null;
 }
 
+function estimateTokens(text: string): number {
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  return Math.max(1, Math.ceil(words * 1.3));
+}
+
 function chatReasoner(workspaceId: string): ReasoningModel {
   return {
     async plan(req) {
@@ -82,19 +94,29 @@ function chatReasoner(workspaceId: string): ReasoningModel {
       if (!llm) throw new RunError('KEY_INVALID', 'No model is configured', false);
       if (llm.provider === 'cursor') throw new RunError('RUN_ERROR', 'Cursor has no chat API', false);
       const sanitizer = new Sanitizer();
+      const systemClean = await sanitizer.sanitize(req.instructions);
+      const system = systemClean.trustLabel === 'rejected' ? 'Reply with JSON only.' : systemClean.cleaned;
+      const cap = (await estimateFor(req.run.activity, workspaceId)).cap;
+      let spent = 0;
       const ask = async (extra: string) => {
         const cleaned = await sanitizer.sanitize(extra);
         const user = cleaned.trustLabel === 'rejected' ? 'Reply with JSON only.' : cleaned.cleaned;
-        return completeChat(llm, [
-          { role: 'system', content: req.instructions },
+        spent += estimateTokens(system) + estimateTokens(user);
+        await checkMidRun(spent, cap);
+        const text = await completeChat(llm, [
+          { role: 'system', content: system },
           { role: 'user', content: user },
         ]);
+        spent += estimateTokens(text);
+        await checkMidRun(spent, cap);
+        return text;
       };
       try {
         const first = await ask('Reply with JSON only.');
         const parsed = await parseWithRetry(req.schema, first, (issues) => ask(`Fix the JSON. Issues: ${issues}`));
-        return { ...parsed, tokensTotal: Math.ceil((first.length + req.instructions.length) / 4) };
+        return { ...parsed, tokensTotal: spent };
       } catch (err) {
+        if (err instanceof RunError) throw err;
         throw new RunError('SCHEMA_INVALID', err instanceof Error ? err.message : 'schema invalid', false);
       }
     },

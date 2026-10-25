@@ -15,11 +15,11 @@ import {
   listCheckRuns,
   readGithubToken,
 } from '../githubClient.service';
-import { diffTouchesUi, secretFindings, sensitivePaths } from '../github/diffGuards';
+import { diffHunkLines, diffTouchesUi, secretFindings, sensitivePaths } from '../github/diffGuards';
 import { codeWorkerFor, prNumberFromUrl, type CodeRunSnapshot } from '../models/codeWorker';
 import { workspaceCursorKey } from '../models/cursorKey';
 import { reasoningFor } from '../models/reasoning';
-import { estimateFor } from '../runs/budget';
+import { checkMidRun, estimateFor } from '../runs/budget';
 import { RunError } from '../runs/errors';
 import { append } from '../runs/runLogs';
 import type { AgentRunRow } from '../runs/runQueue';
@@ -69,7 +69,30 @@ async function repoOf(projectId: string): Promise<{ repoUrl: string; fullName: s
 }
 
 function fixture(run: AgentRunRow): string {
+  if (process.env.NODE_ENV === 'production') return '';
   return typeof run.input.fixture === 'string' ? `\n${run.input.fixture}` : '';
+}
+
+function knownPrUrl(run: AgentRunRow): string | null {
+  if (typeof run.input.prUrl === 'string' && run.input.prUrl) return run.input.prUrl;
+  return run.pr_url;
+}
+
+async function recordedPrUrl(run: AgentRunRow): Promise<string | null> {
+  const direct = knownPrUrl(run);
+  if (direct || !run.ticket_id) return direct;
+  const prior = await getPgPool().query<{ pr_url: string | null }>(
+    `SELECT pr_url FROM agent_runs
+      WHERE ticket_id = $1::uuid AND pr_url IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1`,
+    [run.ticket_id],
+  );
+  return prior.rows[0]?.pr_url ?? null;
+}
+
+function positiveEnv(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 async function evidenceFile(token: string, fullName: string, ticketKey: string, kind: 'dev' | 'qa', sha: string): Promise<string | null> {
@@ -149,7 +172,8 @@ async function finishCloud(
     }
   }, { apiKey, repoUrl: repo.repoUrl, capTokens: cap, signal: options.signal });
   const usage = await worker.usage(ref, apiKey);
-  if (usage?.total != null && usage.total > cap) {
+  if (usage?.unavailable) await checkMidRun(snap.estimatedTokens ?? 0, cap);
+  else if (usage?.total != null && usage.total > cap) {
     throw new RunError('BUDGET_EXCEEDED', 'Per-run token cap exceeded', false);
   }
   const finished = await finishCode(run, ticket, repo.fullName, snap, usage?.total ?? null, options.kind);
@@ -174,7 +198,7 @@ async function finishCode(
     throw new RunError(snap.status === 'expired' ? 'RUN_EXPIRED' : snap.status === 'cancelled' ? 'CANCELLED' : 'RUN_ERROR', snap.resultText || snap.status, snap.status === 'error');
   }
   if (!snap.branch && !snap.prUrl && kind === 'dev') throw new RunError('NO_CHANGES', snap.resultText || 'no branch', false);
-  let prUrl = snap.prUrl;
+  let prUrl = snap.prUrl || (kind === 'dev' ? null : knownPrUrl(run));
   let prNumber = prNumberFromUrl(prUrl);
   const token = await readGithubToken(ticket.workspace_id);
   if (snap.branch && !prUrl && kind === 'dev') {
@@ -188,17 +212,29 @@ async function finishCode(
     prUrl = opened.url;
     prNumber = opened.number;
   }
+  if (!prUrl && kind !== 'dev') {
+    const prior = await getPgPool().query<{ pr_url: string | null }>(
+      `SELECT pr_url FROM agent_runs
+        WHERE ticket_id = $1::uuid AND pr_url IS NOT NULL
+        ORDER BY created_at DESC LIMIT 1`,
+      [ticket.id],
+    );
+    prUrl = prior.rows[0]?.pr_url ?? null;
+    prNumber = prNumberFromUrl(prUrl);
+  }
   const headSha = await headFor(token, fullName, prNumber, snap);
   if (headSha) {
-    const markdown = await evidenceFile(token, fullName, ticket.ticket_key, kind === 'qa' ? 'qa' : 'dev', headSha);
-    if (markdown) {
-      const files = prNumber ? await getPullFiles(token, fullName, prNumber) : [];
+    const files = prNumber ? await getPullFiles(token, fullName, prNumber) : [];
+    const kinds = kind === 'qa' ? (['dev', 'qa'] as const) : (['dev'] as const);
+    for (const reportKind of kinds) {
+      const markdown = await evidenceFile(token, fullName, ticket.ticket_key, reportKind, headSha);
+      if (!markdown) continue;
       await storeReport({
         workspaceId: ticket.workspace_id,
         projectId: ticket.project_id,
         ticketId: ticket.id,
         ticketKey: ticket.ticket_key,
-        kind: kind === 'qa' ? 'qa' : 'dev',
+        kind: reportKind,
         markdown,
         storyPoints: Number(ticket.story_points),
         agents: [run.agent_id || 'agent'],
@@ -209,7 +245,15 @@ async function finishCode(
     }
   }
   if (kind === 'dev' && prUrl) await applyTransition(ticket.id, 'pr_opened', { actorKind: 'agent', agentId: run.agent_id, runId: run.id, prUrl });
-  return { outputSource: 'ai', text: snap.resultText || '', prUrl, prNumber, branch: snap.branch, headSha, tokensTotal: tokens ?? undefined };
+  return {
+    outputSource: 'ai',
+    text: snap.resultText || '',
+    prUrl: prUrl ?? undefined,
+    prNumber,
+    branch: snap.branch,
+    headSha,
+    tokensTotal: tokens ?? undefined,
+  };
 }
 
 const reviewSchema = z.object({
@@ -264,12 +308,19 @@ export async function executeReview(run: AgentRunRow): Promise<{ outputSource: '
   const comments = verdict.comments ?? [];
   const changes = verdict.verdict === 'changes' || secrets.length > 0 || comments.some((comment) => comment.severity === 'blocker');
   const token = await readGithubToken(ticket.workspace_id);
-  const lineComments = comments
-    .filter((comment) => comment.line && comment.line > 0)
-    .map((comment) => ({ path: comment.path, line: comment.line, body: `${comment.severity}: ${comment.body}` }));
+  const hunks = diffHunkLines(pulled.diff);
+  const lineComments: Array<{ path: string; line?: number; body: string }> = [];
+  const bodyNotes: string[] = [];
+  for (const comment of comments) {
+    const text = `${comment.severity}: ${comment.body}`;
+    const allowed = comment.line && comment.line > 0 && hunks.get(comment.path)?.has(comment.line);
+    if (allowed) lineComments.push({ path: comment.path, line: comment.line, body: text });
+    else bodyNotes.push(`${comment.path}${comment.line ? `:${comment.line}` : ''} ${text}`);
+  }
+  const body = [verdict.summary, ...bodyNotes].join('\n').slice(0, 6000);
   await createReview(token, pulled.fullName, pulled.prNumber, {
     event: 'COMMENT',
-    body: verdict.summary.slice(0, 4000),
+    body,
     comments: lineComments,
   });
   if (sensitive.length) await append(run.id, 'status', `sensitive paths: ${sensitive.join(', ')}`);
@@ -291,11 +342,12 @@ export async function executeQa(run: AgentRunRow, signal?: AbortSignal): Promise
   const prompt = qaPrompt({
     ticketKey: ticket.ticket_key,
     title: ticket.title,
+    description: ticket.description,
     storyPoints: Number(ticket.story_points),
     persona: 'You are QA.',
     diffSummary: prior?.diff || 'diff unavailable',
   }) + fixture(run);
-  const prUrl = typeof run.input.prUrl === 'string' ? run.input.prUrl : null;
+  const prUrl = await recordedPrUrl(run);
   const finished = await finishCloud(run, ticket, repo, prompt, {
     autoCreatePR: false,
     workOnCurrentBranch: true,
@@ -305,14 +357,27 @@ export async function executeQa(run: AgentRunRow, signal?: AbortSignal): Promise
   });
   const head = finished.headSha;
   if (!head) throw new RunError('RUN_ERROR', 'QA could not read the pull request head', false);
+  const timeoutMs = positiveEnv('ARIA_QA_CHECK_TIMEOUT_MS', 30 * 60 * 1000);
+  const pollMs = positiveEnv('ARIA_QA_CHECK_POLL_MS', 15_000);
+  const started = Date.now();
   let checks: Array<{ name: string; status: string; conclusion: string | null }>;
   try {
     const token = await readGithubToken(ticket.workspace_id);
     checks = await listCheckRuns(token, repo.fullName, head);
+    while (checks.some((check) => check.status !== 'completed')) {
+      if (Date.now() - started >= timeoutMs) {
+        await applyTransition(ticket.id, 'qa_failed', { reason: 'checks still pending after 30 minutes', runId: run.id, returnTo: 'qa' });
+        return finished;
+      }
+      if (signal?.aborted) throw new RunError('CANCELLED', 'QA cancelled while waiting for checks', false);
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      checks = await listCheckRuns(token, repo.fullName, head);
+    }
   } catch (err) {
+    if (err instanceof RunError) throw err;
     throw new RunError('RUN_ERROR', err instanceof Error ? err.message : 'check runs unavailable', true);
   }
-  const blocked = checks.find((check) => check.status !== 'completed' || (check.conclusion != null && BLOCKING_CHECK.has(check.conclusion)));
+  const blocked = checks.find((check) => check.conclusion != null && BLOCKING_CHECK.has(check.conclusion));
   if (blocked) {
     await applyTransition(ticket.id, 'qa_failed', { reason: `${blocked.name} is ${blocked.status}/${blocked.conclusion ?? 'pending'}`, runId: run.id, returnTo: 'qa' });
     return finished;
@@ -334,7 +399,7 @@ export async function executeQa(run: AgentRunRow, signal?: AbortSignal): Promise
 export async function executeFix(run: AgentRunRow, signal?: AbortSignal): Promise<{ outputSource: 'ai'; text: string; tokensTotal?: number; external_agent_id?: string; external_run_id?: string }> {
   const ticket = await ticketOf(run);
   const repo = await repoOf(run.project_id);
-  const prUrl = typeof run.input.prUrl === 'string' ? run.input.prUrl : null;
+  const prUrl = await recordedPrUrl(run);
   const findings = typeof run.input.findings === 'string' ? run.input.findings : 'No findings were attached.';
   const finished = await finishCloud(run, ticket, repo, [
     `Fix the findings for ${ticket.ticket_key}.`,

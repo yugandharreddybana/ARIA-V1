@@ -14,8 +14,8 @@ export const teams = pgTable('teams', {
   department:         varchar('department', { length: 100 }),
   leadSkillId:        uuid('lead_skill_id'),
   scrumMasterSkillId: uuid('scrum_master_skill_id'),
-  createdAt:          timestamp('created_at').notNull().defaultNow(),
-  updatedAt:          timestamp('updated_at').notNull().defaultNow(),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:          timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('teams_project_idx').on(t.projectId) }));
 
 // ── Skills (agents) ────────────────────────────────────────────────────────
@@ -62,8 +62,8 @@ export const skills = pgTable('skills', {
   instructions: text('instructions').notNull().default(''),
   skillMdPath:  varchar('skill_md_path', { length: 500 }),
 
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('skills_project_idx').on(t.projectId) }));
 
 // ── Team members (skills ↔ teams junction) ────────────────────────────────
@@ -72,8 +72,8 @@ export const teamMembers = pgTable('team_members', {
   teamId:    uuid('team_id').notNull().references(() => teams.id,   { onDelete: 'cascade' }),
   skillId:   uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
   role:      text('role').notNull().default('member'),
-  joinedAt:  timestamp('joined_at').notNull().defaultNow(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  joinedAt:  timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ teamIdx: index('team_members_team_idx').on(t.teamId) }));
 
 // ── Drizzle relations ─────────────────────────────────────────────────────

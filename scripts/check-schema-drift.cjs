@@ -52,8 +52,43 @@ if (!/DROP COLUMN IF EXISTS owner_agent_id/.test(flyway) || !/DROP COLUMN IF EXI
   fail('Flyway does not drop owner_agent_id and owned_flow_ids');
 }
 
+function normalizeSqlType(text) {
+  const raw = String(text).replace(/\(.*?\)/g, ' ').trim().toLowerCase();
+  if (raw.startsWith('timestamp with time zone') || raw.startsWith('timestamptz')) return 'timestamptz';
+  if (raw.startsWith('timestamp')) return 'timestamp';
+  const token = raw.split(/\s+/)[0];
+  if (token === 'uuid') return 'uuid';
+  if (token === 'text' || token === 'varchar' || token === 'character' || token === 'char') return 'text';
+  if (token === 'boolean' || token === 'bool') return 'bool';
+  if (token === 'integer' || token === 'int' || token === 'int4' || token === 'serial' || token === 'smallint' || token === 'int2') return 'int';
+  if (token === 'bigint' || token === 'int8' || token === 'bigserial') return 'bigint';
+  if (token === 'jsonb' || token === 'json') return 'jsonb';
+  if (token === 'numeric' || token === 'decimal') return 'numeric';
+  if (token === 'double' || token === 'float8' || token === 'real' || token === 'float4') return 'float';
+  return null;
+}
+
 function columnSpec(text) {
-  return { notNull: /\bNOT NULL\b/i.test(text), references: /\bREFERENCES\b/i.test(text) };
+  return {
+    notNull: /\bNOT NULL\b/i.test(text),
+    references: /\bREFERENCES\b/i.test(text),
+    type: normalizeSqlType(text),
+    unique: /\bUNIQUE\b/i.test(text),
+  };
+}
+
+function drizzleType(block) {
+  if (/customType\(/.test(block)) return null;
+  if (/\buuid\(/.test(block)) return 'uuid';
+  if (/\btext\(/.test(block) || /\bvarchar\(/.test(block)) return 'text';
+  if (/\bboolean\(/.test(block)) return 'bool';
+  if (/\bbigint\(/.test(block)) return 'bigint';
+  if (/\binteger\(/.test(block) || /\bsmallint\(/.test(block)) return 'int';
+  if (/\bjsonb\(/.test(block) || /\bjson\(/.test(block)) return 'jsonb';
+  if (/\btimestamp\(/.test(block)) return /withTimezone:\s*true/.test(block) ? 'timestamptz' : 'timestamp';
+  if (/\bnumeric\(/.test(block) || /\bdecimal\(/.test(block)) return 'numeric';
+  if (/\bdoublePrecision\(/.test(block) || /\breal\(/.test(block)) return 'float';
+  return null;
 }
 
 function splitTopLevel(body) {
@@ -99,7 +134,12 @@ function drizzleTables(source) {
         i += 1;
         block += lines[i];
       }
-      columns.set(match[1], { notNull: block.includes('.notNull('), references: block.includes('.references(') });
+      columns.set(match[1], {
+        notNull: block.includes('.notNull('),
+        references: block.includes('.references('),
+        type: drizzleType(block),
+        unique: /\.unique\(/.test(block),
+      });
     }
     tables.set(name, columns);
   }
@@ -132,7 +172,7 @@ function flywayTables(sql) {
       if (!line || /^(PRIMARY|UNIQUE|CONSTRAINT|CHECK|FOREIGN)\b/i.test(line)) continue;
       const match = line.match(/^([a-z0-9_]+)\s+/i);
       if (!match) continue;
-      columns.set(match[1].toLowerCase(), columnSpec(line));
+      columns.set(match[1].toLowerCase(), columnSpec(line.slice(match[0].length)));
     }
     create = createRe.exec(stripped);
   }
@@ -185,6 +225,62 @@ for (const [table, columns] of flywayColumns) {
       fail(`${table}.${column} is NOT NULL in Flyway and nullable in Drizzle`);
     }
     if (spec.references !== other.references) fail(`${table}.${column} foreign key differs`);
+    if (spec.type && other.type && spec.type !== other.type) {
+      fail(`${table}.${column} type is ${spec.type} in Flyway and ${other.type} in Drizzle`);
+    }
+  }
+}
+
+function uniqueSets(sql) {
+  const sets = new Map();
+  const add = (table, cols) => {
+    const key = table.toLowerCase();
+    const list = sets.get(key) || [];
+    list.push(cols.map((col) => col.toLowerCase()).sort().join(','));
+    sets.set(key, list);
+  };
+  const stripped = sql.replace(/--[^\n]*/g, '');
+  for (const match of stripped.matchAll(/CREATE UNIQUE INDEX(?: IF NOT EXISTS)?\s+\S+\s+ON\s+([a-z0-9_]+)\s*\(([^)]+)\)/gi)) {
+    add(match[1], match[2].split(',').map((col) => col.trim().split(/\s+/)[0]));
+  }
+  for (const match of stripped.matchAll(/ALTER TABLE(?: IF EXISTS)?\s+([a-z0-9_]+)[\s\S]*?UNIQUE\s*\(([^)]+)\)/gi)) {
+    add(match[1], match[2].split(',').map((col) => col.trim()));
+  }
+  const createRe = /CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z0-9_]+)\s*\(/gi;
+  let create = createRe.exec(stripped);
+  while (create) {
+    let i = create.index + create[0].length;
+    let depth = 1;
+    let body = '';
+    while (i < stripped.length && depth > 0) {
+      const ch = stripped[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth -= 1;
+      if (depth > 0) body += ch;
+      i += 1;
+    }
+    for (const part of splitTopLevel(body)) {
+      const unique = part.match(/\bUNIQUE\s*\(([^)]+)\)/i);
+      if (unique) add(create[1], unique[1].split(',').map((col) => col.trim().split(/\s+/)[0]));
+      else if (/\bUNIQUE\b/i.test(part)) {
+        const name = part.trim().match(/^([a-z0-9_]+)\s+/i);
+        if (name) add(create[1], [name[1]]);
+      }
+    }
+    create = createRe.exec(stripped);
+  }
+  return sets;
+}
+
+const flywayUnique = uniqueSets(flyway);
+for (const file of fs.readdirSync(path.join(root, 'packages/db/src/schema')).filter((name) => name.endsWith('.ts'))) {
+  const source = fs.readFileSync(path.join(root, 'packages/db/src/schema', file), 'utf8');
+  const props = new Map();
+  for (const match of source.matchAll(/(\w+):\s*[A-Za-z0-9_$.]+\('([a-z0-9_]+)'/g)) props.set(match[1], match[2]);
+  for (const match of source.matchAll(/pgTable\('([a-z0-9_]+)'[\s\S]*?uniqueIndex\([^)]*\)\.on\(([^)]+)\)/g)) {
+    const cols = [...match[2].matchAll(/t\.(\w+)/g)].map((hit) => props.get(hit[1]) || hit[1].toLowerCase()).sort().join(',');
+    const have = new Set(flywayUnique.get(match[1]) || []);
+    if (!have.has(cols)) fail(`${match[1]} is missing unique index (${cols}) in Flyway`);
   }
 }
 

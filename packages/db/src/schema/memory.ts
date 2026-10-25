@@ -21,6 +21,6 @@ export const memoryEntries = pgTable('memory_entries', {
   tags: jsonb('tags').notNull().default([]),
   sourceTicketId: uuid('source_ticket_id'),
   sourceSessionId: uuid('source_session_id'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ({ layerIdx: index('memory_layer_idx').on(t.layer), projectIdx: index('memory_project_idx').on(t.projectId) }));

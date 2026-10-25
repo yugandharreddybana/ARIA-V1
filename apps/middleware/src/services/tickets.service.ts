@@ -8,7 +8,7 @@ import { appendTicketEvent } from './tickets/ticketEvents';
 import { applyTransition, approveTicket, assertHumanStatus, workCalendar } from './tickets/ticketActions';
 import { dueAt } from './tickets/schedule';
 import { loadWorkspaceLlm } from './guardedLlm.service';
-import { enqueue } from './runs/runQueue';
+import { cancelForTicket, enqueue, releaseHeldRuns, type HeldRun } from './runs/runQueue';
 import { getPgPool } from './db.client';
 import { codeWorkerFor } from './models/codeWorker';
 import { workspaceCursorKey } from './models/cursorKey';
@@ -151,12 +151,6 @@ export async function updateTicket(
     }
     if (data.status !== existing.status) {
       patch.status = data.status;
-      const cloud = await getPgPool().query<{ external_agent_id: string; external_run_id: string }>(
-        `SELECT external_agent_id, external_run_id FROM agent_runs
-          WHERE ticket_id = $1::uuid AND status = 'running'
-            AND external_agent_id IS NOT NULL AND external_run_id IS NOT NULL`,
-        [ticketId],
-      );
       await appendTicketEvent({
         workspaceId,
         projectId: existing.projectId,
@@ -166,19 +160,26 @@ export async function updateTicket(
         summary: `${existing.status} -> ${data.status} (human)`,
         detail: { from: existing.status, to: data.status, event: 'human_status', userId: actorUserId ?? null },
       });
-      await getPgPool().query(
-        `UPDATE agent_runs
-            SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
-                lease_owner = NULL, lease_expires_at = NULL
-          WHERE ticket_id = $1::uuid AND status IN ('queued', 'running')`,
-        [ticketId],
-      );
-      if (cloud.rows.length) {
+      const client = await getPgPool().connect();
+      let held: HeldRun[] = [];
+      try {
+        await client.query('BEGIN');
+        held = await cancelForTicket(client, ticketId);
+        await client.query('COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+        throw err;
+      } finally {
+        client.release();
+      }
+      await releaseHeldRuns(held);
+      const cloud = held.filter((run) => run.external_agent_id && run.external_run_id);
+      if (cloud.length) {
         try {
           const apiKey = await workspaceCursorKey(workspaceId);
           const worker = codeWorkerFor();
-          for (const run of cloud.rows) {
-            await worker.cancel({ agentId: run.external_agent_id, runId: run.external_run_id }, apiKey);
+          for (const run of cloud) {
+            await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
           }
         } catch {
           // The database row is already cancelled if the provider is unreachable.

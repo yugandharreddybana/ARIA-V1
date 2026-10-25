@@ -1,3 +1,5 @@
+import { AppError } from '../../middleware/error.middleware';
+
 export const RUN_ERROR_CODES = [
   'KEY_INVALID',
   'RATE_LIMITED',
@@ -38,6 +40,8 @@ export class LeaseLost extends Error {
 export function asRunError(err: unknown): RunError {
   if (err instanceof RunError) return err;
   const message = err instanceof Error ? err.message : 'Run failed';
+  if (/invalid user api key/i.test(message)) return new RunError('KEY_INVALID', message, false);
+  if (err instanceof AppError && err.code === 'COMPANY_IN_USE') return new RunError('RUN_ERROR', message, false);
   return new RunError('RUN_ERROR', message, true);
 }
 

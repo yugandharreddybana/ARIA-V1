@@ -1,5 +1,6 @@
 import { validateEnv } from '../../config/env';
 import { cursorWireSelection } from '../modelTiers';
+import { checkMidRun } from '../runs/budget';
 import { RunError } from '../runs/errors';
 import type { AgentRunRow } from '../runs/runQueue';
 
@@ -24,6 +25,7 @@ export interface GitBranch {
   repoUrl: string;
   branch?: string;
   prUrl?: string;
+  sha?: string;
 }
 
 export interface CodeRunSnapshot {
@@ -32,6 +34,7 @@ export interface CodeRunSnapshot {
   branch?: string;
   prUrl?: string;
   headSha?: string;
+  estimatedTokens?: number;
   branches: GitBranch[];
 }
 
@@ -41,6 +44,7 @@ export interface TokenUsage {
   cacheRead?: number;
   cacheWrite?: number;
   total?: number;
+  unavailable?: boolean;
 }
 
 export interface CloudAuth {
@@ -153,6 +157,7 @@ function snapshotFromRun(body: {
     resultText: body.result,
     branch: chosen?.branch,
     prUrl: chosen?.prUrl,
+    headSha: chosen?.sha,
     branches,
   };
 }
@@ -235,85 +240,19 @@ export function cursorCloudWorker(): CodeWorker {
       return { agentId: body.agent.id, runId: body.run.id, url: body.agent.url };
     },
     async follow(ref, cursor, onEvent, auth) {
-      const apiKey = auth.apiKey;
-      const repoUrl = auth.repoUrl;
-      const stream = await fetch(`${base()}/v1/agents/${ref.agentId}/runs/${ref.runId}/stream`, {
-        headers: headers(apiKey, {
-          Accept: 'text/event-stream',
-          ...(cursor ? { 'Last-Event-ID': cursor } : {}),
-        }),
-        signal: auth.signal,
-      });
-      if (stream.status === 410) return pollRun(apiKey, ref, repoUrl);
-      if (!stream.ok) {
-        const parsed = await readBody(stream);
-        throw mapFailure(stream.status, parsed.code, parsed.message);
-      }
-      if (!stream.body) throw new RunError('NETWORK', 'Cursor stream had no body', true);
-      const reader = stream.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let result: CodeRunSnapshot = { status: 'running', branches: [] };
-      let assistants = 0;
-      const apply = async (sse: SseEvent) => {
-        let payload: { text?: string; status?: string; git?: { branches?: GitBranch[] }; message?: string } = {};
-        if (sse.data) {
-          try {
-            payload = JSON.parse(sse.data) as typeof payload;
-          } catch {
-            onEvent('status', sse.data.slice(0, 300), sse.id);
-            return;
-          }
-        }
-        if (sse.event === 'assistant' && payload.text) onEvent('assistant', payload.text, sse.id);
-        if (sse.event === 'thinking' && payload.text) onEvent('status', payload.text, sse.id);
-        if (sse.event === 'tool_call') onEvent('tool', sse.data.slice(0, 500), sse.id);
-        if (sse.event === 'error') onEvent('error', payload.message || payload.text || sse.data, sse.id);
-        if (sse.event === 'status' || sse.event === 'result' || sse.event === 'done') {
-          const branches = Array.isArray(payload.git?.branches) ? payload.git.branches : result.branches;
-          const chosen = pickBranch(branches, repoUrl);
-          const status = sse.event === 'done' ? result.status : mapStatus(payload.status);
-          result = {
-            status: status === 'running' && sse.event === 'done' ? 'finished' : status,
-            resultText: payload.text || result.resultText,
-            branch: chosen?.branch || result.branch,
-            prUrl: chosen?.prUrl || result.prUrl,
-            branches,
-          };
-          if (payload.status) onEvent('status', payload.status, sse.id);
-        }
-        if (sse.event === 'assistant') {
-          assistants += 1;
-          if (auth.capTokens && assistants % 5 === 0) await enforceCap(apiKey, ref, auth.capTokens);
-        }
-      };
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        const blocks = buffer.split('\n\n');
-        buffer = blocks.pop() ?? '';
-        for (const block of blocks) {
-          const sse = parseSse(block);
-          if (sse) await apply(sse);
-        }
-      }
-      if (buffer.trim()) {
-        const sse = parseSse(buffer);
-        if (sse) await apply(sse);
-      }
-      if (result.status === 'running') {
-        const polled = await pollRun(apiKey, ref, repoUrl);
-        result = { ...polled, resultText: polled.resultText || result.resultText, branches: polled.branches.length ? polled.branches : result.branches };
-      }
-      return result;
+      return streamRun(ref, cursor, onEvent, auth, true);
     },
     async usage(ref, apiKey) {
       const res = await fetch(`${base()}/v1/agents/${ref.agentId}/usage?runId=${encodeURIComponent(ref.runId)}`, {
         headers: headers(apiKey),
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
-      if (res.status === 403 || res.status === 404) return null;
+      if (res.status === 403) {
+        const parsed = await readBody(res);
+        if (parsed.code === 'feature_unavailable') return { unavailable: true };
+        return null;
+      }
+      if (res.status === 404) return null;
       if (!res.ok) {
         const parsed = await readBody(res);
         throw mapFailure(res.status, parsed.code, parsed.message);
@@ -336,6 +275,108 @@ export function cursorCloudWorker(): CodeWorker {
   };
 }
 
+async function streamRun(
+  ref: ExternalRef,
+  cursor: string | null,
+  onEvent: (kind: string, text: string, cursor: string | null) => void,
+  auth: CloudAuth & { capTokens?: number; signal?: AbortSignal },
+  retryBadCursor: boolean,
+): Promise<CodeRunSnapshot> {
+  const apiKey = auth.apiKey;
+  const repoUrl = auth.repoUrl;
+  const stream = await fetch(`${base()}/v1/agents/${ref.agentId}/runs/${ref.runId}/stream`, {
+    headers: headers(apiKey, {
+      Accept: 'text/event-stream',
+      ...(cursor ? { 'Last-Event-ID': cursor } : {}),
+    }),
+    signal: auth.signal,
+  });
+  if (stream.status === 410) return pollRun(apiKey, ref, repoUrl);
+  if (stream.status === 400) {
+    const parsed = await readBody(stream);
+    if (parsed.code === 'invalid_last_event_id') {
+      if (cursor && retryBadCursor) return streamRun(ref, null, onEvent, auth, false);
+      return pollRun(apiKey, ref, repoUrl);
+    }
+    throw mapFailure(stream.status, parsed.code, parsed.message);
+  }
+  if (!stream.ok) {
+    const parsed = await readBody(stream);
+    throw mapFailure(stream.status, parsed.code, parsed.message);
+  }
+  if (!stream.body) throw new RunError('NETWORK', 'Cursor stream had no body', true);
+  const reader = stream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: CodeRunSnapshot = { status: 'running', branches: [], estimatedTokens: 0 };
+  let assistants = 0;
+  const apply = async (sse: SseEvent) => {
+    let payload: { text?: string; status?: string; git?: { branches?: GitBranch[] }; message?: string; estimatedTokens?: number } = {};
+    if (sse.data) {
+      try {
+        payload = JSON.parse(sse.data) as typeof payload;
+      } catch {
+        onEvent('status', sse.data.slice(0, 300), sse.id);
+        return;
+      }
+    }
+    if (sse.event === 'assistant' && payload.text) {
+      onEvent('assistant', payload.text, sse.id);
+      result.estimatedTokens = (result.estimatedTokens ?? 0) + Math.ceil(payload.text.length / 4);
+    }
+    if (typeof payload.estimatedTokens === 'number') result.estimatedTokens = payload.estimatedTokens;
+    if (sse.event === 'thinking' && payload.text) onEvent('status', payload.text, sse.id);
+    if (sse.event === 'heartbeat') onEvent('status', 'heartbeat', sse.id);
+    if (sse.event === 'tool_call') onEvent('tool', sse.data.slice(0, 500), sse.id);
+    if (sse.event === 'error') onEvent('error', payload.message || payload.text || sse.data, sse.id);
+    if (sse.event === 'status' || sse.event === 'result' || sse.event === 'done') {
+      const branches = Array.isArray(payload.git?.branches) ? payload.git.branches : result.branches;
+      const chosen = pickBranch(branches, repoUrl);
+      const status = sse.event === 'done' ? result.status : mapStatus(payload.status);
+      result = {
+        status: status === 'running' && sse.event === 'done' ? 'finished' : status,
+        resultText: payload.text || result.resultText,
+        branch: chosen?.branch || result.branch,
+        prUrl: chosen?.prUrl || result.prUrl,
+        headSha: chosen?.sha || result.headSha,
+        estimatedTokens: result.estimatedTokens,
+        branches,
+      };
+      if (payload.status) onEvent('status', payload.status, sse.id);
+    }
+    if (sse.event === 'assistant') {
+      assistants += 1;
+      if (auth.capTokens && assistants % 5 === 0) await enforceCap(apiKey, ref, auth.capTokens, result.estimatedTokens ?? 0);
+    }
+  };
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const blocks = buffer.split('\n\n');
+    buffer = blocks.pop() ?? '';
+    for (const block of blocks) {
+      const sse = parseSse(block);
+      if (sse) await apply(sse);
+    }
+  }
+  if (buffer.trim()) {
+    const sse = parseSse(buffer);
+    if (sse) await apply(sse);
+  }
+  if (result.status === 'running') {
+    const polled = await pollRun(apiKey, ref, repoUrl);
+    result = {
+      ...polled,
+      resultText: polled.resultText || result.resultText,
+      headSha: polled.headSha || result.headSha,
+      estimatedTokens: result.estimatedTokens,
+      branches: polled.branches.length ? polled.branches : result.branches,
+    };
+  }
+  return result;
+}
+
 async function pollRun(apiKey: string, ref: ExternalRef, repoUrl: string): Promise<CodeRunSnapshot> {
   const polled = await fetch(`${base()}/v1/agents/${ref.agentId}/runs/${ref.runId}`, {
     headers: headers(apiKey),
@@ -346,11 +387,16 @@ async function pollRun(apiKey: string, ref: ExternalRef, repoUrl: string): Promi
   return snapshotFromRun(parsed.json as { status?: string; result?: string; git?: { branches?: GitBranch[] } }, repoUrl);
 }
 
-async function enforceCap(apiKey: string, ref: ExternalRef, cap: number): Promise<void> {
+async function enforceCap(apiKey: string, ref: ExternalRef, cap: number, estimated: number): Promise<void> {
   const res = await fetch(`${base()}/v1/agents/${ref.agentId}/usage?runId=${encodeURIComponent(ref.runId)}`, {
     headers: headers(apiKey),
     signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
   });
+  if (res.status === 403) {
+    const parsed = await readBody(res);
+    if (parsed.code === 'feature_unavailable') await checkMidRun(estimated, cap);
+    return;
+  }
   if (!res.ok) return;
   const parsed = await readBody(res);
   const usage = usageFrom(parsed.json as { totalUsage?: { totalTokens?: number; inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } });

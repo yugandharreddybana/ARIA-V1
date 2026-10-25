@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 const sdkCreate = vi.hoisted(() => vi.fn());
 vi.mock('@cursor/sdk', () => ({ Agent: { create: sdkCreate } }));
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { dueAt, scheduleState, workingMsBetween, type WorkCalendar } from '../services/tickets/schedule';
@@ -12,12 +15,13 @@ import { renderReportPdf } from '../services/evidence/pdfReport';
 import { developPrompt, qaPrompt } from '../services/activities/prompts';
 import { DEV_SECTIONS, QA_SECTIONS } from '../services/evidence/reportValidation';
 import { eventHash, canonicalDetail } from '../services/tickets/eventHash';
-import { sensitivePaths, secretFindings } from '../services/github/diffGuards';
+import { diffHunkLines, sensitivePaths, secretFindings } from '../services/github/diffGuards';
 import { extractJson, parseWithRetry } from '../services/models/structuredOutput';
 import { backoffMs, p90 } from '../services/runs/budget';
 import { redact } from '../services/runs/runLogs';
-import { githubRequest, MergeForbiddenError } from '../services/githubClient.service';
-import { runLocalAgent, scrubbedEnv } from '../services/models/localAgentProcess';
+import { getPullFiles, githubRequest, MergeForbiddenError } from '../services/githubClient.service';
+import { asRunError } from '../services/runs/errors';
+import { plannerCwd, runLocalAgent, scrubbedEnv } from '../services/models/localAgentProcess';
 import { planWithCursorSdk } from '../services/models/cursorSdkPlanner';
 import { catalogIsStale } from '../services/models/resolveForRun';
 import { acceptCompanyPlan } from '../services/activities/companyRoster';
@@ -177,8 +181,12 @@ describe('pdf, hash, guards', () => {
       model: { id: 'claude-opus-5' },
       mode: 'plan',
       tools: ['read', 'grep', 'glob', 'ls'],
-      local: { cwd: '/tmp/aria-planner', settingSources: [], dirs: ['/tmp/aria-planner'] },
-      sandboxOptions: { enabled: true },
+      local: {
+        cwd: '/tmp/aria-planner',
+        settingSources: [],
+        dirs: ['/tmp/aria-planner'],
+        sandboxOptions: { enabled: true },
+      },
     });
     expect(send).toHaveBeenCalledWith('plan the change', { mode: 'plan' });
     expect(close).toHaveBeenCalledTimes(1);
@@ -188,6 +196,86 @@ describe('pdf, hash, guards', () => {
     });
     await expect(planWithCursorSdk({ prompt: 'roster', apiKey: 'live-key', modelId: 'auto', tools: 'none', cwd: '/tmp/aria-planner' })).rejects.toThrow('planner down');
     expect(sdkCreate).toHaveBeenLastCalledWith(expect.objectContaining({ tools: [] }));
+  });
+
+  it('keeps review comments on diff hunk lines', () => {
+    const diff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,2 +1,2 @@',
+      ' context',
+      '-old',
+      '+new',
+    ].join('\n');
+    const lines = diffHunkLines(diff);
+    expect(lines.get('src/a.ts')?.has(1)).toBe(true);
+    expect(lines.get('src/a.ts')?.has(2)).toBe(true);
+    expect(lines.get('src/a.ts')?.has(9)).toBe(false);
+  });
+
+  it('exits planner children instead of leaving them running', async () => {
+    const listed = () => readdirSync('/proc').filter((name) => /^\d+$/.test(name)).filter((pid) => {
+      try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('localAgentChild'); } catch { return false; }
+    });
+    const before = listed();
+    await runLocalAgent({ prompt: 'Estimate story points', stub: true, timeoutMs: 10_000, apiKey: 'secret-key' });
+    await runLocalAgent({ prompt: 'Estimate story points', stub: true, timeoutMs: 10_000, apiKey: 'secret-key' });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(listed().filter((pid) => !before.includes(pid))).toEqual([]);
+  });
+
+  it('checks out a repo in its own worktree without keeping the token', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'aria-origin-'));
+    const git = (args: string[], cwd = root) => new Promise<void>((resolve, reject) => {
+      execFile('git', args, { cwd }, (err) => err ? reject(err) : resolve());
+    });
+    await git(['init']);
+    await git(['config', 'user.email', 'aria@example.com']);
+    await git(['config', 'user.name', 'Aria']);
+    await mkdir(path.join(root, '.cursor'), { recursive: true });
+    await writeFile(path.join(root, '.cursor', 'hooks.json'), '{"hooks":{}}');
+    await writeFile(path.join(root, 'README.md'), 'hello\n');
+    await git(['add', '.']);
+    await git(['commit', '-m', 'init']);
+    const token = 'ghp_secret_token_value';
+    const [first, second] = await Promise.all([
+      plannerCwd({ stub: false, repoUrl: root, githubToken: token }),
+      plannerCwd({ stub: false, repoUrl: root, githubToken: token }),
+    ]);
+    expect(first).not.toBe(second);
+    expect(readFileSync(path.join(first, 'README.md'), 'utf8')).toContain('hello');
+    expect(existsSync(path.join(first, '.cursor', 'hooks.json'))).toBe(false);
+    const gitfile = await readFile(path.join(first, '.git'), 'utf8');
+    expect(gitfile).not.toContain(token);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('pages pull request files past the first thirty', async () => {
+    const previous = process.env.ARIA_GITHUB_MODE;
+    process.env.ARIA_GITHUB_MODE = 'live';
+    try {
+      const base = process.env.GITHUB_API_BASE || '';
+      const files = Array.from({ length: 31 }, (_, index) => `src/file-${index}.ts`);
+      const created = await fetch(`${base}/repos/acme/pages/pulls`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'pages', head: 'aria', base: 'main', body: 'files', files }),
+      });
+      const pull = await created.json() as { number: number };
+      const names = await getPullFiles('token', 'acme/pages', pull.number);
+      expect(names).toHaveLength(31);
+      expect(names[30]).toBe('src/file-30.ts');
+    } finally {
+      if (previous === undefined) delete process.env.ARIA_GITHUB_MODE;
+      else process.env.ARIA_GITHUB_MODE = previous;
+    }
+  });
+
+  it('maps an invalid planner key to a non-retryable error', () => {
+    const error = asRunError(new Error('Invalid User API Key'));
+    expect(error.code).toBe('KEY_INVALID');
+    expect(error.retryable).toBe(false);
   });
 
   it('refreshes a catalog older than 24 hours', () => {

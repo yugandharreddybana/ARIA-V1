@@ -160,15 +160,20 @@ export async function claim(workerId: string, runtimes: RunRuntime[]): Promise<A
 }
 
 export async function claimById(id: string, workerId: string): Promise<AgentRunRow | null> {
-  const result = await getPgPool().query<AgentRunRow>(
-    `UPDATE agent_runs
-        SET status = 'running', lease_owner = $2, lease_expires_at = NOW() + interval '90 seconds',
-            heartbeat_at = NOW(), started_at = COALESCE(started_at, NOW()), updated_at = NOW()
-      WHERE id = $1::uuid AND status = 'queued'
-      RETURNING ${COLUMNS}`,
-    [id, workerId],
-  );
-  return result.rows[0] ? mapRow(result.rows[0]) : null;
+  try {
+    const result = await getPgPool().query<AgentRunRow>(
+      `UPDATE agent_runs
+          SET status = 'running', lease_owner = $2, lease_expires_at = NOW() + interval '90 seconds',
+              heartbeat_at = NOW(), started_at = COALESCE(started_at, NOW()), updated_at = NOW()
+        WHERE id = $1::uuid AND status = 'queued'
+        RETURNING ${COLUMNS}`,
+      [id, workerId],
+    );
+    return result.rows[0] ? mapRow(result.rows[0]) : null;
+  } catch (err) {
+    if (pgCode(err) === '23505') return null;
+    throw err;
+  }
 }
 
 export async function heartbeat(id: string, workerId: string): Promise<boolean> {
@@ -281,18 +286,106 @@ export async function fail(id: string, workerId: string, code: string, message: 
   }
 }
 
-export async function cancel(id: string): Promise<AgentRunRow | null> {
-  const result = await getPgPool().query<AgentRunRow>(
-    `UPDATE agent_runs
-        SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
-            lease_owner = NULL, lease_expires_at = NULL, error_code = 'CANCELLED'
-      WHERE id = $1::uuid AND status IN ('queued', 'running', 'blocked')
-      RETURNING ${COLUMNS}`,
+export interface HeldRun {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  agent_id: string | null;
+  activity: RunActivity;
+  taken: number;
+  external_agent_id: string | null;
+  external_run_id: string | null;
+}
+
+export async function releaseHeldRuns(runs: HeldRun[]): Promise<void> {
+  for (const run of runs) {
+    if (run.taken <= 0) continue;
+    const budget = await getPgPool().query<{ scoped: boolean }>(
+      `SELECT token_budget_monthly IS NOT NULL AS scoped FROM projects WHERE id = $1::uuid`,
+      [run.project_id],
+    );
+    await releaseRun(run.workspace_id, run.activity, run.taken, run.agent_id, run.project_id, Boolean(budget.rows[0]?.scoped));
+  }
+}
+
+export async function consumeReservation(id: string): Promise<number> {
+  const result = await getPgPool().query<{ taken: string }>(
+    `WITH prev AS (
+       SELECT id, tokens_reserved
+         FROM agent_runs
+        WHERE id = $1::uuid AND tokens_reserved > 0
+        FOR UPDATE
+     )
+     UPDATE agent_runs AS a
+        SET tokens_reserved = 0, updated_at = NOW()
+       FROM prev
+      WHERE a.id = prev.id
+      RETURNING prev.tokens_reserved::text AS taken`,
     [id],
   );
-  const row = result.rows[0] ? mapRow(result.rows[0]) : null;
-  if (row) emitProject(row.project_id, 'run:updated', summary(row));
-  return row;
+  return Number(result.rows[0]?.taken ?? 0);
+}
+
+export async function cancelForTicket(client: PoolClient, ticketId: string): Promise<HeldRun[]> {
+  const result = await client.query<HeldRun>(
+    `WITH prev AS (
+       SELECT id, workspace_id, project_id, agent_id, activity, tokens_reserved,
+              external_agent_id, external_run_id
+         FROM agent_runs
+        WHERE ticket_id = $1::uuid AND status IN ('queued', 'running', 'blocked')
+        FOR UPDATE
+     )
+     UPDATE agent_runs AS a
+        SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
+            lease_owner = NULL, lease_expires_at = NULL, tokens_reserved = 0
+       FROM prev
+      WHERE a.id = prev.id
+      RETURNING prev.id, prev.workspace_id, prev.project_id, prev.agent_id, prev.activity,
+                prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id`,
+    [ticketId],
+  );
+  return result.rows.map((row) => ({ ...row, taken: Number(row.taken) }));
+}
+
+export async function cancel(id: string): Promise<AgentRunRow | null> {
+  const client = await getPgPool().connect();
+  try {
+    await client.query('BEGIN');
+    const held = await client.query<HeldRun>(
+      `WITH prev AS (
+         SELECT id, workspace_id, project_id, agent_id, activity, tokens_reserved,
+                external_agent_id, external_run_id
+           FROM agent_runs
+          WHERE id = $1::uuid AND status IN ('queued', 'running', 'blocked')
+          FOR UPDATE
+       )
+       UPDATE agent_runs AS a
+          SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
+              lease_owner = NULL, lease_expires_at = NULL, error_code = 'CANCELLED',
+              tokens_reserved = 0
+         FROM prev
+        WHERE a.id = prev.id
+        RETURNING prev.workspace_id, prev.project_id, prev.agent_id, prev.activity,
+                  prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id, prev.id`,
+      [id],
+    );
+    const rowResult = await client.query<AgentRunRow>(
+      `SELECT ${COLUMNS} FROM agent_runs WHERE id = $1::uuid`,
+      [id],
+    );
+    await client.query('COMMIT');
+    const row = rowResult.rows[0] ? mapRow(rowResult.rows[0]) : null;
+    if (held.rows[0]) {
+      await releaseHeldRuns([{ ...held.rows[0], taken: Number(held.rows[0].taken) }]);
+    }
+    if (row && row.status === 'cancelled') emitProject(row.project_id, 'run:updated', summary(row));
+    return row && row.status === 'cancelled' ? row : null;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function markTokensReserved(id: string, tokens: number): Promise<void> {
@@ -375,16 +468,37 @@ export async function blockQueuedForAgent(agentId: string, reason: string): Prom
   );
 }
 
-export async function cancelRunningForAgent(agentId: string): Promise<Array<{ id: string; external_agent_id: string | null; external_run_id: string | null; workspace_id: string }>> {
-  const result = await getPgPool().query<{ id: string; external_agent_id: string | null; external_run_id: string | null; workspace_id: string }>(
-    `UPDATE agent_runs
-        SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
-            lease_owner = NULL, lease_expires_at = NULL, tokens_reserved = 0
-      WHERE agent_id = $1::uuid AND status = 'running'
-      RETURNING id, external_agent_id, external_run_id, workspace_id`,
-    [agentId],
-  );
-  return result.rows;
+export async function cancelRunningForAgent(agentId: string): Promise<HeldRun[]> {
+  const client = await getPgPool().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query<HeldRun>(
+      `WITH prev AS (
+         SELECT id, workspace_id, project_id, agent_id, activity, tokens_reserved,
+                external_agent_id, external_run_id
+           FROM agent_runs
+          WHERE agent_id = $1::uuid AND status = 'running'
+          FOR UPDATE
+       )
+       UPDATE agent_runs AS a
+          SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
+              lease_owner = NULL, lease_expires_at = NULL, tokens_reserved = 0
+         FROM prev
+        WHERE a.id = prev.id
+        RETURNING prev.id, prev.workspace_id, prev.project_id, prev.agent_id, prev.activity,
+                  prev.tokens_reserved::int AS taken, prev.external_agent_id, prev.external_run_id`,
+      [agentId],
+    );
+    await client.query('COMMIT');
+    const held = result.rows.map((row) => ({ ...row, taken: Number(row.taken) }));
+    await releaseHeldRuns(held);
+    return held;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function unblockQueuedForAgent(agentId: string): Promise<number> {

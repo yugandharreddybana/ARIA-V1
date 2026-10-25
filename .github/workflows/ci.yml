@@ -192,3 +192,17 @@ jobs:
           tail -n 80 /tmp/aria-stub.log /tmp/aria-middleware.log /tmp/aria-web.log >&2 || true
           exit 1
       - run: pnpm -F @aria/e2e exec playwright test tests/milestone1-setup.spec.ts tests/auth/landing.spec.ts tests/sprint1-auth.spec.ts tests/sprint2-projects.spec.ts tests/sprint3-analysis.spec.ts tests/sprint4-tickets.spec.ts tests/sprint4-sessions.spec.ts tests/sprint4-planning.spec.ts tests/sprint4-team.spec.ts tests/sprint4-settings.spec.ts tests/sprint4-ai.spec.ts --project=${{ matrix.project }}
+
+  docker-images:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build middleware image
+        run: docker build -f Dockerfile.middleware -t aria-middleware:ci .
+      - name: Build web image
+        run: docker build -f Dockerfile.web -t aria-web:ci .
+      - name: Build backend image
+        run: docker build -f Dockerfile.backend -t aria-backend:ci .
+      - name: Boot the middleware image and run the planner child
+        run: docker run --rm --entrypoint node aria-middleware:ci /repo/scripts/docker-planner-smoke.mjs

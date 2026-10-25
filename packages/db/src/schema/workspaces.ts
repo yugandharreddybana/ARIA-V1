@@ -34,6 +34,6 @@ export const workspaces = pgTable('workspaces', {
   llmCatalogRefreshedAt:      timestamp('llm_catalog_refreshed_at', { withTimezone: true }),
   githubPushTokenEncrypted:   text('github_push_token_encrypted'),
 
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

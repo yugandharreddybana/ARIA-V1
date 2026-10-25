@@ -262,7 +262,7 @@ export async function generateProjectCompany(
     taskType: 'company_generation',
     runtime: llm.provider === 'cursor' ? 'cursor_local' : 'chat',
     idempotencyKey: `company:${projectId}:r${Number(prior.rows[0]?.n ?? 0) + 1}`,
-    input: { size, mix },
+    input: { size, mix, force },
   });
   return { ...(await getCompany(projectId, workspaceId)), statusCode: 202 as const, runId: queued.id };
 }

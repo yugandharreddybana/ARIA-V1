@@ -34,8 +34,8 @@ export const tickets = pgTable('tickets', {
   scheduleState: text('schedule_state').notNull().default('not_started'),
   ticketKey: text('ticket_key').notNull().default(''),
   splitSuggested: boolean('split_suggested').notNull().default(false),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   projectIdx: index('tickets_project_idx').on(t.projectId),
   statusIdx: index('tickets_status_idx').on(t.status),
@@ -57,5 +57,5 @@ export const ticketEvidence = pgTable('ticket_evidence', {
   testOutput: text('test_output'),
   commitHash: varchar('commit_hash', { length: 100 }),
   createdBySkillId: uuid('created_by_skill_id'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ ticketIdx: index('ticket_evidence_ticket_idx').on(t.ticketId) }));

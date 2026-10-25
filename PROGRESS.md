@@ -41,23 +41,23 @@ These are the plan §16 defaults, each a config setting, until the owner says ot
 
 ### Review fix pass (PR #9, do not merge from the agent)
 
-Opus review items 1–23 and the should-fix list are addressed on `cursor/m2-backend-1c0c`. Not merged.
+Opus review items 1–23 and the re-review (8 remaining must-fixes, near-blocking, and should-fix) are addressed on `cursor/m2-backend-1c0c`. Not merged.
 
-- Cloud worker uses the workspace encrypted key, `repos[{url,startingRef,prUrl}]`, `{agent,run}`, SSE `event:` lines, `git.branches[]`, `GET /v1/agents/{id}/usage?runId=` `totalTokens`, and a timeout on every call. The provider stub follows that contract.
-- The planner child resolves `localAgentChild.js` when the `.ts` source is absent, kills the process group, and uses a 20 minute timeout. `tsc` emits `dist/services/models/localAgentChild.js`. Running that file with a stub start message returned `{"storyPoints":5}`. Docker is not installed in this environment, so the image itself was not booted.
-- Queue terminal writes require `status` and `lease_owner`. A lost lease aborts the run. Ticks do not overlap. Transitions lock the ticket row. Dispatch takes one ready ticket per agent. Human status changes are logged and cancel runs.
-- Merge guard fails closed. Review and QA read the GitHub diff, files, and PR number. QA fails on pending, timed out, cancelled, and error checks. Evidence is the committed `evidence/` file at the current head SHA. UI-affected comes from the diff.
-- Flow-owner writes check the project. Client requests cannot append `actor_kind=agent`. `flowId` must belong to the project.
-- V17 no longer creates a role. V19 keeps the purge behind the trigger GUC. Drizzle matches Flyway, including nullability and foreign keys. `scripts/check-schema-drift.cjs` compares those.
-- Ticket event sequence is ordered by `ticket_events.seq`, not the `seq::text` output alias (`"9"` sorted above `"10"`). A full working day is due at the next open. Deleting an owner promotes the backup from the postgres.js row list.
+- Cloud worker uses the workspace encrypted key, `repos[{url,startingRef,prUrl}]`, `{agent,run}`, SSE `event:` lines, `git.branches[].sha`, `GET /v1/agents/{id}/usage?runId=` `totalTokens`, and a timeout on every call. A usage `403 feature_unavailable` falls back to the estimate cap. A bad `Last-Event-ID` reconnects once, then polls. QA and fix runs attach the known pull request URL when the cloud reply omits it.
+- `Dockerfile.middleware` and `Dockerfile.web` copy `pnpm-workspace.yaml` and install with the lockfile. The runtime image has `git`. CI job `docker-images` builds the middleware, web, and backend images and boots the middleware image with `scripts/docker-planner-smoke.mjs`.
+- Planning checks the repo out with async `git` (askpass token only on the git process, per-repo lock, unique worktree, timeouts) and strips `.cursor/{hooks,mcp,environment}.json`. `sandboxOptions` sits under `local`. The planner child exits after it replies and the parent kills the process group.
+- QA polls checks until they complete or `ARIA_QA_CHECK_TIMEOUT_MS` (default 30 minutes). Pending is not an immediate failure. Evidence accepts a QA report at the QA head and a dev report at that head or at the succeeded develop/fix commit QA built on. The stub changes the pull head SHA on every push.
+- Review line comments stay on diff hunks. Pull files page past 30. One project budget bucket is shared by planning and coding. Reservations are released on cancel, human status change, agent disable, and worker early return.
+- Ticket-event deletes are allowed only while a parent `BEFORE DELETE` trigger is on the stack (`pg_trigger_depth() > 1`). `aria_purge_ticket_events*` is `SECURITY DEFINER` and rejects a direct call. A session GUC cannot bypass the trigger. Deleting a workspace that still has events succeeds.
+- Drift check compares column types and unique indexes. Drizzle timestamps that mirror `TIMESTAMPTZ` set `withTimezone: true`.
 
 ### Verified locally on 2026-10-25
 
 - `node scripts/check-schema-drift.cjs` passed.
-- `pnpm -F @aria/middleware exec tsc --noEmit` passed. `pnpm -F @aria/middleware build` passed.
+- `pnpm -F @aria/middleware exec tsc --noEmit` passed.
 - `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
-- `pnpm -F @aria/middleware test` — 24 files, 125 tests passed, including `reviewAcceptance.integration.test.ts` (develop → review → QA, fix round cap, stub failures, merge guard, cancel, lease loss, IDOR, WebSocket room).
-- `pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts` on the changed middleware tests passed.
+- `pnpm -F @aria/middleware test` — 24 files, 132 tests passed, including the re-review cases (worktree, child exit, file pages, check wait, usage 403, ledger release on cancel / human status / agent off, workspace purge).
+- Docker is not installed in this environment. The image boot is the `docker-images` CI job.
 - Java sources were not changed. Java CI remains the check.
 
 ### Open

@@ -25,6 +25,36 @@ const SECRET = [
   /ghr_[A-Za-z0-9]{16,}/,
 ];
 
+export function diffHunkLines(diff: string): Map<string, Set<number>> {
+  const lines = new Map<string, Set<number>>();
+  let file = '';
+  let next = 0;
+  for (const raw of diff.split('\n')) {
+    const header = raw.match(/^\+\+\+ b\/(.+)$/);
+    if (header) {
+      file = header[1];
+      if (!lines.has(file)) lines.set(file, new Set());
+      continue;
+    }
+    const hunk = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      next = Number(hunk[1]);
+      continue;
+    }
+    if (!file || raw.startsWith('diff ') || raw.startsWith('index ') || raw.startsWith('--- ') || raw.startsWith('@@')) continue;
+    if (raw.startsWith('+')) {
+      lines.get(file)?.add(next);
+      next += 1;
+    } else if (raw.startsWith('-') || raw.startsWith('\\')) {
+      continue;
+    } else {
+      lines.get(file)?.add(next);
+      next += 1;
+    }
+  }
+  return lines;
+}
+
 export function diffTouchesUi(files: string[]): boolean {
   return files.some((file) => {
     const path = file.replace(/\\/g, '/');

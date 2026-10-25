@@ -1,6 +1,7 @@
 -- Append-only ticket audit log. UPDATE and DELETE are blocked for every role.
--- A parent delete (ticket/project/workspace) may cascade only after the parent
--- trigger sets a transaction-local purge flag. The app never sets that flag.
+-- A parent BEFORE DELETE trigger deletes the child rows first. The row trigger
+-- allows that nested delete (pg_trigger_depth() > 1) and rejects a session
+-- DELETE, a session GUC, and a direct call to the purge function.
 
 CREATE TABLE IF NOT EXISTS ticket_events (
   id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -66,7 +67,7 @@ BEGIN
     RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
   END IF;
   IF TG_OP = 'DELETE' THEN
-    IF current_setting('aria.purge_ticket_events', true) IS DISTINCT FROM '1' THEN
+    IF pg_trigger_depth() <= 1 THEN
       RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
     END IF;
     RETURN OLD;
@@ -91,18 +92,56 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  PERFORM set_config('aria.purge_ticket_events', '1', true);
+  IF pg_trigger_depth() < 1 THEN
+    RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
+  END IF;
   DELETE FROM ticket_events WHERE ticket_id = target;
-  PERFORM set_config('aria.purge_ticket_events', '0', true);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION aria_purge_ticket_events_for_project(target uuid) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF pg_trigger_depth() < 1 THEN
+    RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
+  END IF;
+  DELETE FROM ticket_events WHERE project_id = target;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION aria_purge_ticket_events_for_workspace(target uuid) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF pg_trigger_depth() < 1 THEN
+    RAISE EXCEPTION 'ticket_events is append-only' USING ERRCODE = '55000';
+  END IF;
+  DELETE FROM ticket_events WHERE workspace_id = target;
 END;
 $$;
 
 REVOKE ALL ON FUNCTION aria_purge_ticket_events(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION aria_purge_ticket_events_for_project(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION aria_purge_ticket_events_for_workspace(uuid) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION ticket_events_allow_parent_delete() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-  PERFORM aria_purge_ticket_events(OLD.id);
+  IF TG_TABLE_NAME = 'workspaces' THEN
+    PERFORM aria_purge_ticket_events_for_workspace(OLD.id);
+  ELSIF TG_TABLE_NAME = 'projects' THEN
+    PERFORM aria_purge_ticket_events_for_project(OLD.id);
+  ELSE
+    PERFORM aria_purge_ticket_events(OLD.id);
+  END IF;
   RETURN OLD;
 END;
 $$;
@@ -110,6 +149,16 @@ $$;
 DROP TRIGGER IF EXISTS tickets_allow_event_purge ON tickets;
 CREATE TRIGGER tickets_allow_event_purge
   BEFORE DELETE ON tickets
+  FOR EACH ROW EXECUTE FUNCTION ticket_events_allow_parent_delete();
+
+DROP TRIGGER IF EXISTS projects_allow_event_purge ON projects;
+CREATE TRIGGER projects_allow_event_purge
+  BEFORE DELETE ON projects
+  FOR EACH ROW EXECUTE FUNCTION ticket_events_allow_parent_delete();
+
+DROP TRIGGER IF EXISTS workspaces_allow_event_purge ON workspaces;
+CREATE TRIGGER workspaces_allow_event_purge
+  BEFORE DELETE ON workspaces
   FOR EACH ROW EXECUTE FUNCTION ticket_events_allow_parent_delete();
 
 REVOKE UPDATE, DELETE, TRUNCATE ON ticket_events FROM PUBLIC;

@@ -26,8 +26,8 @@ export const sessions = pgTable('sessions', {
   isFirstStart: boolean('is_first_start').notNull().default(false),
   briefSummary: text('brief_summary'),
   summary: text('summary'),
-  startedAt: timestamp('started_at').notNull().defaultNow(),
-  endedAt: timestamp('ended_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('sessions_project_idx').on(t.projectId) }));

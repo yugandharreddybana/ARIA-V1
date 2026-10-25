@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { getPgPool } from '../db.client';
 import { canonicalDetail, eventHash, type EventHashInput } from './eventHash';
 
@@ -51,16 +52,17 @@ export async function appendTicketEvent(input: {
   tokensTotal?: number | null;
   prUrl?: string | null;
   commitSha?: string | null;
-}): Promise<TicketEventRow> {
-  const pool = getPgPool();
-  const client = await pool.connect();
+}, client?: PoolClient): Promise<TicketEventRow> {
+  const own = !client;
+  const db = client ?? await getPgPool().connect();
   try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-    await client.query('BEGIN');
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`events:${input.ticketId}`]);
+    if (own) await db.query('BEGIN');
+    else await db.query('SAVEPOINT ticket_event');
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`events:${input.ticketId}`]);
     // Qualify seq. `SELECT seq::text ... ORDER BY seq` sorts the text alias ("9" > "10").
-    const prior = await client.query<{ seq: string; hash: string }>(
+    const prior = await db.query<{ seq: string; hash: string }>(
       `SELECT t.seq::text AS seq, t.hash
          FROM ticket_events t
         WHERE t.ticket_id = $1::uuid
@@ -87,7 +89,7 @@ export async function appendTicketEvent(input: {
       prevHash,
     };
     const hash = eventHash(fields);
-    const inserted = await client.query<TicketEventRow>(
+    const inserted = await db.query<TicketEventRow>(
       `INSERT INTO ticket_events (
          workspace_id, project_id, ticket_id, seq, event_type, actor_kind, agent_id, run_id,
          summary, detail, detail_canonical, model_id, tokens_total, pr_url, commit_sha, prev_hash, hash
@@ -102,10 +104,12 @@ export async function appendTicketEvent(input: {
         input.commitSha ?? null, prevHash, hash,
       ],
     );
-    await client.query('COMMIT');
+    if (own) await db.query('COMMIT');
+    else await db.query('RELEASE SAVEPOINT ticket_event');
     return inserted.rows[0];
     } catch (err) {
-      await client.query('ROLLBACK');
+      if (own) await db.query('ROLLBACK');
+      else await db.query('ROLLBACK TO SAVEPOINT ticket_event');
       const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
       if ((code === '23514' || code === '23505') && attempt < 2) continue;
       throw err;
@@ -113,7 +117,7 @@ export async function appendTicketEvent(input: {
     }
     throw new Error('ticket event was not appended');
   } finally {
-    client.release();
+    if (own) db.release();
   }
 }
 

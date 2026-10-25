@@ -211,8 +211,20 @@ runRouter.post('/:runId/retry', async (req: AriaRequest, res, next) => {
     }
     if (run.ticket_id) {
       const ticket = await getPgPool().query<{ status: string }>(`SELECT status FROM tickets WHERE id = $1::uuid`, [run.ticket_id]);
-      if (ticket.rows[0] && (ticket.rows[0].status === 'done' || ticket.rows[0].status === 'rejected')) {
+      const status = ticket.rows[0]?.status;
+      if (status === 'done' || status === 'rejected') {
         throw new AppError('A terminal ticket cannot be retried', 422, 'NOT_RETRYABLE');
+      }
+      const allowed: Partial<Record<typeof run.activity, readonly string[]>> = {
+        develop: ['ready_for_dev', 'in_progress', 'blocked'],
+        fix: ['in_progress', 'blocked'],
+        review: ['ready_for_review', 'blocked'],
+        qa: ['in_qa', 'blocked'],
+        story_points: ['backlog', 'ready_for_dev', 'in_progress', 'blocked'],
+      };
+      const states = allowed[run.activity];
+      if (status && states && !states.includes(status)) {
+        throw new AppError(`A ${run.activity} run cannot retry while the ticket is ${status}`, 422, 'NOT_RETRYABLE');
       }
     }
     const created = await enqueue({
@@ -235,11 +247,25 @@ ticketExtra.use(requireAuth);
 ticketExtra.get('/:id/events', async (req: AriaRequest, res, next) => {
   try {
     await ticketInWorkspace(req.params.id, req.user!.workspaceId);
+    const cursor = z.coerce.number().int().nonnegative().safeParse(req.query.cursor ?? 0);
+    if (!cursor.success) throw new AppError('cursor must be a non-negative integer', 400, 'VALIDATION_ERROR');
+    let agentId: string | undefined;
+    if (typeof req.query.agentId === 'string' && req.query.agentId) {
+      const parsedAgent = z.string().uuid().safeParse(req.query.agentId);
+      if (!parsedAgent.success) throw new AppError('agentId must be a uuid', 400, 'VALIDATION_ERROR');
+      agentId = parsedAgent.data;
+    }
+    let eventType: string | undefined;
+    if (typeof req.query.type === 'string' && req.query.type) {
+      const parsedType = z.enum(['status_change', 'agent_action', 'progress', 'communication', 'run_ref', 'owner_decision', 'schedule', 'evidence']).safeParse(req.query.type);
+      if (!parsedType.success) throw new AppError('type is not a ticket event', 400, 'VALIDATION_ERROR');
+      eventType = parsedType.data;
+    }
     const events = await listTicketEvents(req.params.id, {
-      eventType: typeof req.query.type === 'string' ? req.query.type : undefined,
-      agentId: typeof req.query.agentId === 'string' ? req.query.agentId : undefined,
-      afterSeq: Number(req.query.cursor ?? 0),
-      limit: Number(req.query.limit ?? 100),
+      eventType,
+      agentId,
+      afterSeq: cursor.data,
+      limit: queryLimit(req.query.limit, 100, 500),
     });
     res.json({ events });
   } catch (err) { next(err); }

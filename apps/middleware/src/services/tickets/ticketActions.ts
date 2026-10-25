@@ -2,8 +2,11 @@ import { validateEnv } from '../../config/env';
 import { getPgPool } from '../db.client';
 import { AppError } from '../../middleware/error.middleware';
 import { evidenceAllowsMerge } from '../evidence/reports';
-import { enqueueOn, type RunActivity, type RunRuntime } from '../runs/runQueue';
+import { codeWorkerFor } from '../models/codeWorker';
+import { workspaceCursorKey } from '../models/cursorKey';
+import { enqueueOn, cancelForTicket, releaseHeldRuns, type HeldRun, type RunActivity, type RunRuntime } from '../runs/runQueue';
 import { emitProject } from '../runs/hub';
+import { routeTicket } from '../flows/flowOwners';
 import { appendTicketEvent } from './ticketEvents';
 import { dueAt, parseMinutes, parseWorkdays, scheduleState, type WorkCalendar } from './schedule';
 import { humanMaySetStatus, transition, type PipelineEvent, type PipelineStatus } from './ticketPipeline';
@@ -138,14 +141,10 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
     if ((updated.rowCount ?? 0) === 0) throw new AppError('Ticket changed before the transition committed', 409, 'ILLEGAL_TRANSITION');
     const project = await client.query<{ code_runtime: string }>(`SELECT code_runtime FROM projects WHERE id = $1::uuid`, [ticket.project_id]);
     const codeRuntime = project.rows[0]?.code_runtime ?? 'cursor_cloud';
+    const held: HeldRun[] = [];
     for (const effect of next.effects) {
       if (effect.type === 'cancelRuns') {
-        await client.query(
-          `UPDATE agent_runs SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
-                  lease_owner = NULL, lease_expires_at = NULL
-            WHERE ticket_id = $1::uuid AND status IN ('queued', 'running')`,
-          [ticketId],
-        );
+        held.push(...await cancelForTicket(client, ticketId));
       }
       if (effect.type === 'enqueue') {
         const prior = await client.query<{ n: string }>(
@@ -174,7 +173,6 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
         });
       }
     }
-    await client.query('COMMIT');
     await appendTicketEvent({
       workspaceId: ticket.workspace_id,
       projectId: ticket.project_id,
@@ -193,7 +191,21 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
         reason: extra.reason ?? next.reason ?? null,
         userId: extra.actorUserId ?? null,
       },
-    });
+    }, client);
+    await client.query('COMMIT');
+    await releaseHeldRuns(held);
+    const cloud = held.filter((run) => run.external_agent_id && run.external_run_id);
+    if (cloud.length) {
+      try {
+        const apiKey = await workspaceCursorKey(ticket.workspace_id);
+        const worker = codeWorkerFor();
+        for (const run of cloud) {
+          await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
+        }
+      } catch {
+        // The database row is already cancelled if the provider is unreachable.
+      }
+    }
     emitProject(ticket.project_id, 'ticket:updated', { id: ticketId, status: next.status });
     return { status: next.status };
   } catch (err) {
@@ -240,16 +252,14 @@ async function pickAgent(ticket: TicketRow, activity: RunActivity): Promise<stri
 
 export async function approveTicket(ticketId: string, workspaceId: string): Promise<void> {
   const ticket = await loadTicket(ticketId);
-  if (ticket.workspace_id !== workspaceId) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  if (ticket.workspace_id !== workspaceId) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
   if (!ticket.assigned_skill_id && ticket.flow_id) {
-    const { routeTicket } = await import('../flows/flowOwners');
     const layer = ticket.layer === 'frontend' || ticket.layer === 'backend' || ticket.layer === 'fullstack' ? ticket.layer : null;
     const agentId = await routeTicket(ticket.flow_id, layer, ticket.project_id);
     if (!agentId) throw new AppError('No agent can take this ticket', 422, 'UNROUTABLE');
     await getPgPool().query(`UPDATE tickets SET assigned_skill_id = $2::uuid WHERE id = $1::uuid`, [ticketId, agentId]);
   }
   if (!ticket.assigned_skill_id && !ticket.flow_id) {
-    const { routeTicket } = await import('../flows/flowOwners');
     const agentId = await routeTicket(null, null, ticket.project_id);
     if (agentId) await getPgPool().query(`UPDATE tickets SET assigned_skill_id = $2::uuid WHERE id = $1::uuid`, [ticketId, agentId]);
   }

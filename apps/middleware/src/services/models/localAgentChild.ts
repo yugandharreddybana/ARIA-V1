@@ -7,8 +7,12 @@ interface StartMessage {
   cwd?: string;
 }
 
-function reply(message: unknown): void {
-  if (typeof process.send === 'function') process.send(message);
+function reply(message: { type?: string; text?: string; error?: string; envKeys?: string[]; usage?: { total?: number } }): void {
+  const code = message.type === 'error' ? 1 : 0;
+  if (typeof process.send !== 'function') process.exit(code);
+  process.send(message, () => {
+    process.exit(code);
+  });
 }
 
 const COMPANY_OK = JSON.stringify({

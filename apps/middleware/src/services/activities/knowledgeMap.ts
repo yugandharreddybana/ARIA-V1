@@ -29,7 +29,7 @@ const knowledgeSchema = z.object({
 export async function executeKnowledge(run: AgentRunRow): Promise<{ outputSource: 'ai' | 'template'; text: string; tokensTotal?: number }> {
   const model = await reasoningFor(run.workspace_id);
   const existing = await db.query.knowledgeMaps.findFirst({ where: eq(knowledgeMaps.projectId, run.project_id) });
-  const marker = typeof run.input.fixture === 'string' ? `\n${run.input.fixture}` : '';
+  const marker = process.env.NODE_ENV === 'production' || typeof run.input.fixture !== 'string' ? '' : `\n${run.input.fixture}`;
   try {
     const planned = await model.plan({
       run,

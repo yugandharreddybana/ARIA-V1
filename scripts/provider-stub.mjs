@@ -143,34 +143,58 @@ function diffFor(pull) {
   }).join('');
 }
 
+function findPull(number) {
+  for (const pull of pulls.values()) {
+    if (Number(pull.number) === Number(number)) return pull;
+  }
+  return null;
+}
+
+function bumpHead(pull) {
+  if (!pull) return;
+  pull.pushes = (pull.pushes || 0) + 1;
+  pull.head.sha = `head${pull.number}p${pull.pushes}`;
+}
+
 function runBody(agent) {
   const slug = repoSlug(agent.repoUrl) || { owner: 'local', repo: 'repo' };
   const finished = agent.kind !== 'error';
   const status = agent.kind === 'error' ? 'ERROR' : 'FINISHED';
   const branch = agent.kind === 'no_changes' || agent.kind === 'error' ? undefined : 'aria/ticket';
   let prUrl;
+  let sha;
   const existing = agent.prUrl ? String(agent.prUrl).match(/\/pull\/(\d+)/) : null;
+  const omitPr = marker(agent.prompt, 'omit_pr') != null;
   if (existing) {
     agent.pullNumber = Number(existing[1]);
-    prUrl = agent.prUrl;
+    const pull = findPull(agent.pullNumber);
+    bumpHead(pull);
+    sha = pull?.head?.sha;
+    if (!omitPr) prUrl = agent.prUrl;
   } else if (agent.kind === 'ok' || agent.kind === 'slow' || agent.kind === 'stream_410') {
     if (!agent.pullNumber) {
       agent.pullNumber = prSeq++;
       const ui = String(agent.prompt).includes('[[stub:ui]]');
-      const files = ui
-        ? ['apps/web/src/app/page.tsx', 'apps/middleware/src/services/tickets/ticketPipeline.ts']
-        : ['apps/middleware/src/services/tickets/ticketPipeline.ts'];
-      const sha = marker(agent.prompt, 'checks') === 'pending' ? `pending${agent.pullNumber}` : `head${agent.pullNumber}`;
+      const many = marker(agent.prompt, 'many_files') != null;
+      const files = many
+        ? Array.from({ length: 31 }, (_, index) => `apps/middleware/src/file-${index}.ts`)
+        : ui
+          ? ['apps/web/src/app/page.tsx', 'apps/middleware/src/services/tickets/ticketPipeline.ts']
+          : ['apps/middleware/src/services/tickets/ticketPipeline.ts'];
+      const checks = marker(agent.prompt, 'checks');
+      sha = checks === 'pending' || checks === 'timeout' ? `pending${agent.pullNumber}` : `head${agent.pullNumber}`;
       registerPull(slug.owner, slug.repo, agent.pullNumber, {
         sha,
         files,
+        checks,
         changes: String(agent.prompt).includes('[[stub:review-changes]]') || String(agent.prompt).includes('[[stub:review-always]]'),
         sticky: String(agent.prompt).includes('[[stub:review-always]]'),
       });
     }
     prUrl = `https://github.com/${slug.owner}/${slug.repo}/pull/${agent.pullNumber}`;
+    sha = sha || findPull(agent.pullNumber)?.head?.sha;
   }
-  const branches = branch ? [{ repoUrl: `github.com/${slug.owner}/${slug.repo}`, branch, ...(prUrl ? { prUrl } : {}) }] : [];
+  const branches = branch ? [{ repoUrl: `github.com/${slug.owner}/${slug.repo}`, branch, ...(sha ? { sha } : {}), ...(prUrl ? { prUrl } : {}) }] : [];
   return {
     id: agent.runId,
     status,
@@ -182,16 +206,26 @@ function runBody(agent) {
 
 function writeSse(res, agent) {
   const body = runBody(agent);
+  const estimate = marker(agent.prompt, 'estimate');
+  const assistant = { text: 'working', ...(estimate ? { estimatedTokens: Number(estimate) } : {}) };
   const sse = [
     'id: 1',
-    'event: assistant',
-    'data: {"text":"working"}',
+    'event: status',
+    'data: {"status":"RUNNING"}',
     '',
     'id: 2',
+    'event: heartbeat',
+    'data: {"text":"alive"}',
+    '',
+    'id: 3',
+    'event: assistant',
+    `data: ${JSON.stringify(assistant)}`,
+    '',
+    'id: 4',
     'event: result',
     `data: ${JSON.stringify({ runId: agent.runId, status: body.status, text: body.result, durationMs: body.durationMs, git: body.git })}`,
     '',
-    'id: 3',
+    'id: 5',
     'event: done',
     `data: ${JSON.stringify({ runId: agent.runId })}`,
     '',
@@ -245,7 +279,14 @@ export function startStub({ port = 0 } = {}) {
         const prompt = body.prompt?.text || '';
         const kind = scenario(prompt);
         if (kind === 'repo_access') return send(res, 400, errorBody('repository_access', 'The key cannot access that repository'));
-        const agentId = body.agentId || `bc-${Date.now()}`;
+        const agentId = body.agentId || `bc-${crypto.randomUUID()}`;
+        if (!/^bc-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(agentId)) {
+          return send(res, 400, errorBody('invalid_agent_id', 'agentId must match bc-<uuid>'));
+        }
+        const modelId = body.model?.id;
+        if (modelId != null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/.test(String(modelId))) {
+          return send(res, 400, errorBody('model_not_found', 'Unknown model'));
+        }
         if (agents.has(agentId)) return send(res, 409, errorBody('agent_id_conflict', 'An agent with this id already exists'));
         const repo = Array.isArray(body.repos) ? body.repos[0] : null;
         const runId = `run_${agentId}`;
@@ -278,6 +319,9 @@ export function startStub({ port = 0 } = {}) {
       if (usage && req.method === 'GET') {
         const agent = agents.get(usage[1]);
         if (!agent) return send(res, 404, errorBody('run_not_found', 'Run not found'));
+        if (marker(agent.prompt, 'usage') === '403') {
+          return send(res, 403, errorBody('feature_unavailable', 'Usage is not available for this key'));
+        }
         const runId = url.searchParams.get('runId');
         if (runId && runId !== agent.runId) return send(res, 404, errorBody('run_not_found', 'Run not found'));
         const total = agent.usage;
@@ -294,6 +338,9 @@ export function startStub({ port = 0 } = {}) {
       if (stream && req.method === 'GET') {
         const agent = agents.get(stream[1]);
         if (!agent || agent.runId !== stream[2]) return send(res, 404, errorBody('run_not_found', 'Run not found'));
+        if (marker(agent.prompt, 'bad_cursor') && req.headers['last-event-id']) {
+          return send(res, 400, errorBody('invalid_last_event_id', 'Unknown cursor'));
+        }
         if (agent.kind === 'stream_410' && !agent.streamOpened && !req.headers['last-event-id']) {
           agent.streamOpened = true;
           return send(res, 410, errorBody('stream_expired', 'The stream cursor expired'));
@@ -329,12 +376,16 @@ export function startStub({ port = 0 } = {}) {
       if (pullFiles && req.method === 'GET') {
         const pull = pulls.get(pullKey(pullFiles[1], pullFiles[2], pullFiles[3]));
         const files = pull?.files || ['apps/middleware/src/services/tickets/ticketPipeline.ts'];
-        return send(res, 200, files.map((filename) => ({ filename, status: 'modified' })));
+        const perPage = Math.max(1, Number(url.searchParams.get('per_page') || 30));
+        const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+        const slice = files.slice((page - 1) * perPage, page * perPage);
+        return send(res, 200, slice.map((filename) => ({ filename, status: 'modified' })));
       }
       const pullCreate = path.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/);
       if (pullCreate && req.method === 'POST') {
         const number = prSeq++;
-        const pull = registerPull(pullCreate[1], pullCreate[2], number, { sha: `head${number}` });
+        const files = Array.isArray(body.files) ? body.files : undefined;
+        const pull = registerPull(pullCreate[1], pullCreate[2], number, { sha: `head${number}`, ...(files ? { files } : {}) });
         return send(res, 201, pull);
       }
       const pullGet = path.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/);
@@ -356,12 +407,26 @@ export function startStub({ port = 0 } = {}) {
           violations += 1;
           return send(res, 422, { message: 'only comments' });
         }
+        const comments = Array.isArray(body.comments) ? body.comments : [];
+        if (comments.some((comment) => comment.line && comment.line !== 1)) {
+          violations += 1;
+          return send(res, 422, { message: 'line is not part of the diff' });
+        }
         return send(res, 201, { id: 1 });
       }
       if (req.method === 'POST' && /\/issues\/\d+\/comments$/.test(path)) return send(res, 201, { id: 1 });
       if (path.includes('/check-runs')) {
-        const pending = /\/commits\/pending/.test(path);
-        if (pending) return send(res, 200, { check_runs: [{ name: 'ci', status: 'pending', conclusion: null }] });
+        const sha = decodeURIComponent(path.split('/commits/')[1]?.split('/')[0] || '');
+        const pull = [...pulls.values()].find((item) => item.head?.sha === sha);
+        const mode = pull?.checks;
+        if (mode === 'timeout' || mode === 'pending' || sha.startsWith('pending')) {
+          return send(res, 200, { check_runs: [{ name: 'ci', status: 'pending', conclusion: null }] });
+        }
+        if (mode === 'settle' || mode === 'own') {
+          pull.checkPolls = (pull.checkPolls || 0) + 1;
+          if (pull.checkPolls < 2) return send(res, 200, { check_runs: [{ name: 'ci', status: 'pending', conclusion: null }] });
+        }
+        if (mode === 'failure') return send(res, 200, { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure' }] });
         return send(res, 200, { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }] });
       }
       const control = path.match(/^\/__stub\/github\/(merge|close)\/(\d+)$/);

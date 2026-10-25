@@ -59,9 +59,8 @@ export interface BudgetDecision {
 }
 
 function scopeBackend(activity: string, projectId: string | null | undefined, projectScoped: boolean): string {
-  const runtime = runtimeBackend(activity);
-  if (projectScoped && projectId) return `${runtime}:${projectId}`;
-  return runtime;
+  if (projectScoped && projectId) return `project:${projectId}`;
+  return runtimeBackend(activity);
 }
 
 async function projected(sessionId: string, backendId?: string): Promise<number> {
@@ -134,8 +133,14 @@ export async function reserveRun(input: {
   return { ok: true, reserved: estimate.reserve };
 }
 
-export async function checkMidRun(spent: number, cap: number): Promise<void> {
+export async function checkMidRun(spent: number, cap: number, workspaceRemaining?: number): Promise<void> {
+  if (!Number.isFinite(spent) || !Number.isFinite(cap) || cap <= 0) {
+    throw new RunError('BUDGET_EXCEEDED', 'Per-run token cap is unavailable', false);
+  }
   if (spent > cap) throw new RunError('BUDGET_EXCEEDED', 'Per-run token cap exceeded', false);
+  if (workspaceRemaining != null && spent > workspaceRemaining) {
+    throw new RunError('BUDGET_EXCEEDED', 'Monthly token budget would be exceeded', false);
+  }
 }
 
 export async function noteBudget(workspaceId: string, projectId: string | null, limit: number): Promise<void> {

@@ -30,6 +30,7 @@ export function developPrompt(input: {
 export function qaPrompt(input: {
   ticketKey: string;
   title: string;
+  description?: string;
   storyPoints: number;
   persona: string;
   diffSummary: string;
@@ -47,6 +48,7 @@ export function qaPrompt(input: {
     'Where UI is affected, capture before/after screenshots with Playwright in this run and embed them. Set ui_affected: yes or no.',
     'Verdict is exactly pass or fail.',
     '<untrusted_repo_content>',
+    input.description || '',
     input.diffSummary.slice(0, 60_000),
     '</untrusted_repo_content>',
   ].join('\n');

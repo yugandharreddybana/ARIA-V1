@@ -5,6 +5,14 @@ import { AppError } from '../../middleware/error.middleware';
 import type { CompanyMix, FlowAssignment, GeneratedAgent } from '../companyGenerator';
 import { assertOwnerInvariant, type FlowLayer, type FlowRole } from '../flows/flowOwners';
 
+function sqlRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === 'object' && Array.isArray((result as { rows?: unknown }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
+}
+
 export async function applyCompanyRoster(input: {
   projectId: string;
   size: number;
@@ -32,7 +40,7 @@ export async function applyCompanyRoster(input: {
         (SELECT COUNT(*) FROM sessions WHERE project_id = ${projectId}::uuid) AS sessions,
         (SELECT COUNT(*) FROM tickets WHERE project_id = ${projectId}::uuid) AS tickets
     `);
-    const counts = (usage as { rows?: Array<{ sessions: string; tickets: string }> }).rows?.[0];
+    const counts = sqlRows<{ sessions: string; tickets: string }>(usage)[0];
     if (counts && (Number(counts.sessions) > 0 || Number(counts.tickets) > 0) && !input.force) {
       throw new AppError('Regeneration would remove sessions or tickets. Send force: true to continue.', 409, 'COMPANY_IN_USE');
     }

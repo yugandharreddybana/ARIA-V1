@@ -13,8 +13,8 @@ export const ideas = pgTable('ideas', {
   description: text('description'),
   status: text('status').notNull().default('draft'),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const ideaCards = pgTable('idea_cards', {
@@ -34,10 +34,10 @@ export const ideaCards = pgTable('idea_cards', {
   status: ideaStatusEnum('status').notNull().default('draft'),
   humanApproved: boolean('human_approved').notNull().default(false),
   humanApprovedById: uuid('human_approved_by_id'),
-  humanApprovedAt: timestamp('human_approved_at'),
+  humanApprovedAt: timestamp('human_approved_at', { withTimezone: true }),
   linkedTicketIds: jsonb('linked_ticket_ids').notNull().default([]),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('idea_cards_project_idx').on(t.projectId) }));
 
 export const featureSpecs = pgTable('feature_specs', {
@@ -59,6 +59,6 @@ export const featureSpecs = pgTable('feature_specs', {
   humanApproved: boolean('human_approved').notNull().default(false),
   humanApprovedById: uuid('human_approved_by_id'),
   humanApprovedAt: timestamp('human_approved_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('feature_specs_project_idx').on(t.projectId) }));
