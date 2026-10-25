@@ -12,13 +12,13 @@ export function Badge({
   children,
   tone = 'neutral',
   className,
-}: {
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement> & {
   children: React.ReactNode;
   tone?: keyof typeof tones;
-  className?: string;
 }) {
   return (
-    <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', tones[tone], className)}>
+    <span {...props} className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', tones[tone], className)}>
       {children}
     </span>
   );

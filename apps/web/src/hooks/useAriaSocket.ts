@@ -21,12 +21,18 @@ export type AriaSocketEvent =
   | { type: 'token.hard_stop'; sessionId: string; projected: number; hardLimit: number }
   | { type: 'queue.depth'; data: { totalQueueDepth: number; acceptingRequests: boolean } }
   | { type: 'ticket:created'; ticket: Record<string, unknown> }
-  | { type: 'ticket:updated'; ticket: Record<string, unknown> };
+  | { type: 'ticket:updated'; ticket: Record<string, unknown> }
+  | { type: 'run:updated'; id: string; status: string; activity: string; agentId?: string | null; ticketId?: string | null; prUrl?: string | null; tokens?: number | null; error_code?: string | null }
+  | { type: 'run:log'; runId: string; lines: Array<{ seq: number; kind: string; message: string; ts: string }> }
+  | { type: 'budget:warn'; projectId: string; used: number; limit: number }
+  | { type: 'knowledge:updated'; projectId: string; source?: string }
+  | { type: 'company:updated'; projectId: string; source?: string };
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
 
 export function useAriaSocket() {
   const socketRef = useRef<Socket | null>(null);
+  const listeners = useRef(new Set<(event: AriaSocketEvent) => void>());
   const [connected, setConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<AriaSocketEvent | null>(null);
 
@@ -50,7 +56,11 @@ export function useAriaSocket() {
     socket.on('connect_error', () => setConnected(false));
 
     const fan = (type: AriaSocketEvent['type']) =>
-      (payload: Record<string, unknown>) => setLastEvent({ type, ...(payload as object) } as AriaSocketEvent);
+      (payload: Record<string, unknown>) => {
+        const event = { type, ...(payload as object) } as AriaSocketEvent;
+        setLastEvent(event);
+        listeners.current.forEach((listener) => listener(event));
+      };
 
     socket.on('hello',          fan('hello'));
     socket.on('session.update', fan('session.update'));
@@ -60,6 +70,11 @@ export function useAriaSocket() {
     socket.on('queue.depth',    fan('queue.depth'));
     socket.on('ticket:created', fan('ticket:created'));
     socket.on('ticket:updated', fan('ticket:updated'));
+    socket.on('run:updated',    fan('run:updated'));
+    socket.on('run:log',        fan('run:log'));
+    socket.on('budget:warn',    fan('budget:warn'));
+    socket.on('knowledge:updated', fan('knowledge:updated'));
+    socket.on('company:updated', fan('company:updated'));
 
     return () => {
       socket.removeAllListeners();
@@ -84,5 +99,10 @@ export function useAriaSocket() {
     socketRef.current?.emit('unsubscribe', { room });
   }, []);
 
-  return { connected, lastEvent, subscribe, unsubscribe };
+  const onEvent = useCallback((listener: (event: AriaSocketEvent) => void) => {
+    listeners.current.add(listener);
+    return () => { listeners.current.delete(listener); };
+  }, []);
+
+  return { connected, lastEvent, subscribe, unsubscribe, onEvent };
 }

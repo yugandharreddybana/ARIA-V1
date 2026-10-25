@@ -33,5 +33,29 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     );
   }
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
+}
+
+export async function downloadApi(path: string, filename: string): Promise<void> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('aria_token') : null;
+  const res = await fetch(`${BASE_URL}/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Request failed' }));
+    throw new ApiError(body.error ?? body.message ?? 'Request failed', res.status, body.details ?? []);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  // ponytail: revoke after the browser has started the download. Immediate revoke drops the file.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
