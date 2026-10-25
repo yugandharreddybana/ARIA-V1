@@ -7,15 +7,16 @@ test.describe('Sprint 3 — Analysis & Dashboard', () => {
     await login(page);
   });
 
-  test('S3-01: Dashboard overview loads with stat cards', async ({ page }) => {
-    await page.goto('/dashboard');
-    await expect(page.getByTestId('dashboard-greeting')).toBeVisible();
-    await expect(page.locator('main').getByText(/projects|your workspace is empty/i).first()).toBeVisible();
+  test('S3-01: Projects home loads', async ({ page }) => {
+    await page.goto('/projects');
+    await expect(page.getByRole('heading', { name: /^projects$/i })).toBeVisible();
+    await expect(page.locator('main').getByText(/no projects yet|repositories/i).first()).toBeVisible();
   });
 
-  test('S3-02: Activity feed section renders', async ({ page }) => {
-    await page.goto('/dashboard');
-    await expect(page.locator('main').getByText(/recent analysis|your workspace is empty/i).first()).toBeVisible();
+  test('S3-02: Runs page shows activity', async ({ page }) => {
+    await page.goto('/runs');
+    await expect(page.getByRole('heading', { name: /^runs$/i })).toBeVisible();
+    await expect(page.getByText(/no agent runs yet|no sessions/i).first()).toBeVisible();
   });
 
   test('S3-03: Concept graph page loads with ReactFlow canvas', async ({ page }) => {

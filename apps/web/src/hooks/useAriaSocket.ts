@@ -19,7 +19,9 @@ export type AriaSocketEvent =
   | { type: 'agent.status'; agentId: string; status: 'idle' | 'working' | 'blocked' }
   | { type: 'token.warn'; sessionId: string; projected: number; warnLimit: number }
   | { type: 'token.hard_stop'; sessionId: string; projected: number; hardLimit: number }
-  | { type: 'queue.depth'; data: { totalQueueDepth: number; acceptingRequests: boolean } };
+  | { type: 'queue.depth'; data: { totalQueueDepth: number; acceptingRequests: boolean } }
+  | { type: 'ticket:created'; ticket: Record<string, unknown> }
+  | { type: 'ticket:updated'; ticket: Record<string, unknown> };
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
 
@@ -56,6 +58,8 @@ export function useAriaSocket() {
     socket.on('token.warn',     fan('token.warn'));
     socket.on('token.hard_stop', fan('token.hard_stop'));
     socket.on('queue.depth',    fan('queue.depth'));
+    socket.on('ticket:created', fan('ticket:created'));
+    socket.on('ticket:updated', fan('ticket:updated'));
 
     return () => {
       socket.removeAllListeners();
@@ -65,10 +69,18 @@ export function useAriaSocket() {
   }, []);
 
   const subscribe = useCallback((room: string) => {
+    if (room.startsWith('project:')) {
+      socketRef.current?.emit('join:project', { projectId: room.slice('project:'.length) });
+      return;
+    }
     socketRef.current?.emit('subscribe', { room });
   }, []);
 
   const unsubscribe = useCallback((room: string) => {
+    if (room.startsWith('project:')) {
+      socketRef.current?.emit('leave:project', { projectId: room.slice('project:'.length) });
+      return;
+    }
     socketRef.current?.emit('unsubscribe', { room });
   }, []);
 

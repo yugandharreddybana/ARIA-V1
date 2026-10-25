@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/ui/page-header';
+import { ErrorNote, LoadingState } from '@/components/ui/empty-state';
 import { Loader2, AlertTriangle, Activity, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -52,17 +54,18 @@ export default function SystemHealthPage() {
 
   return (
     <div className="mx-auto max-w-5xl p-6 space-y-4" data-testid="system-health-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">System Health</h1>
-          <p className="text-sm text-muted-foreground">Live Token Gateway queue + recent incidents + SLO status.</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={loading} data-testid="refresh">
-          <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </Button>
-      </div>
+      <PageHeader
+        title="System health"
+        description="Token gateway queue and recent incidents."
+        action={(
+          <Button variant="outline" size="sm" onClick={refresh} disabled={loading} data-testid="refresh">
+            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </Button>
+        )}
+      />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {loading && <LoadingState label="Checking the gateway…" />}
+      {error && <ErrorNote>{error}</ErrorNote>}
 
       <Card data-testid="queue-card">
         <CardHeader>

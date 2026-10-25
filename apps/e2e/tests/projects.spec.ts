@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginAsTestUser, createProject, deleteProject } from './helpers/auth';
+import { loginAsTestUser, createProject, signup } from './helpers/auth';
 
 test.describe('Projects', () => {
   test.beforeEach(async ({ page }) => {
@@ -7,24 +7,26 @@ test.describe('Projects', () => {
   });
 
   test('shows empty state when no projects exist', async ({ page }) => {
+    await signup(page);
     await page.goto('/projects');
     await expect(page.getByText('No projects yet')).toBeVisible();
   });
 
   test('creates a new project', async ({ page }) => {
+    const projectName = `E2E Test Project ${Date.now()}`;
     await page.goto('/projects');
     await page.getByRole('button', { name: /new project/i }).click();
-    await page.getByLabel('Name').fill('E2E Test Project');
+    await page.getByLabel('Name').fill(projectName);
     await page.getByLabel(/description/i).fill('Created by E2E test');
     await page.getByRole('button', { name: /create/i }).last().click();
-    await expect(page.getByText('E2E Test Project')).toBeVisible();
+    await expect(page.getByText(projectName)).toBeVisible();
   });
 
   test('navigates to project detail', async ({ page }) => {
     const projectName = `E2E Project ${Date.now()}`;
     await createProject(page, projectName);
     await page.getByText(projectName).click();
-    await expect(page.getByText('Connected Repositories')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Connected repositories' })).toBeVisible();
     await expect(page.getByRole('button', { name: /connect repo/i })).toBeVisible();
   });
 
@@ -36,7 +38,7 @@ test.describe('Projects', () => {
     await page.getByLabel(/repository url/i).fill('https://github.com/yugandharreddybana/ARIA-V1');
     await page.getByLabel(/branch/i).fill('main');
     await page.getByRole('button', { name: /^connect$/i }).click();
-    await expect(page.getByText('ARIA-V1')).toBeVisible();
+    await expect(page.getByText('ARIA-V1', { exact: true }).first()).toBeVisible();
   });
 
   test('shows error for invalid repo URL', async ({ page }) => {

@@ -66,7 +66,20 @@ Opus review items 1–23 and the re-review (8 remaining must-fixes, near-blockin
 - Screenshot capture is a prompt requirement plus a stub PNG. Middleware does not run Playwright. `ARIA_QA_BROWSER` stays false. The visual-regression suite stays M3.
 - `smoke:cursor` has not been run against a real key. No scratch-repo ticket has gone through a live develop → owner merge. The SDK import is wired; CI still uses the stub.
 
-Non-goals that stay M3 or later: standup ceremony, merge-order coordinator, red/blue execution, ideas and proposals, the learning agent, the visual-regression suite, LLM security review, worker sub-agents, multi-tenant, GitHub webhooks. Frontend F1–F5, including the timeline UI, wait for the UI PR.
+Non-goals that stay M3 or later: standup ceremony, merge-order coordinator, red/blue execution, ideas and proposals, the learning agent, the visual-regression suite, LLM security review, worker sub-agents, multi-tenant, GitHub webhooks. Frontend F1–F5, including the timeline UI, are still not in this PR. The simplified web shell from PR #8 is on main.
+
+## UI simplification (merged, PR #8)
+
+Branch: `cursor/simplify-web-ui-d456`, merged to main. UI in `apps/web`, plus the Playwright suite. Middleware only forwards the bearer token to the concept graph and proxies orchestrator session create. No schema changes.
+
+- Light theme by default, optional dark mode (`aria-theme` on `<html>`), one accent, system font, shared primitives (Button, Input, Card, Badge, Dialog, EmptyState, PageHeader, Table).
+- Sidebar is Projects, Company, Board, Runs, Settings. `/dashboard` redirects to `/projects`. `/sessions` redirects to `/runs`. `/board` renders the ticket board. Signup goes to `/setup`.
+- Setup is one stepper (project, model, GitHub, knowledge, company). The org chart uses custom nodes (name, role, ON/OFF) and a side panel. `components/runs/agent-runs.tsx` is an empty Queue slot for Milestone 2.
+- A project page still opens when the Java analysis service is down. The jobs section shows that error.
+- Dialogs are positioned with `dvw`/`dvh` so the panel stays inside the visible viewport on mobile.
+- No Playwright spec was deleted. `dashboard.spec.ts` now checks that `/dashboard` opens the projects home (the stat-card dashboard is gone). `apps/e2e/src/agent-kanban.spec.ts` moved to `apps/e2e/tests/agent-kanban.spec.ts` because the board still exists. Sprint 5+ specs were updated for the new labels, the orchestrator create proxy, and graph coverage 404s.
+- Concept graph screenshots were retaken with the Java backend up (Docker Compose, host network, existing Postgres). The map is empty (0 concept nodes). The knowledge map shows the Demo Shop flows.
+- Verified on that branch: `pnpm -F @aria/web exec tsc --noEmit`, `pnpm -F @aria/web lint`, `pnpm -F @aria/middleware exec tsc --noEmit`, anti-slop 10/10. Full Playwright suite (`--workers=1 --retries=0`): **510 passed** (170 on chromium-desktop, 170 on chromium-tablet, 170 on chromium-mobile) in 7.4m.
 
 ## Milestone 1 — foundation (merged, PR #5)
 

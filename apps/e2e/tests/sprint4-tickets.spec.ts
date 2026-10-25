@@ -7,7 +7,7 @@ test.describe('Sprint 4 — Tickets Kanban', () => {
 
   test('S4-T01: tickets page loads with heading', async ({ page }) => {
     await page.goto('/tickets');
-    await expect(page.getByRole('heading', { name: /tickets/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /board/i })).toBeVisible();
   });
 
   test('S4-T02: all 8 kanban columns render', async ({ page }) => {

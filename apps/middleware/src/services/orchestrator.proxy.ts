@@ -37,6 +37,7 @@ async function pass<T>(method: string, path: string, userToken: string, body?: u
 }
 
 export const orchestratorProxy = {
+  create: (body: unknown, token: string) => pass<OrchestratorSession>('POST', '/api/orchestrator/sessions', token, body),
   start:  (sid: string, token: string) => pass<OrchestratorSession>('POST', `/api/orchestrator/sessions/${sid}/start`, token),
   pause:  (sid: string, token: string) => pass<OrchestratorSession>('POST', `/api/orchestrator/sessions/${sid}/pause`, token),
   stop:   (sid: string, token: string) => pass<OrchestratorSession>('POST', `/api/orchestrator/sessions/${sid}/stop`, token),
