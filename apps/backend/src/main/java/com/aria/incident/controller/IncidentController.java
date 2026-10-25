@@ -2,9 +2,11 @@ package com.aria.incident.controller;
 
 import com.aria.incident.dto.DeclareIncidentRequest;
 import com.aria.incident.model.Incident;
+import com.aria.incident.repository.IncidentRepository;
 import com.aria.incident.service.IncidentCommanderService;
 import com.aria.incident.service.IncidentResponder;
 import com.aria.security.AriaAuthentication;
+import com.aria.security.ProjectAccess;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +33,8 @@ public class IncidentController {
 
     private final IncidentCommanderService commander;
     private final IncidentResponder responder;
+    private final IncidentRepository incidents;
+    private final ProjectAccess access;
 
     public record DeclareWithProject(
             @Valid DeclareIncidentRequest body,
@@ -38,10 +42,15 @@ public class IncidentController {
     ) {}
 
     @PostMapping
-    public ResponseEntity<Map<String, Object>> declare(@Valid @RequestBody DeclareIncidentRequest req) {
+    public ResponseEntity<Map<String, Object>> declare(
+            @Valid @RequestBody DeclareIncidentRequest req,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal AriaAuthentication auth) {
+        String workspaceId = ProjectAccess.require(auth).workspaceId();
         Incident inc = commander.declare(
                 req.source(), req.severity(), req.title(), req.description(),
                 req.relatedSessionId(), req.relatedCommits());
+        access.stampUuid("incidents", inc.getId().toString(), workspaceId);
+        inc.setWorkspaceId(UUID.fromString(workspaceId));
 
         UUID actor = currentUserIdOrNull();
         IncidentResponder.EscalationResult esc = responder.escalate(inc, null, actor);
@@ -53,12 +62,19 @@ public class IncidentController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Incident>> list() {
-        return ResponseEntity.ok(commander.recent());
+    public ResponseEntity<List<Incident>> list(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal AriaAuthentication auth) {
+        return ResponseEntity.ok(incidents.findTop20ByWorkspaceIdOrderByDetectedAtDesc(
+                UUID.fromString(ProjectAccess.require(auth).workspaceId())));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Incident> get(@PathVariable UUID id) {
+    public ResponseEntity<Incident> get(
+            @PathVariable UUID id,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal AriaAuthentication auth) {
+        if (!access.owns("incidents", id.toString(), ProjectAccess.require(auth).workspaceId())) {
+            return ResponseEntity.notFound().build();
+        }
         Incident inc = commander.getById(id);
         return inc == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(inc);
     }
@@ -66,7 +82,13 @@ public class IncidentController {
     public record TransitionRequest(String to) {}
 
     @PostMapping("/{id}/transition")
-    public ResponseEntity<?> transition(@PathVariable UUID id, @RequestBody TransitionRequest req) {
+    public ResponseEntity<?> transition(
+            @PathVariable UUID id,
+            @RequestBody TransitionRequest req,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal AriaAuthentication auth) {
+        if (!access.owns("incidents", id.toString(), ProjectAccess.require(auth).workspaceId())) {
+            return ResponseEntity.notFound().build();
+        }
         try {
             return ResponseEntity.ok(commander.transition(id, req.to()));
         } catch (IllegalStateException e) {
@@ -75,7 +97,13 @@ public class IncidentController {
     }
 
     @PostMapping("/{id}/escalate")
-    public ResponseEntity<?> escalate(@PathVariable UUID id, @RequestParam(required = false) UUID projectId) {
+    public ResponseEntity<?> escalate(
+            @PathVariable UUID id,
+            @RequestParam(required = false) UUID projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal AriaAuthentication auth) {
+        if (!access.owns("incidents", id.toString(), ProjectAccess.require(auth).workspaceId())) {
+            return ResponseEntity.notFound().build();
+        }
         Incident inc = commander.getById(id);
         if (inc == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(responder.escalate(inc, projectId, currentUserIdOrNull()));

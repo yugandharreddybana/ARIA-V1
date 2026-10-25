@@ -33,7 +33,12 @@ export async function archiveProject(id: string, workspaceId: string) {
 
 export async function connectRepo(projectId: string, workspaceId: string, repoUrl: string, branch = 'main') {
   await getProject(projectId, workspaceId);
-  const repoName = repoUrl.split('/').pop()?.replace(/\.git$/, '') ?? repoUrl;
-  const [repo] = await db.insert(projectRepos).values({ id: randomUUID(), projectId, repoUrl: repoUrl.trim(), repoName, branch }).returning();
+  const normalized = repoUrl.trim();
+  const existing = await db.query.projectRepos.findFirst({
+    where: and(eq(projectRepos.projectId, projectId), eq(projectRepos.repoUrl, normalized)),
+  });
+  if (existing) return existing;
+  const repoName = normalized.split('/').pop()?.replace(/\.git$/, '') ?? normalized;
+  const [repo] = await db.insert(projectRepos).values({ id: randomUUID(), projectId, repoUrl: normalized, repoName, branch }).returning();
   return repo;
 }

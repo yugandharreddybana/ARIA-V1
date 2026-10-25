@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface FleetCircuitBreakerRepository extends JpaRepository<FleetCircuitBreaker, UUID> {
     List<FleetCircuitBreaker> findByClearedAtIsNull();
+    List<FleetCircuitBreaker> findByWorkspaceIdAndClearedAtIsNull(UUID workspaceId);
 }

@@ -101,7 +101,7 @@ export default function AIStrategyPage() {
             <p className="font-medium">Ask ARIA anything</p>
             <div className="flex flex-col gap-2 items-center">
               {['Help me plan the next sprint', 'What are the riskiest parts of the codebase?', 'Suggest features based on current tickets'].map(s => (
-                <button key={s} onClick={() => { setInput(s); inputRef.current?.focus(); }}
+                <button key={s} data-testid="suggestion-chip" onClick={() => { setInput(s); inputRef.current?.focus(); }}
                   className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-aria-500/40 rounded-lg px-4 py-2 transition-colors">
                   {s}
                 </button>

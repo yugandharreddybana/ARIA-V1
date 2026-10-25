@@ -9,12 +9,13 @@ test.describe('Sprint 3 — Analysis & Dashboard', () => {
 
   test('S3-01: Dashboard overview loads with stat cards', async ({ page }) => {
     await page.goto('/dashboard');
-    await expect(page.getByRole('heading', { name: /dashboard/i })).toBeVisible();
+    await expect(page.getByTestId('dashboard-greeting')).toBeVisible();
+    await expect(page.locator('main').getByText(/projects|your workspace is empty/i).first()).toBeVisible();
   });
 
   test('S3-02: Activity feed section renders', async ({ page }) => {
     await page.goto('/dashboard');
-    await expect(page.locator('text=Activity, text=Recent').first()).toBeVisible();
+    await expect(page.locator('main').getByText(/recent analysis|your workspace is empty/i).first()).toBeVisible();
   });
 
   test('S3-03: Concept graph page loads with ReactFlow canvas', async ({ page }) => {

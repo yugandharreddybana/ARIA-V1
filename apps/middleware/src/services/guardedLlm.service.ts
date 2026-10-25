@@ -1,7 +1,7 @@
 /**
  * Every model completion in the setup path goes through the sanitizer and a
- * token-budget queue. The ledger is in-memory because setup has no orchestrator
- * session row (token_ledger.session_id is a NOT NULL foreign key).
+ * token-budget queue. The process-wide gateway persists totals on token_ledger,
+ * using the workspace id as the budget bucket.
  * An agent with enabled=false is refused before any tokens are reserved.
  */
 
@@ -11,14 +11,9 @@ import { db, projects, skills, workspaces } from '@aria/db';
 import { AppError } from '../middleware/error.middleware';
 import { decryptSecret } from './crypto.service';
 import { Sanitizer } from './sanitizer.service';
-import { TokenGateway, type Backend } from './tokenGateway.service';
-import { InMemoryReplayFrameRepository, InMemoryTokenLedgerRepository } from './ledger.repository';
-import {
-  completeChat,
-  type ChatMessage,
-  type LlmEndpoint,
-  type LlmProviderId,
-} from './llmProvider.service';
+import { getTokenGateway } from './tokenGateway.factory';
+import { bindLlmCall, takeLlmCall } from './llmDispatchContext';
+import { mockModeEnabled, type ChatMessage, type LlmEndpoint, type LlmProviderId } from './llmProvider.service';
 import { resolveModelRoute, taskTierMap, tierModelMap, type TaskType } from './modelTiers';
 
 const sanitizer = new Sanitizer();
@@ -58,45 +53,26 @@ export async function completeThroughGateway(input: {
     workspaceModel: input.config.model,
     projectTaskTiers: policy.projectTaskTiers,
     projectTierModels: policy.projectTierModels,
+    workspaceTierModels: policy.workspaceTierModels,
     agentTaskTiers: policy.agentTaskTiers,
     agentModelOverride: policy.agentModelOverride,
   });
+  const tierKey = route.tier === 'top' || route.tier === 'auto' ? route.tier : null;
+  const storedModel = tierKey ? policy.projectTierModels[tierKey] || policy.workspaceTierModels[tierKey] : null;
+  if (!mockModeEnabled() && route.source !== 'agent_model' && !storedModel) {
+    throw new AppError('Test Connection has not stored a model id for this tier', 422, 'MODEL_NOT_VALIDATED');
+  }
   const routed: LlmEndpoint = { ...input.config, model: route.modelId };
-  const backend: Backend = {
-    backendId: `setup-${input.config.provider}`,
-    type: 'remote',
-    modelId: route.modelId,
-    tier: 'team',
-    requestsPerMinuteLimit: 30,
-    tokensPerMinuteLimit: 40_000,
-    tokensPerDayLimit: 200_000,
-  };
-  const gateway = new TokenGateway({
-    backends: [backend],
-    replay: new InMemoryReplayFrameRepository(),
-    ledger: new InMemoryTokenLedgerRepository(),
-    dispatcher: {
-      async dispatch(req) {
-        const responseText = await completeChat(routed, req.messages);
-        return {
-          responseText,
-          responseTokens: Math.max(1, Math.ceil(responseText.length / 4)),
-          promptTokensActual: req.promptTokensEstimated,
-        };
-      },
-    },
-    maxQueueDepth: 20,
-    maxSessionTokenBudget: 50_000,
-    warnRatio: 0.8,
-    hardRatio: 0.95,
-  });
+  const requestId = randomUUID();
+  bindLlmCall(requestId, { config: routed, messages });
+  const gateway = getTokenGateway();
   try {
     const response = await gateway.invoke({
-      requestId: randomUUID(),
+      requestId,
       sessionId: input.workspaceId,
       agentId: input.agentId,
       skillSlug: input.skillSlug,
-      targetBackend: backend.backendId,
+      targetBackend: 'workspace-llm',
       priority: route.taskClass === 'planning' ? 'high' : 'normal',
       promptTokensEstimated: Math.max(1, Math.ceil(JSON.stringify(messages).length / 4)),
       messages,
@@ -109,6 +85,7 @@ export async function completeThroughGateway(input: {
     });
     return response.responseText;
   } catch (err) {
+    takeLlmCall(requestId);
     const message = err instanceof Error ? err.message : '';
     if (message.includes('no chat-completions')) {
       throw new AppError(
@@ -124,15 +101,18 @@ export async function completeThroughGateway(input: {
 async function loadTierPolicy(workspaceId: string, projectId: string | undefined, agentId: string): Promise<{
   projectTaskTiers: ReturnType<typeof taskTierMap>;
   projectTierModels: ReturnType<typeof tierModelMap>;
+  workspaceTierModels: ReturnType<typeof tierModelMap>;
   agentTaskTiers: ReturnType<typeof taskTierMap>;
   agentModelOverride: string | null;
 }> {
+  const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
+  const workspaceTierModels = tierModelMap(workspace?.llmTierModels);
   let resolvedProjectId = projectId;
   let agentTaskTiers: ReturnType<typeof taskTierMap> = {};
   let agentModelOverride: string | null = null;
   if (UUID_RE.test(agentId)) {
     const skill = await db.query.skills.findFirst({ where: eq(skills.id, agentId) });
-    if (skill) {
+    if (skill?.projectId) {
       const owned = await db.query.projects.findFirst({
         where: and(eq(projects.id, skill.projectId), eq(projects.workspaceId, workspaceId)),
       });
@@ -144,7 +124,7 @@ async function loadTierPolicy(workspaceId: string, projectId: string | undefined
     }
   }
   if (!resolvedProjectId) {
-    return { projectTaskTiers: {}, projectTierModels: {}, agentTaskTiers, agentModelOverride };
+    return { projectTaskTiers: {}, projectTierModels: {}, workspaceTierModels, agentTaskTiers, agentModelOverride };
   }
   const project = await db.query.projects.findFirst({
     where: and(eq(projects.id, resolvedProjectId), eq(projects.workspaceId, workspaceId)),
@@ -152,6 +132,7 @@ async function loadTierPolicy(workspaceId: string, projectId: string | undefined
   return {
     projectTaskTiers: taskTierMap(project?.modelTaskTiers),
     projectTierModels: tierModelMap(project?.modelTierModels),
+    workspaceTierModels,
     agentTaskTiers,
     agentModelOverride,
   };
@@ -178,10 +159,12 @@ export async function loadWorkspaceLlm(workspaceId: string): Promise<LlmEndpoint
   const row = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
   if (!row?.llmProvider || !row.llmModel) return null;
   return {
-    provider: row.llmProvider,
+    provider: providerId(row.llmProvider),
     baseUrl: row.llmBaseUrl,
     model: row.llmModel,
-    apiKey: row.llmApiKeyEncrypted ? decryptSecret(row.llmApiKeyEncrypted) : null,
+    apiKey: row.llmApiKeyEncrypted
+      ? decryptSecret(row.llmApiKeyEncrypted, { workspaceId, column: 'llm_api_key_encrypted' })
+      : null,
   };
 }
 
@@ -190,7 +173,7 @@ export async function workspaceOwnsAgent(agentId: string, workspaceId: string): 
     where: eq(skills.id, agentId),
     with: { project: true },
   });
-  if (!row?.project) return false;
+  if (!row?.project || !row.projectId) return false;
   const project = await db.query.projects.findFirst({
     where: and(eq(projects.id, row.projectId), eq(projects.workspaceId, workspaceId)),
   });

@@ -1,14 +1,9 @@
 import {
   pgTable, uuid, varchar, text, integer, boolean,
-  timestamp, pgEnum, index, jsonb,
+  timestamp, index, jsonb,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { projects } from './projects';
-
-export const riskClassEnum      = pgEnum('risk_class',       ['A', 'B', 'C', 'D']);
-export const skillStatusEnum    = pgEnum('skill_status',     ['active', 'future', 'inactive', 'quarantined']);
-export const idleModeEnum       = pgEnum('idle_mode',        ['learning', 'creative', 'reflection', 'off']);
-export const teamMemberRoleEnum = pgEnum('team_member_role', ['lead', 'member', 'scrum_master', 'observer']);
 
 // ── Teams ──────────────────────────────────────────────────────────────────
 export const teams = pgTable('teams', {
@@ -24,7 +19,7 @@ export const teams = pgTable('teams', {
 // ── Skills (agents) ────────────────────────────────────────────────────────
 export const skills = pgTable('skills', {
   id:        uuid('id').primaryKey().defaultRandom(),
-  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
   teamId:    uuid('team_id').references(() => teams.id),
 
   // ── Org hierarchy ──────────────────────────────────────────────────────
@@ -47,9 +42,9 @@ export const skills = pgTable('skills', {
   modelOverride: text('model_override'),
 
   // ── Risk & lifecycle ───────────────────────────────────────────────────
-  riskClass: riskClassEnum('risk_class').notNull().default('B'),
-  status:    skillStatusEnum('status').notNull().default('active'),
-  idleMode:  idleModeEnum('idle_mode').notNull().default('learning'),
+  riskClass: text('risk_class').notNull().default('B'),
+  status:    text('status').notNull().default('active'),
+  idleMode:  text('idle_mode').notNull().default('learning'),
 
   // ── Domains & routing ──────────────────────────────────────────────────
   ownedDomains:    jsonb('owned_domains').notNull().default([]),
@@ -73,7 +68,7 @@ export const teamMembers = pgTable('team_members', {
   id:        uuid('id').primaryKey().defaultRandom(),
   teamId:    uuid('team_id').notNull().references(() => teams.id,   { onDelete: 'cascade' }),
   skillId:   uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
-  role:      teamMemberRoleEnum('role').notNull().default('member'),
+  role:      text('role').notNull().default('member'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({ teamIdx: index('team_members_team_idx').on(t.teamId) }));
 

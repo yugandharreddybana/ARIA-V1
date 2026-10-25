@@ -92,7 +92,7 @@ export async function handleGithubCallback(code: string) {
   });
 
   await db.update(workspaces).set({
-    githubAccessTokenEncrypted: encryptSecret(ghToken),
+    githubAccessTokenEncrypted: encryptSecret(ghToken, { workspaceId: existing.workspaceId, column: 'github_access_token_encrypted' }),
     updatedAt: new Date(),
   }).where(eq(workspaces.id, existing.workspaceId));
 

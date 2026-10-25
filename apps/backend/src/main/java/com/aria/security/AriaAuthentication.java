@@ -22,7 +22,7 @@ public record AriaAuthentication(
     @Override public Collection<? extends GrantedAuthority> getAuthorities() { return List.of(); }
     @Override public Object getCredentials() { return null; }
     @Override public Object getDetails() { return null; }
-    @Override public Object getPrincipal() { return userId; }
+    @Override public Object getPrincipal() { return this; }
     @Override public boolean isAuthenticated() { return true; }
     @Override public void setAuthenticated(boolean isAuthenticated) {}
 }

@@ -1,8 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, pgEnum } from 'drizzle-orm/pg-core';
-
-export const llmProviderEnum = pgEnum('llm_provider', [
-  'cursor', 'gemini', 'groq', 'ollama', 'openai', 'anthropic', 'nvidia', 'custom', 'openai_compatible',
-]);
+import { pgTable, uuid, varchar, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
 
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -29,10 +25,12 @@ export const workspaces = pgTable('workspaces', {
   jiraUserEmail:              varchar('jira_user_email', { length: 255 }),
 
   // ── LLM / model configuration (onboarding Step 2) ────────────────────────
-  llmProvider:                llmProviderEnum('llm_provider').default('cursor'),
+  llmProvider:                text('llm_provider').default('cursor'),
   llmBaseUrl:                 varchar('llm_base_url', { length: 500 }),
   llmApiKeyEncrypted:         text('llm_api_key_encrypted'),
   llmModel:                   varchar('llm_model', { length: 200 }),
+  llmTierModels:              jsonb('llm_tier_models').notNull().default({}),
+  llmModelCatalog:            jsonb('llm_model_catalog').notNull().default([]),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

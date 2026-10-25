@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * V27.9 §17.4 — Fleet Commander.
@@ -56,5 +57,11 @@ public class FleetCommanderService {
         return epicId == null
                 ? outcomes.findTop50ByOrderByCreatedAtDesc()
                 : outcomes.findTop100ByEpicIdOrderByCreatedAtDesc(epicId);
+    }
+
+    public List<FleetOutcome> recent(String epicId, UUID workspaceId) {
+        return recent(epicId).stream()
+                .filter(row -> workspaceId.equals(row.getWorkspaceId()))
+                .toList();
     }
 }

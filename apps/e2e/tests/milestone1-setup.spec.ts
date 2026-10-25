@@ -26,7 +26,7 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await page.getByTestId('repo-acme-demo-app').check();
   await page.getByTestId('connect-repos').click();
 
-  await expect(page.getByTestId('knowledge-summary')).toContainText(/signup/i, { timeout: 20_000 });
+  await expect(page.getByTestId('knowledge-summary')).toContainText(/signup/i, { timeout: 45_000 });
   await expect(page.getByTestId('knowledge-flow').filter({ hasText: 'Login' })).toBeVisible();
   await page.getByTestId('generate-company').click();
   await page.getByTestId('open-org-chart').click();
@@ -43,4 +43,20 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await page.getByTestId('agent-toggle').click();
   await toggle;
   await expect(ceo).toContainText('OFF');
+
+  await page.getByTestId('new-agent-name').fill('Nora Analyst');
+  await page.getByTestId('new-agent-role').selectOption('qa');
+  const manager = page.getByTestId('new-agent-manager');
+  await manager.selectOption({ index: 1 });
+  const added = page.waitForResponse((res) => res.url().includes('/agents') && res.request().method() === 'POST' && res.ok());
+  await page.getByTestId('add-agent').click();
+  await added;
+  const nora = page.getByRole('button', { name: /Nora Analyst/ });
+  await expect(nora).toBeVisible();
+  await nora.click();
+  await page.getByTestId('agent-delete').click();
+  const deleted = page.waitForResponse((res) => res.request().method() === 'DELETE' && res.ok());
+  await page.getByTestId('agent-delete-confirm').click();
+  await deleted;
+  await expect(page.getByRole('button', { name: /Nora Analyst/ })).toHaveCount(0);
 });

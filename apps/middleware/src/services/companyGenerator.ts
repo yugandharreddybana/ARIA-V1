@@ -255,18 +255,23 @@ function assignFlows(agents: GeneratedAgent[], flows: FlowRef[]): Map<string, { 
   return owners;
 }
 
+const ALWAYS_PRESENT: RoleKey[] = ['documentation', 'pr_coordinator'];
+
 export function generateCompany(input: GenerateCompanyInput): { agents: GeneratedAgent[]; flowOwners: Map<string, { owner: string; backup: string | null }> } {
   if (!Number.isInteger(input.size) || input.size < 3 || input.size > 40) {
     throw new Error('Company size must be an integer from 3 to 40');
   }
   const leaders = leadershipFor(input.size);
   const specialists = scaleMix(input.mix, input.size - leaders.length);
+  const seated = [...leaders, ...specialists];
+  const overflow = ALWAYS_PRESENT.filter((role) => !seated.includes(role));
   const roleCounts = new Map<RoleKey, number>();
-  const seats = [...leaders, ...specialists].map((roleKey) => {
+  const seats = [...seated, ...overflow].map((roleKey) => {
     const index = roleCounts.get(roleKey) ?? 0;
     roleCounts.set(roleKey, index + 1);
     return seatFor(roleKey, index);
   });
+  const enabledByIndex = [...seated.map(() => true), ...overflow.map(() => false)];
 
   // QA reports to the scrum master when one exists, otherwise the CTO or CEO.
   const present = new Set(seats.map((seat) => seat.roleKey));
@@ -294,7 +299,7 @@ export function generateCompany(input: GenerateCompanyInput): { agents: Generate
       description: `${seat.roleTitle.trim()} for this repository.`,
       skills: seat.skills,
       ownedFlowIds: [],
-      enabled: true,
+      enabled: enabledByIndex[index] !== false,
     };
   });
 

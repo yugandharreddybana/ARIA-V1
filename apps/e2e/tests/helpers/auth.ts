@@ -9,7 +9,38 @@ export const TEST_NAME     = process.env.E2E_NAME     ?? 'E2E Tester';
  * Log in via the UI and wait until the dashboard or projects page is reached.
  * Re-used by every spec that requires an authenticated session.
  */
+let seeded: Promise<void> | null = null;
+
+async function ensureTestUser(): Promise<void> {
+  if (!seeded) {
+    seeded = (async () => {
+      const base = process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://127.0.0.1:3001';
+      const res = await fetch(`${base}/api/auth/signup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: TEST_NAME, email: TEST_EMAIL, password: TEST_PASSWORD }),
+      });
+      if (res.status !== 201 && res.status !== 409) {
+        throw new Error(`Could not seed ${TEST_EMAIL}: HTTP ${res.status}`);
+      }
+    })();
+  }
+  await seeded;
+}
+
+export async function revealNav(page: Page): Promise<void> {
+  const dashboard = page.locator('aside').getByRole('link', { name: /^dashboard$/i });
+  try {
+    await dashboard.waitFor({ state: 'visible', timeout: 3_000 });
+    return;
+  } catch {
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await dashboard.waitFor({ state: 'visible' });
+  }
+}
+
 export async function login(page: Page): Promise<void> {
+  await ensureTestUser();
   await page.goto('/login');
   await page.waitForSelector('[name="email"]', { timeout: 10_000 });
   await page.fill('[name="email"]', TEST_EMAIL);

@@ -26,14 +26,19 @@ public class ShadowBranchService {
 
     @Transactional
     public String open(String ticketRef, String speculativeDiff) {
+        return open(ticketRef, speculativeDiff, null);
+    }
+
+    @Transactional
+    public String open(String ticketRef, String speculativeDiff, UUID workspaceId) {
         String safe = (ticketRef == null ? "unknown" : ticketRef).replaceAll("[^A-Za-z0-9_.-]", "_");
         String branch = "aria-shadow/" + safe;
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO shadow_branches (id, ticket_ref, branch_name, speculative_diff, status) " +
-            "VALUES (?::uuid, ?, ?, ?, 'open') " +
-            "ON CONFLICT (branch_name) DO UPDATE SET speculative_diff = EXCLUDED.speculative_diff",
-            id.toString(), ticketRef, branch, speculativeDiff
+            "INSERT INTO shadow_branches (id, ticket_ref, branch_name, speculative_diff, status, workspace_id) " +
+            "VALUES (?::uuid, ?, ?, ?, 'open', ?::uuid) " +
+            "ON CONFLICT (branch_name) DO UPDATE SET speculative_diff = EXCLUDED.speculative_diff, workspace_id = EXCLUDED.workspace_id",
+            id.toString(), ticketRef, branch, speculativeDiff, workspaceId == null ? null : workspaceId.toString()
         );
         log.info("SHADOW_BRANCH_OPENED ticket={} branch={} id={}", ticketRef, branch, id);
         return branch;

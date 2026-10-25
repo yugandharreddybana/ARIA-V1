@@ -22,6 +22,9 @@ public class AgentRegistration {
     @Column(name = "agent_id", nullable = false, length = 200)
     private String agentId;
 
+    @Column(name = "workspace_id")
+    private java.util.UUID workspaceId;
+
     @Column(name = "agent_family", nullable = false, length = 100)
     private String agentFamily;
 

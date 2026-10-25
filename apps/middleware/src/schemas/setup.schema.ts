@@ -21,10 +21,12 @@ export const githubTokenSchema = z.object({
   token: z.string().trim().min(8).max(500),
 }).strict();
 
+const repoFullName = z.string().trim().regex(/^[\w.-]+\/[\w.-]+$/).refine((value) => !value.includes('..'), 'Repository name cannot contain ..');
+
 export const connectReposSchema = z.object({
   projectId: z.string().uuid(),
   repos: z.array(z.object({
-    fullName: z.string().trim().min(3).max(200),
+    fullName: repoFullName,
     branch: z.string().trim().min(1).max(200).default('main'),
   }).strict()).min(1).max(20),
 }).strict();
@@ -54,6 +56,7 @@ export const companyGenerateSchema = z.object({
     topModel: modelId.optional(),
     autoModel: modelId.optional(),
   }).strict().optional(),
+  force: z.boolean().optional(),
 }).strict();
 
 export const agentPatchSchema = z.object({
@@ -66,6 +69,13 @@ export const agentPatchSchema = z.object({
   planningTier: modelTier.nullable().optional(),
   developmentTier: modelTier.nullable().optional(),
   modelOverride: modelId.nullable().optional(),
+  reportingManagerId: z.string().uuid().nullable().optional(),
+  backupAgentId: z.string().uuid().nullable().optional(),
+}).strict();
+
+export const flowAssignSchema = z.object({
+  ownerAgentId: z.string().uuid().nullable().optional(),
+  backupAgentId: z.string().uuid().nullable().optional(),
 }).strict();
 
 export const agentCreateSchema = z.object({

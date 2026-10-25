@@ -32,7 +32,10 @@ export const businessFlows = pgTable('business_flows', {
   backupAgentId: uuid('backup_agent_id').references(() => skills.id, { onDelete: 'set null' }),
   createdAt: tstz('created_at').notNull().defaultNow(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
-}, (t) => ({ projectIdx: index('business_flows_project_idx').on(t.projectId) }));
+}, (t) => ({
+  projectIdx: index('business_flows_project_idx').on(t.projectId),
+  flowKeyIdx: uniqueIndex('business_flows_project_flow_key').on(t.projectId, t.flowKey),
+}));
 
 export const knowledgeMapsRelations = relations(knowledgeMaps, ({ one, many }) => ({
   project: one(projects, { fields: [knowledgeMaps.projectId], references: [projects.id] }),

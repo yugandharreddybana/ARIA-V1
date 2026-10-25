@@ -15,8 +15,9 @@ const app = createApp(env);
 const server = http.createServer(app);
 const io = createWsServer(server);
 
-server.listen(PORT, '0.0.0.0', () => {
-  logger.info(`ARIA Middleware listening on 0.0.0.0:${PORT}`);
+const host = env.HOST;
+server.listen(PORT, host, () => {
+  logger.info(`ARIA Middleware listening on ${host}:${PORT}`);
   logger.info(`WebSocket path: /ws`);
   logger.info(`Environment: ${env.NODE_ENV}`);
 });

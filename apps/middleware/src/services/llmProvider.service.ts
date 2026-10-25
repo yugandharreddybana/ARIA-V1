@@ -5,6 +5,8 @@
  * guardedLlm.service.ts sends through the token gateway.
  */
 
+import { defaultTierModels, selectTierModels, type CatalogEntry, type TierModels } from './modelTiers';
+
 export const LLM_PROVIDERS = [
   'cursor', 'gemini', 'groq', 'ollama', 'openai', 'anthropic', 'nvidia', 'custom', 'openai_compatible',
 ] as const;
@@ -22,6 +24,9 @@ export interface ConnectionResult {
   ok: boolean;
   message: string;
   latencyMs?: number;
+  topModel?: string;
+  autoModel?: string;
+  models?: string[];
 }
 
 export class CursorNoChatError extends Error {
@@ -36,12 +41,16 @@ export function providerSupportsChat(provider: LlmProviderId): boolean {
   return provider !== 'cursor';
 }
 
-function isMock(apiKey?: string | null): boolean {
-  return process.env.ARIA_LLM_MODE === 'mock' || apiKey === 'aria-mock-key';
+export function mockModeEnabled(): boolean {
+  return process.env.ARIA_LLM_MODE === 'mock' && process.env.NODE_ENV !== 'production';
 }
 
-function cursorBase(baseUrl?: string | null): string {
-  return (baseUrl || process.env.CURSOR_API_BASE || 'https://api.cursor.com').replace(/\/$/, '');
+function envBase(name: string, fallback: string): string {
+  return (process.env[name] || fallback).replace(/\/$/, '');
+}
+
+function cursorBase(): string {
+  return envBase('CURSOR_API_BASE', 'https://api.cursor.com');
 }
 
 async function fetchStatus(url: string, headers: Record<string, string>, timeoutMs: number): Promise<number> {
@@ -51,21 +60,51 @@ async function fetchStatus(url: string, headers: Record<string, string>, timeout
 
 export async function testProviderConnection(config: LlmEndpoint): Promise<ConnectionResult> {
   const started = Date.now();
-  if (isMock(config.apiKey)) {
+  if (mockModeEnabled()) {
     if (config.provider !== 'ollama' && config.provider !== 'custom' && !config.apiKey) {
       return { ok: false, message: 'API key is required' };
     }
-    return { ok: true, message: `Mock connection succeeded for ${config.provider}`, latencyMs: Date.now() - started };
+    const tiers = selectTierModels(config.provider, mockCatalog(config), config.model);
+    return {
+      ok: true,
+      message: `Mock connection succeeded for ${config.provider}`,
+      latencyMs: Date.now() - started,
+      topModel: tiers.top,
+      autoModel: tiers.auto,
+      models: [tiers.top, tiers.auto],
+    };
   }
   try {
-    const status = await probe(config);
+    const probed = await probe(config);
     const latencyMs = Date.now() - started;
-    if (status === 401 || status === 403) return { ok: false, message: 'Credentials were rejected', latencyMs };
-    if (status < 200 || status >= 300) return { ok: false, message: `Provider returned HTTP ${status}`, latencyMs };
-    if (config.provider === 'cursor') {
-      return { ok: true, message: 'Cursor API key verified via GET /v1/me. This key cannot run chat completions.', latencyMs };
+    if (probed.status === 401 || probed.status === 403) return { ok: false, message: 'Credentials were rejected', latencyMs };
+    if (probed.status < 200 || probed.status >= 300) return { ok: false, message: `Provider returned HTTP ${probed.status}`, latencyMs };
+    let tiers: TierModels;
+    try {
+      tiers = selectTierModels(config.provider, probed.models, config.model);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Model list could not be resolved';
+      return { ok: false, message, latencyMs };
     }
-    return { ok: true, message: `${config.provider} connection succeeded`, latencyMs };
+    const names = probed.models.map((model) => model.id);
+    if (config.provider === 'cursor') {
+      return {
+        ok: true,
+        message: `Cursor API key verified. Planning model ${tiers.top}. Auto model ${tiers.auto}. This key cannot run chat completions.`,
+        latencyMs,
+        topModel: tiers.top,
+        autoModel: tiers.auto,
+        models: names,
+      };
+    }
+    return {
+      ok: true,
+      message: `${config.provider} connection succeeded. Planning model ${tiers.top}. Standard model ${tiers.auto}.`,
+      latencyMs,
+      topModel: tiers.top,
+      autoModel: tiers.auto,
+      models: names,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Connection failed';
     const safe = config.apiKey ? message.replaceAll(config.apiKey, '[redacted]') : message;
@@ -73,41 +112,76 @@ export async function testProviderConnection(config: LlmEndpoint): Promise<Conne
   }
 }
 
-async function probe(config: LlmEndpoint): Promise<number> {
+function mockCatalog(config: LlmEndpoint): CatalogEntry[] {
+  if (config.provider === 'cursor') {
+    return [{ id: 'claude-opus-5' }, { id: 'auto', aliases: ['auto-smart'] }];
+  }
+  const tiers = defaultTierModels(config.provider, config.model);
+  return [{ id: tiers.top }, { id: tiers.auto }];
+}
+
+interface ProbeResult { status: number; models: CatalogEntry[] }
+
+function modelsFromPayload(payload: unknown): CatalogEntry[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const body = payload as { data?: unknown; models?: unknown; items?: unknown };
+  const rows = Array.isArray(body.items) ? body.items : Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
+  const models: CatalogEntry[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const record = row as { id?: unknown; name?: unknown; aliases?: unknown };
+    const raw = typeof record.id === 'string' ? record.id : typeof record.name === 'string' ? record.name : '';
+    const id = raw.replace(/^models\//, '').trim();
+    if (!id) continue;
+    const aliases = Array.isArray(record.aliases) ? record.aliases.filter((alias): alias is string => typeof alias === 'string') : [];
+    models.push({ id, aliases });
+  }
+  return models;
+}
+
+async function readModels(url: string, headers: Record<string, string>, timeoutMs: number): Promise<ProbeResult> {
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) return { status: res.status, models: [] };
+  return { status: res.status, models: modelsFromPayload(await res.json()) };
+}
+
+async function probe(config: LlmEndpoint): Promise<ProbeResult> {
   const key = config.apiKey ?? '';
   switch (config.provider) {
     case 'cursor': {
-      const base = cursorBase(config.baseUrl);
+      const base = cursorBase();
       const basic = Buffer.from(`${key}:`).toString('base64');
-      const bearer = await fetchStatus(`${base}/v1/me`, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, 8000);
-      if (bearer === 200) return bearer;
-      return fetchStatus(`${base}/v1/me`, { Authorization: `Basic ${basic}`, Accept: 'application/json' }, 8000);
+      let me = await fetchStatus(`${base}/v1/me`, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, 8000);
+      if (me !== 200) {
+        me = await fetchStatus(`${base}/v1/me`, { Authorization: `Basic ${basic}`, Accept: 'application/json' }, 8000);
+      }
+      if (me !== 200) return { status: me, models: [] };
+      const models = await readModels(`${base}/v1/models`, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, 8000);
+      return models.status === 200 ? models : { status: models.status, models: [] };
     }
-    case 'gemini': {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(key)}`;
-      return fetchStatus(url, {}, 8000);
-    }
+    case 'gemini':
+      return readModels(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=${encodeURIComponent(key)}`, {}, 8000);
     case 'groq':
-      return fetchStatus('https://api.groq.com/openai/v1/models', { Authorization: `Bearer ${key}` }, 8000);
+      return readModels('https://api.groq.com/openai/v1/models', { Authorization: `Bearer ${key}` }, 8000);
     case 'ollama': {
-      const base = (config.baseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-      const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) return res.status;
-      const data = await res.json() as { models?: { name: string }[] };
-      const found = data.models?.some((model) => model.name.startsWith(config.model.split(':')[0]));
-      return found ? 200 : 404;
+      const base = (config.baseUrl || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
+      const probed = await readModels(`${base}/api/tags`, {}, 5000);
+      if (probed.status !== 200) return probed;
+      const wanted = config.model.split(':')[0];
+      if (!probed.models.some((model) => model.id.startsWith(wanted))) return { status: 404, models: [] };
+      return probed;
     }
     case 'openai':
-      return fetchStatus(`${(config.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')}/models`, { Authorization: `Bearer ${key}` }, 8000);
+      return readModels(`${envBase('OPENAI_API_BASE', 'https://api.openai.com/v1')}/models`, { Authorization: `Bearer ${key}` }, 8000);
     case 'anthropic':
-      return fetchStatus('https://api.anthropic.com/v1/models', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, 8000);
+      return readModels(`${envBase('ANTHROPIC_API_BASE', 'https://api.anthropic.com')}/v1/models`, { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, 8000);
     case 'nvidia':
-      return fetchStatus(`${(config.baseUrl || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '')}/models`, { Authorization: `Bearer ${key}` }, 8000);
+      return readModels(`${envBase('NVIDIA_API_BASE', 'https://integrate.api.nvidia.com/v1')}/models`, { Authorization: `Bearer ${key}` }, 8000);
     case 'custom':
     case 'openai_compatible': {
       const base = (config.baseUrl || '').replace(/\/$/, '');
       const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`;
-      return fetchStatus(url, key ? { Authorization: `Bearer ${key}` } : {}, 8000);
+      return readModels(url, key ? { Authorization: `Bearer ${key}` } : {}, 8000);
     }
     default: {
       const neverProvider: never = config.provider;
@@ -123,7 +197,7 @@ export interface ChatMessage {
 
 export async function completeChat(config: LlmEndpoint, messages: ChatMessage[]): Promise<string> {
   if (config.provider === 'cursor') throw new CursorNoChatError();
-  if (isMock(config.apiKey)) {
+  if (mockModeEnabled()) {
     const last = messages.filter((message) => message.role === 'user').pop();
     return `Mock completion [${config.model}]. Noted ${last?.content.slice(0, 180) ?? 'empty prompt'}.`;
   }
@@ -191,10 +265,11 @@ export async function completeChat(config: LlmEndpoint, messages: ChatMessage[])
 async function openAiCompatible(config: LlmEndpoint, messages: ChatMessage[]): Promise<string> {
   const defaults: Partial<Record<LlmProviderId, string>> = {
     groq: 'https://api.groq.com/openai/v1',
-    openai: 'https://api.openai.com/v1',
-    nvidia: 'https://integrate.api.nvidia.com/v1',
+    openai: envBase('OPENAI_API_BASE', 'https://api.openai.com/v1'),
+    nvidia: envBase('NVIDIA_API_BASE', 'https://integrate.api.nvidia.com/v1'),
   };
-  const base = (config.baseUrl || defaults[config.provider] || '').replace(/\/$/, '');
+  const fixed = config.provider === 'groq' || config.provider === 'openai' || config.provider === 'nvidia';
+  const base = (fixed ? defaults[config.provider] ?? '' : config.baseUrl || '').replace(/\/$/, '');
   const root = base.endsWith('/v1') || config.provider === 'groq' || config.provider === 'openai' || config.provider === 'nvidia'
     ? base
     : `${base}/v1`;

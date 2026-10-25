@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
-import { analysisJobs, businessFlows, db, knowledgeMaps, projects, skills, teamMembers, teams, workspaces } from '@aria/db';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { analysisJobs, businessFlows, db, knowledgeMaps, projectRepos, projects, skills, teamMembers, teams, workspaces } from '@aria/db';
 import { AppError } from '../middleware/error.middleware';
 import { generateCompany, type CompanyMix, type GeneratedAgent, type RoleKey } from './companyGenerator';
 import { logger } from '../config/logger';
+import { getPgPool } from './db.client';
 import { completeThroughGateway, loadWorkspaceLlm, providerId } from './guardedLlm.service';
 import { readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
 
@@ -59,7 +60,12 @@ function toView(row: typeof skills.$inferSelect): AgentView {
 
 async function workspaceChoice(workspaceId: string) {
   const row = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
-  return { provider: providerId(row?.llmProvider), model: row?.llmModel ?? null };
+  return {
+    provider: providerId(row?.llmProvider),
+    model: row?.llmModel ?? null,
+    tierModels: tierModelMap(row?.llmTierModels),
+    catalog: Array.isArray(row?.llmModelCatalog) ? row.llmModelCatalog.filter((id): id is string => typeof id === 'string') : [],
+  };
 }
 
 function routedModels(input: {
@@ -67,6 +73,7 @@ function routedModels(input: {
   workspaceModel: string | null;
   projectTaskTiers: TaskTierMap;
   projectTierModels: TierModelMap;
+  workspaceTierModels?: TierModelMap | null;
   agentTaskTiers?: TaskTierMap | null;
   agentModelOverride?: string | null;
 }) {
@@ -75,6 +82,7 @@ function routedModels(input: {
     workspaceModel: input.workspaceModel,
     projectTaskTiers: input.projectTaskTiers,
     projectTierModels: input.projectTierModels,
+    workspaceTierModels: input.workspaceTierModels,
     agentTaskTiers: input.agentTaskTiers,
     agentModelOverride: input.agentModelOverride,
   };
@@ -91,7 +99,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
   const projectTierModels = tierModelMap(project.modelTierModels);
   const agents = await db.query.skills.findMany({ where: eq(skills.projectId, projectId) });
   const flows = await db.query.businessFlows.findMany({ where: eq(businessFlows.projectId, projectId) });
-  const companyRoute = routedModels({ provider: choice.provider, workspaceModel: choice.model, projectTaskTiers, projectTierModels });
+  const companyRoute = routedModels({ provider: choice.provider, workspaceModel: choice.model, projectTaskTiers, projectTierModels, workspaceTierModels: choice.tierModels });
   return {
     projectId,
     companySize: project.companySize ?? null,
@@ -112,6 +120,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
         workspaceModel: choice.model,
         projectTaskTiers,
         projectTierModels,
+        workspaceTierModels: choice.tierModels,
         agentTaskTiers: taskTierMap(row.modelTaskTiers),
         agentModelOverride: row.modelOverride,
       }),
@@ -170,6 +179,12 @@ export async function updateModelTiers(projectId: string, workspaceId: string, p
   autoModel?: string | null;
 }) {
   const project = await ownedProject(projectId, workspaceId);
+  const choice = await workspaceChoice(workspaceId);
+  for (const id of [patch.topModel, patch.autoModel]) {
+    if (id && choice.catalog.length > 0 && !choice.catalog.includes(id)) {
+      throw new AppError(`Model ${id} is not in the provider catalog from Test Connection`, 422, 'MODEL_NOT_VALIDATED');
+    }
+  }
   const models = tierModelMap(project.modelTierModels);
   if (patch.topModel === null) delete models.top;
   else if (patch.topModel) models.top = patch.topModel;
@@ -189,6 +204,7 @@ export async function generateProjectCompany(
   size: number,
   mix: CompanyMix,
   tiers?: { planning: ModelTier; development: ModelTier; topModel?: string; autoModel?: string },
+  force = false,
 ) {
   if (tiers) await updateModelTiers(projectId, workspaceId, tiers);
   const project = await ownedProject(projectId, workspaceId);
@@ -200,7 +216,19 @@ export async function generateProjectCompany(
     workspaceModel: choice.model,
     projectTaskTiers: taskTierMap(project.modelTaskTiers),
     projectTierModels: tierModelMap(project.modelTierModels),
+    workspaceTierModels: choice.tierModels,
   }).modelId;
+  const usage = await getPgPool().query<{ sessions: string; tickets: string }>(
+    `SELECT
+       (SELECT COUNT(*) FROM sessions WHERE project_id = $1::uuid) AS sessions,
+       (SELECT COUNT(*) FROM tickets WHERE project_id = $1::uuid) AS tickets`,
+    [projectId],
+  );
+  const sessions = Number(usage.rows[0]?.sessions ?? 0);
+  const tickets = Number(usage.rows[0]?.tickets ?? 0);
+  if (!force && (sessions > 0 || tickets > 0)) {
+    throw new AppError('Regeneration would remove sessions or tickets. Send force: true to continue.', 409, 'COMPANY_IN_USE');
+  }
   const { agents, flowOwners } = generateCompany({
     size,
     mix,
@@ -208,15 +236,16 @@ export async function generateProjectCompany(
     flows: flowRows.map((flow) => ({ id: flow.id, flowKey: flow.flowKey, name: flow.name, kind: flow.kind })),
   });
 
-  await db.execute(sql`UPDATE business_flows SET owner_agent_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
-  await db.execute(sql`UPDATE skills SET reporting_manager_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
-  await db.execute(sql`DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE project_id = ${projectId}::uuid)`);
-  await db.execute(sql`DELETE FROM skills WHERE project_id = ${projectId}::uuid`);
-  await db.execute(sql`DELETE FROM teams WHERE project_id = ${projectId}::uuid`);
+  await db.transaction(async (tx) => {
+  await tx.execute(sql`UPDATE business_flows SET owner_agent_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
+  await tx.execute(sql`UPDATE skills SET reporting_manager_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
+  await tx.execute(sql`DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE project_id = ${projectId}::uuid)`);
+  await tx.execute(sql`DELETE FROM skills WHERE project_id = ${projectId}::uuid`);
+  await tx.execute(sql`DELETE FROM teams WHERE project_id = ${projectId}::uuid`);
 
   const deptIds = new Map<string, string>();
   for (const department of new Set(agents.map((agent) => agent.department))) {
-    const [team] = await db.insert(teams).values({
+    const [team] = await tx.insert(teams).values({
       id: randomUUID(),
       projectId,
       name: department,
@@ -229,7 +258,7 @@ export async function generateProjectCompany(
   for (const agent of agents) {
     const id = randomUUID();
     idByTemp.set(agent.tempId, id);
-    await db.insert(skills).values({
+    await tx.insert(skills).values({
       id,
       projectId,
       teamId: deptIds.get(agent.department) ?? null,
@@ -246,7 +275,7 @@ export async function generateProjectCompany(
       instructions: agent.instructions,
       ownedDomains: agent.skills,
       ownedFlowIds: agent.ownedFlowIds,
-      enabled: true,
+      enabled: agent.enabled,
       status: 'active',
       riskClass: 'B',
       idleMode: 'learning',
@@ -256,7 +285,7 @@ export async function generateProjectCompany(
   for (const agent of agents) {
     const id = idByTemp.get(agent.tempId);
     if (!id) continue;
-    await db.update(skills).set({
+    await tx.update(skills).set({
       reportingManagerId: agent.managerTempId ? idByTemp.get(agent.managerTempId) ?? null : null,
       backupAgentId: agent.backupTempId ? idByTemp.get(agent.backupTempId) ?? null : null,
       updatedAt: new Date(),
@@ -264,23 +293,24 @@ export async function generateProjectCompany(
     const teamId = deptIds.get(agent.department);
     if (teamId) {
       const memberRole = agent.hierarchyLevel <= 3 ? 'lead' : agent.roleKey === 'scrum_master' ? 'scrum_master' : 'member';
-      await db.insert(teamMembers).values({ teamId, skillId: id, role: memberRole });
+      await tx.insert(teamMembers).values({ teamId, skillId: id, role: memberRole });
     }
   }
 
   for (const [flowId, owners] of flowOwners) {
-    await db.update(businessFlows).set({
+    await tx.update(businessFlows).set({
       ownerAgentId: idByTemp.get(owners.owner) ?? null,
       backupAgentId: owners.backup ? idByTemp.get(owners.backup) ?? null : null,
       updatedAt: new Date(),
     }).where(and(eq(businessFlows.id, flowId), eq(businessFlows.projectId, projectId)));
   }
 
-  await db.update(projects).set({
+  await tx.update(projects).set({
     companySize: size,
     companyMix: mix,
     updatedAt: new Date(),
   }).where(eq(projects.id, projectId));
+  });
 
   const llm = await loadWorkspaceLlm(workspaceId);
   if (llm) {
@@ -329,12 +359,22 @@ export async function updateAgent(projectId: string, workspaceId: string, agentI
   planningTier?: ModelTier | null;
   developmentTier?: ModelTier | null;
   modelOverride?: string | null;
+  reportingManagerId?: string | null;
+  backupAgentId?: string | null;
 }) {
   await ownedProject(projectId, workspaceId);
   const existing = await db.query.skills.findFirst({
     where: and(eq(skills.id, agentId), eq(skills.projectId, projectId)),
   });
   if (!existing) throw new AppError('Agent not found', 404, 'NOT_FOUND');
+  if (patch.reportingManagerId) await assertSameProjectAgent(projectId, patch.reportingManagerId, 'Manager');
+  if (patch.backupAgentId) await assertSameProjectAgent(projectId, patch.backupAgentId, 'Backup');
+  if (patch.modelOverride) {
+    const choice = await workspaceChoice(workspaceId);
+    if (choice.catalog.length > 0 && !choice.catalog.includes(patch.modelOverride)) {
+      throw new AppError(`Model ${patch.modelOverride} is not in the provider catalog from Test Connection`, 422, 'MODEL_NOT_VALIDATED');
+    }
+  }
   await db.update(skills).set({
     ...(patch.roleTitle !== undefined ? { roleTitle: patch.roleTitle, role: patch.roleTitle } : {}),
     ...(patch.description !== undefined ? { description: patch.description } : {}),
@@ -344,6 +384,8 @@ export async function updateAgent(projectId: string, workspaceId: string, agentI
     ...(patch.realName !== undefined ? { realName: patch.realName, name: patch.realName } : {}),
     ...tierPatch(existing.modelTaskTiers, patch),
     ...(patch.modelOverride !== undefined ? { modelOverride: patch.modelOverride } : {}),
+    ...(patch.reportingManagerId !== undefined ? { reportingManagerId: patch.reportingManagerId } : {}),
+    ...(patch.backupAgentId !== undefined ? { backupAgentId: patch.backupAgentId } : {}),
     updatedAt: new Date(),
   }).where(eq(skills.id, agentId));
   const updated = await db.query.skills.findFirst({ where: eq(skills.id, agentId) });
@@ -366,7 +408,9 @@ export async function createAgent(projectId: string, workspaceId: string, input:
     workspaceModel: choice.model,
     projectTaskTiers: taskTierMap(project.modelTaskTiers),
     projectTierModels: tierModelMap(project.modelTierModels),
+    workspaceTierModels: choice.tierModels,
   }).modelId;
+  if (input.managerId) await assertSameProjectAgent(projectId, input.managerId, 'Manager');
   const slugBase = input.realName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || input.roleKey;
   const id = randomUUID();
   await db.insert(skills).values({
@@ -401,18 +445,84 @@ export async function deleteAgent(projectId: string, workspaceId: string, agentI
   });
   if (!existing) throw new AppError('Agent not found', 404, 'NOT_FOUND');
   const managerId = existing.reportingManagerId;
-  await db.update(skills).set({ reportingManagerId: managerId }).where(and(
-    eq(skills.projectId, projectId),
-    eq(skills.reportingManagerId, agentId),
-  ));
-  await db.update(skills).set({ backupAgentId: null }).where(and(
-    eq(skills.projectId, projectId),
-    eq(skills.backupAgentId, agentId),
-  ));
-  await db.update(businessFlows).set({ ownerAgentId: null }).where(eq(businessFlows.ownerAgentId, agentId));
-  await db.update(businessFlows).set({ backupAgentId: null }).where(eq(businessFlows.backupAgentId, agentId));
-  await db.delete(teamMembers).where(eq(teamMembers.skillId, agentId));
-  await db.delete(skills).where(eq(skills.id, agentId));
+  await db.transaction(async (tx) => {
+    const owned = await tx.select().from(businessFlows).where(and(
+      eq(businessFlows.projectId, projectId),
+      eq(businessFlows.ownerAgentId, agentId),
+    ));
+    for (const flow of owned) {
+      const promoted = flow.backupAgentId && flow.backupAgentId !== agentId ? flow.backupAgentId : null;
+      await tx.update(businessFlows).set({
+        ownerAgentId: promoted,
+        backupAgentId: null,
+        updatedAt: new Date(),
+      }).where(eq(businessFlows.id, flow.id));
+    }
+    await tx.update(businessFlows).set({ backupAgentId: null, updatedAt: new Date() }).where(and(
+      eq(businessFlows.projectId, projectId),
+      eq(businessFlows.backupAgentId, agentId),
+    ));
+    await tx.update(skills).set({ reportingManagerId: managerId }).where(and(
+      eq(skills.projectId, projectId),
+      eq(skills.reportingManagerId, agentId),
+    ));
+    await tx.update(skills).set({ backupAgentId: null }).where(and(
+      eq(skills.projectId, projectId),
+      eq(skills.backupAgentId, agentId),
+    ));
+    await tx.delete(teamMembers).where(eq(teamMembers.skillId, agentId));
+    await tx.delete(skills).where(eq(skills.id, agentId));
+  });
+}
+
+async function assertSameProjectAgent(projectId: string, agentId: string, label: string): Promise<void> {
+  const row = await db.query.skills.findFirst({
+    where: and(eq(skills.id, agentId), eq(skills.projectId, projectId)),
+  });
+  if (!row) throw new AppError(`${label} is not an agent on this project`, 400, 'MANAGER_NOT_IN_PROJECT');
+}
+
+export async function assignFlow(projectId: string, workspaceId: string, flowId: string, patch: {
+  ownerAgentId?: string | null;
+  backupAgentId?: string | null;
+}) {
+  await ownedProject(projectId, workspaceId);
+  const flow = await db.query.businessFlows.findFirst({
+    where: and(eq(businessFlows.id, flowId), eq(businessFlows.projectId, projectId)),
+  });
+  if (!flow) throw new AppError('Flow not found', 404, 'NOT_FOUND');
+  if (patch.ownerAgentId) await assertSameProjectAgent(projectId, patch.ownerAgentId, 'Owner');
+  if (patch.backupAgentId) await assertSameProjectAgent(projectId, patch.backupAgentId, 'Backup');
+  await db.update(businessFlows).set({
+    ...(patch.ownerAgentId !== undefined ? { ownerAgentId: patch.ownerAgentId } : {}),
+    ...(patch.backupAgentId !== undefined ? { backupAgentId: patch.backupAgentId } : {}),
+    updatedAt: new Date(),
+  }).where(eq(businessFlows.id, flowId));
+  return getCompany(projectId, workspaceId);
+}
+
+export async function getSetupState(workspaceId: string) {
+  const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
+  const project = await db.query.projects.findFirst({
+    where: eq(projects.workspaceId, workspaceId),
+    orderBy: [desc(projects.createdAt)],
+  });
+  const llmConfigured = Boolean(workspace?.llmProvider && (workspace.llmApiKeyEncrypted || workspace.llmProvider === 'ollama'));
+  if (!project) {
+    return { project: null, llmConfigured, repoCount: 0, knowledgeReady: false, summary: '', flows: [], jobs: [] };
+  }
+  const repos = await db.query.projectRepos.findMany({ where: eq(projectRepos.projectId, project.id) });
+  const knowledge = await getKnowledge(project.id, workspaceId);
+  const active = knowledge.jobs.some((job) => job.status === 'queued' || job.status === 'running');
+  return {
+    project: { id: project.id, name: project.name },
+    llmConfigured,
+    repoCount: repos.length,
+    knowledgeReady: Boolean(knowledge.map) && !active,
+    summary: knowledge.map?.summary ?? '',
+    flows: knowledge.flows,
+    jobs: knowledge.jobs,
+  };
 }
 
 export type { GeneratedAgent };

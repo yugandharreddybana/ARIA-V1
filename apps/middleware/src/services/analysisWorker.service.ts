@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { analysisJobs, businessFlows, db, knowledgeMaps, projectRepos, projects } from '@aria/db';
 import { getPgPool } from './db.client';
 import { logger } from '../config/logger';
@@ -40,7 +40,16 @@ export function stopAnalysisWorker(): void {
 
 export async function enqueueProjectAnalysis(projectId: string, workspaceId: string): Promise<number> {
   const repos = await db.query.projectRepos.findMany({ where: eq(projectRepos.projectId, projectId) });
+  let queued = 0;
   for (const repo of repos) {
+    const active = await db.query.analysisJobs.findFirst({
+      where: and(
+        eq(analysisJobs.projectId, projectId),
+        eq(analysisJobs.repoId, repo.id),
+        inArray(analysisJobs.status, ['queued', 'running']),
+      ),
+    });
+    if (active) continue;
     await db.insert(analysisJobs).values({
       id: randomUUID(),
       projectId,
@@ -50,11 +59,22 @@ export async function enqueueProjectAnalysis(projectId: string, workspaceId: str
       workspaceId,
       status: 'queued',
     });
+    queued += 1;
   }
-  return repos.length;
+  return queued;
+}
+
+async function recoverStuckJobs(): Promise<void> {
+  await getPgPool().query(
+    `UPDATE analysis_jobs
+        SET status = 'queued', updated_at = NOW(),
+            error_message = 'Requeued after the worker stopped'
+      WHERE status = 'running' AND updated_at < NOW() - INTERVAL '10 minutes'`,
+  );
 }
 
 export async function processNextAnalysisJob(): Promise<'idle' | 'done' | 'failed'> {
+  await recoverStuckJobs();
   const job = await claimJob();
   if (!job) return 'idle';
   try {
@@ -130,28 +150,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
     }
   }
 
-  await db.delete(businessFlows).where(eq(businessFlows.projectId, job.project_id));
-  await db.delete(knowledgeMaps).where(eq(knowledgeMaps.projectId, job.project_id));
-  const [map] = await db.insert(knowledgeMaps).values({
-    projectId: job.project_id,
-    workspaceId: job.workspace_id,
-    techStack: draft.techStack,
-    modules: draft.modules,
-    dataModel: draft.dataModel,
-    apis: draft.apis,
-    summary,
-  }).returning();
-  if (draft.flows.length) {
-    await db.insert(businessFlows).values(draft.flows.map((flow) => ({
-      projectId: job.project_id,
-      knowledgeMapId: map.id,
-      flowKey: flow.flowKey,
-      name: flow.name,
-      kind: flow.kind,
-      description: flow.description,
-      entryPoints: flow.entryPoints,
-    })));
-  }
+  await persistKnowledge(job, draft, summary, new Set(snapshot.paths));
   const resultSummary = `${draft.flows.length} flows, ${draft.modules.length} modules, ${draft.techStack.length} technologies`;
   await db.update(analysisJobs).set({
     status: 'done',
@@ -160,4 +159,74 @@ async function runJob(job: ClaimedJob): Promise<void> {
     updatedAt: new Date(),
   }).where(eq(analysisJobs.id, job.id));
   logger.info('Analysis job finished', { jobId: job.id, repo: job.repo_url, resultSummary });
+}
+
+function replaceRepoSlice<T>(previous: Array<T & { repoId?: string }>, repoId: string, next: T[]): Array<T & { repoId?: string }> {
+  return [
+    ...previous.filter((item) => item.repoId !== repoId),
+    ...next.map((item) => ({ ...item, repoId })),
+  ];
+}
+
+async function persistKnowledge(
+  job: ClaimedJob,
+  draft: ReturnType<typeof buildKnowledgeMap>,
+  summary: string,
+  repoPaths: Set<string>,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const existing = await tx.query.knowledgeMaps.findFirst({ where: eq(knowledgeMaps.projectId, job.project_id) });
+    const techStack = replaceRepoSlice((existing?.techStack as Array<typeof draft.techStack[number] & { repoId?: string }> | undefined) ?? [], job.repo_id, draft.techStack);
+    const modules = replaceRepoSlice((existing?.modules as Array<typeof draft.modules[number] & { repoId?: string }> | undefined) ?? [], job.repo_id, draft.modules);
+    const dataModel = replaceRepoSlice((existing?.dataModel as Array<typeof draft.dataModel[number] & { repoId?: string }> | undefined) ?? [], job.repo_id, draft.dataModel);
+    const apis = replaceRepoSlice((existing?.apis as Array<typeof draft.apis[number] & { repoId?: string }> | undefined) ?? [], job.repo_id, draft.apis);
+    const [map] = existing
+      ? await tx.update(knowledgeMaps).set({
+        techStack, modules, dataModel, apis, summary, updatedAt: new Date(),
+      }).where(eq(knowledgeMaps.id, existing.id)).returning()
+      : await tx.insert(knowledgeMaps).values({
+        projectId: job.project_id,
+        workspaceId: job.workspace_id,
+        techStack, modules, dataModel, apis, summary,
+      }).returning();
+
+    const current = await tx.query.businessFlows.findMany({ where: eq(businessFlows.projectId, job.project_id) });
+    const seen = new Set(draft.flows.map((flow) => flow.flowKey));
+    for (const flow of draft.flows) {
+      const row = current.find((item) => item.flowKey === flow.flowKey);
+      const previous = Array.isArray(row?.entryPoints) ? row.entryPoints.filter((entry): entry is string => typeof entry === 'string') : [];
+      const kept = previous.filter((entry) => !repoPaths.has(entry));
+      const entryPoints = [...new Set([...kept, ...flow.entryPoints])];
+      if (row) {
+        await tx.update(businessFlows).set({
+          knowledgeMapId: map.id,
+          name: flow.name,
+          kind: flow.kind,
+          description: flow.description,
+          entryPoints,
+          updatedAt: new Date(),
+        }).where(eq(businessFlows.id, row.id));
+      } else {
+        await tx.insert(businessFlows).values({
+          projectId: job.project_id,
+          knowledgeMapId: map.id,
+          flowKey: flow.flowKey,
+          name: flow.name,
+          kind: flow.kind,
+          description: flow.description,
+          entryPoints,
+        });
+      }
+    }
+    for (const row of current) {
+      if (seen.has(row.flowKey)) continue;
+      const previous = Array.isArray(row.entryPoints) ? row.entryPoints.filter((entry): entry is string => typeof entry === 'string') : [];
+      const kept = previous.filter((entry) => !repoPaths.has(entry));
+      if (kept.length === 0 && !row.ownerAgentId && !row.backupAgentId) {
+        await tx.delete(businessFlows).where(eq(businessFlows.id, row.id));
+      } else if (kept.length !== previous.length) {
+        await tx.update(businessFlows).set({ entryPoints: kept, updatedAt: new Date() }).where(eq(businessFlows.id, row.id));
+      }
+    }
+  });
 }

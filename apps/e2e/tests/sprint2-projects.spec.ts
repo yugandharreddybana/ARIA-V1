@@ -14,14 +14,14 @@ test.describe('Sprint 2 — Projects & Repo Connection', () => {
 
   test('S2-02: Create project button is visible', async ({ page }) => {
     await page.goto('/projects');
-    await expect(page.getByRole('button', { name: /new project|create/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New Project' })).toBeVisible();
   });
 
   test('S2-03: Create a project and verify it appears in list', async ({ page }) => {
     await page.goto('/projects');
-    await page.click('button:has-text("New Project"), button:has-text("Create")');
-    await page.fill('[placeholder*="project name" i], [name="name"]', `E2E Project ${Date.now()}`);
-    await page.click('button[type="submit"]');
+    await page.getByRole('button', { name: 'New Project' }).click();
+    await page.locator('#pname').fill(`E2E Project ${Date.now()}`);
+    await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(page.locator('[data-testid="project-card"], .project-card').first()).toBeVisible({ timeout: 8000 });
   });
 
@@ -39,7 +39,7 @@ test.describe('Sprint 2 — Projects & Repo Connection', () => {
     const firstProject = page.locator('a[href*="/projects/"]').first();
     if (await firstProject.count() > 0) {
       await firstProject.click();
-      await expect(page.getByRole('button', { name: /connect|add repo/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Connect Repo' })).toBeVisible();
     }
   });
 

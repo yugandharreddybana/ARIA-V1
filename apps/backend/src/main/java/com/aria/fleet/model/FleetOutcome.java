@@ -37,6 +37,9 @@ public class FleetOutcome {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String signature;
 
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

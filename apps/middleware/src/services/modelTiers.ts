@@ -108,6 +108,7 @@ export function resolveModelRoute(input: {
   workspaceModel?: string | null;
   projectTaskTiers?: TaskTierMap | null;
   projectTierModels?: TierModelMap | null;
+  workspaceTierModels?: TierModelMap | null;
   agentTaskTiers?: TaskTierMap | null;
   agentModelOverride?: string | null;
 }): ModelRoute {
@@ -122,22 +123,83 @@ export function resolveModelRoute(input: {
   const source = agentTier ? 'agent_tier' : projectTier ? 'project_tier' : 'default';
   const catalog = defaultTierModels(input.provider, input.workspaceModel);
   const custom = input.projectTierModels?.[tier]?.trim();
+  const validated = input.workspaceTierModels?.[tier]?.trim();
   return {
     taskType: input.taskType,
     taskClass,
     tier,
-    modelId: custom || catalog[tier],
+    modelId: custom || validated || catalog[tier],
     source,
   };
 }
 
+export interface CatalogEntry {
+  id: string;
+  aliases?: string[];
+}
+
+const CURSOR_TOP_PREFERENCE = [
+  'claude-opus-5',
+  'gpt-5.5',
+  'grok-4.6',
+  'claude-fable-5',
+  'composer-2.5',
+  'claude-4.6-opus-thinking',
+];
+
+const CURSOR_AUTO_PREFERENCE = ['auto', 'auto-smart'];
+
+function catalogHas(catalog: CatalogEntry[], id: string): CatalogEntry | undefined {
+  return catalog.find((entry) => entry.id === id || entry.aliases?.includes(id));
+}
+
+function pickListed(catalog: CatalogEntry[], preference: string[], fallback: (id: string) => boolean): string | null {
+  for (const id of preference) {
+    const found = catalogHas(catalog, id);
+    if (found) return found.id;
+  }
+  return catalog.find((entry) => fallback(entry.id))?.id ?? null;
+}
+
 /**
- * Cloud Agents does not accept the literal model id `auto`.
- * Development sends Cursor Router (`auto-smart`, optimize for cost).
- * Planning sends the explicit top-tier id.
+ * Both tier ids must be members of the provider's live model list.
+ * Hard-coded names are only preferences, and only when the catalog contains them.
+ */
+export function selectTierModels(provider: LlmProviderId, catalog: CatalogEntry[], preferredModel?: string | null): TierModels {
+  const listed = catalog.filter((entry) => entry.id.trim());
+  if (listed.length === 0) throw new Error('Provider returned no models');
+  if (provider === 'cursor') {
+    const auto = pickListed(listed, CURSOR_AUTO_PREFERENCE, (id) => id === 'auto' || id.startsWith('auto-'));
+    const top = pickListed(listed, CURSOR_TOP_PREFERENCE, (id) => id !== auto && !id.startsWith('auto'));
+    if (!auto || !top || auto === top) {
+      throw new Error('Cursor catalog did not include both a planning model and an Auto model');
+    }
+    return { top, auto };
+  }
+  if (provider === 'ollama' || provider === 'custom' || provider === 'openai_compatible') {
+    const preferred = preferredModel?.trim();
+    if (preferred && !catalogHas(listed, preferred)) {
+      throw new Error(`Model ${preferred} is not in the provider catalog`);
+    }
+    const chosen = preferred ? catalogHas(listed, preferred)!.id : listed[0].id;
+    return { top: chosen, auto: listed.find((entry) => entry.id !== chosen)?.id ?? chosen };
+  }
+  const defaults = defaultTierModels(provider, preferredModel);
+  const top = catalogHas(listed, defaults.top)?.id
+    ?? pickListed(listed, [], (id) => /opus|pro|large|70b|nemotron|gpt-5/i.test(id));
+  const auto = catalogHas(listed, defaults.auto)?.id
+    ?? pickListed(listed, [], (id) => id !== top && /flash|mini|small|8b|instant|haiku|sonnet/i.test(id));
+  if (!top || !auto) throw new Error(`${provider} catalog did not include a planning model and a standard model`);
+  return { top, auto };
+}
+
+/**
+ * Wire id for a model that Test Connection already found in the account catalog.
+ * `{ id: "auto" }` is the documented Auto fallback. `auto-smart` is only sent
+ * when that id was actually listed (Teams / Enterprise router).
  */
 export function cursorWireSelection(modelId: string): { id: string; params?: Array<{ id: string; value: string }> } {
-  if (modelId === CURSOR_AUTO_MODEL) {
+  if (modelId === 'auto-smart') {
     return { id: 'auto-smart', params: [{ id: 'optimize_for', value: 'cost' }] };
   }
   return { id: modelId };

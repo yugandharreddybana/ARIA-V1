@@ -6,15 +6,22 @@ const mix = { business: 1, qa: 3, frontend: 2, backend: 2, fullstack: 1, junior:
 describe('generateCompany', () => {
   it('keeps a CEO, unique names, and a backup for every agent at the requested size', () => {
     const { agents } = generateCompany({ size: 10, mix, seed: 'project-a', flows: [] });
-    expect(agents).toHaveLength(10);
+    const seated = agents.filter((agent) => agent.enabled);
+    expect(seated).toHaveLength(10);
+    expect(agents.filter((agent) => !agent.enabled).map((agent) => agent.roleKey).sort()).toEqual(['documentation', 'pr_coordinator']);
     expect(agents.some((agent) => agent.roleKey === 'ceo' && agent.managerTempId === null)).toBe(true);
     expect(new Set(agents.map((agent) => agent.realName)).size).toBe(agents.length);
     expect(new Set(agents.map((agent) => agent.slug)).size).toBe(agents.length);
     for (const agent of agents) {
-      expect(agent.enabled).toBe(true);
       expect(agent.instructions.length).toBeGreaterThan(40);
       if (agents.length > 1) expect(agent.backupTempId).not.toBe(agent.tempId);
     }
+  });
+
+  it('keeps documentation and the PR coordinator on when the company has seats for them', () => {
+    const { agents } = generateCompany({ size: 12, mix, seed: 'large', flows: [] });
+    expect(agents).toHaveLength(12);
+    expect(agents.filter((agent) => agent.roleKey === 'documentation' || agent.roleKey === 'pr_coordinator').every((agent) => agent.enabled)).toBe(true);
   });
 
   it('is deterministic for the same seed and assigns UI flows to a frontend owner', () => {

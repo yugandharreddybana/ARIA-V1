@@ -58,7 +58,7 @@ export async function saveLlmConfigHandler(
       return;
     }
 
-    await saveLlmConfig(req.user!.workspaceId, req.body);
+    await saveLlmConfig(req.user!.workspaceId, req.body, result);
     const saved = await getLlmConfig(req.user!.workspaceId);
     res.json({ success: true, config: saved });
   } catch (e) {

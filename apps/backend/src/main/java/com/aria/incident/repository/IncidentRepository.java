@@ -8,5 +8,6 @@ import java.util.UUID;
 
 public interface IncidentRepository extends JpaRepository<Incident, UUID> {
     List<Incident> findTop20ByOrderByDetectedAtDesc();
+    List<Incident> findTop20ByWorkspaceIdOrderByDetectedAtDesc(UUID workspaceId);
     List<Incident> findByStatus(String status);
 }

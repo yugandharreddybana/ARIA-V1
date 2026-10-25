@@ -46,7 +46,22 @@ interface ModelTiers {
   developmentModel: string;
 }
 
-interface CompanyResponse { agents: Agent[]; modelTiers: ModelTiers }
+interface FlowRow {
+  id: string;
+  flowKey: string;
+  name: string;
+  ownerAgentId: string | null;
+  backupAgentId: string | null;
+}
+
+interface CompanyResponse { agents: Agent[]; modelTiers: ModelTiers; flows: FlowRow[] }
+
+const ROLE_KEYS = [
+  'ceo', 'cfo', 'cto', 'business', 'product_owner', 'scrum_master',
+  'frontend', 'backend', 'fullstack', 'junior', 'aiml', 'qa', 'devops',
+  'cybersecurity', 'red_team', 'blue_team', 'research', 'coach',
+  'documentation', 'pr_coordinator',
+] as const;
 
 function tierValue(value: FormDataEntryValue | null): 'top' | 'auto' | null {
   return value === 'top' || value === 'auto' ? value : null;
@@ -55,6 +70,7 @@ function tierValue(value: FormDataEntryValue | null): 'top' | 'auto' | null {
 export default function CompanyPage() {
   const params = useParams<{ id: string }>();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [flows, setFlows] = useState<FlowRow[]>([]);
   const [tiers, setTiers] = useState<ModelTiers | null>(null);
   const [topModel, setTopModel] = useState('');
   const [autoModel, setAutoModel] = useState('');
@@ -62,11 +78,15 @@ export default function CompanyPage() {
   const [error, setError] = useState('');
   const [realName, setRealName] = useState('');
   const [roleTitle, setRoleTitle] = useState('Engineer');
+  const [roleKey, setRoleKey] = useState<(typeof ROLE_KEYS)[number]>('fullstack');
+  const [managerId, setManagerId] = useState('');
   const [instructions, setInstructions] = useState('Describe the work this person owns.');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
     const data = await api<CompanyResponse>(`/projects/${params.id}/company`);
     setAgents(data.agents);
+    setFlows(data.flows);
     setTiers(data.modelTiers);
     setTopModel(data.modelTiers.topModel ?? '');
     setAutoModel(data.modelTiers.autoModel ?? '');
@@ -77,6 +97,15 @@ export default function CompanyPage() {
   }, [load]);
 
   const current = agents.find((agent) => agent.id === selected) ?? null;
+
+  async function run(action: () => Promise<void>) {
+    setError('');
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'The company could not be updated');
+    }
+  }
 
   const nodes: Node[] = useMemo(() => {
     const columns = new Map<number, number>();
@@ -107,65 +136,92 @@ export default function CompanyPage() {
     event.preventDefault();
     if (!current) return;
     const form = new FormData(event.currentTarget as HTMLFormElement);
-    await api(`/projects/${params.id}/agents/${current.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        roleTitle: String(form.get('roleTitle') ?? ''),
-        description: String(form.get('description') ?? ''),
-        instructions: String(form.get('instructions') ?? ''),
-        planningTier: tierValue(form.get('planningTier')),
-        developmentTier: tierValue(form.get('developmentTier')),
-        modelOverride: String(form.get('modelOverride') ?? '').trim() || null,
-      }),
+    const manager = String(form.get('reportingManagerId') ?? '');
+    const backup = String(form.get('backupAgentId') ?? '');
+    await run(async () => {
+      await api(`/projects/${params.id}/agents/${current.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          roleTitle: String(form.get('roleTitle') ?? ''),
+          description: String(form.get('description') ?? ''),
+          instructions: String(form.get('instructions') ?? ''),
+          planningTier: tierValue(form.get('planningTier')),
+          developmentTier: tierValue(form.get('developmentTier')),
+          modelOverride: String(form.get('modelOverride') ?? '').trim() || null,
+          reportingManagerId: manager || null,
+          backupAgentId: backup || null,
+        }),
+      });
+      await load();
     });
-    await load();
   }
 
   async function toggle() {
     if (!current) return;
-    await api(`/projects/${params.id}/agents/${current.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled: !current.enabled }),
+    await run(async () => {
+      await api(`/projects/${params.id}/agents/${current.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: !current.enabled }),
+      });
+      await load();
     });
-    await load();
   }
 
   async function remove() {
     if (!current) return;
-    await api(`/projects/${params.id}/agents/${current.id}`, { method: 'DELETE' });
-    setSelected(null);
-    await load();
+    await run(async () => {
+      await api(`/projects/${params.id}/agents/${current.id}`, { method: 'DELETE' });
+      setSelected(null);
+      setConfirmDelete(false);
+      await load();
+    });
   }
 
   async function addAgent(event: React.FormEvent) {
     event.preventDefault();
-    await api(`/projects/${params.id}/agents`, {
-      method: 'POST',
-      body: JSON.stringify({
-        realName,
-        roleTitle,
-        roleKey: 'fullstack',
-        instructions,
-        managerId: agents.find((agent) => agent.roleKey === 'cto')?.id ?? agents[0]?.id ?? null,
-      }),
+    await run(async () => {
+      await api(`/projects/${params.id}/agents`, {
+        method: 'POST',
+        body: JSON.stringify({
+          realName,
+          roleTitle,
+          roleKey,
+          instructions,
+          managerId: managerId || null,
+        }),
+      });
+      setRealName('');
+      await load();
     });
-    setRealName('');
-    await load();
   }
 
   async function saveTiers(event: React.FormEvent) {
     event.preventDefault();
     if (!tiers) return;
-    await api(`/projects/${params.id}/model-tiers`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        planning: tiers.planning,
-        development: tiers.development,
-        topModel: topModel.trim() || null,
-        autoModel: autoModel.trim() || null,
-      }),
+    await run(async () => {
+      await api(`/projects/${params.id}/model-tiers`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          planning: tiers.planning,
+          development: tiers.development,
+          topModel: topModel.trim() || null,
+          autoModel: autoModel.trim() || null,
+        }),
+      });
+      await load();
     });
-    await load();
+  }
+
+  async function assignFlow(flowId: string, patch: { ownerAgentId?: string | null; backupAgentId?: string | null }) {
+    await run(async () => {
+      const data = await api<CompanyResponse>(`/projects/${params.id}/flows/${flowId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      setAgents(data.agents);
+      setFlows(data.flows);
+      setTiers(data.modelTiers);
+    });
   }
 
   return (
@@ -238,7 +294,7 @@ export default function CompanyPage() {
               type="button"
               data-testid={`agent-${agent.slug}`}
               className="text-left text-sm border border-border rounded-md px-2 py-1"
-              onClick={() => setSelected(agent.id)}
+              onClick={() => { setSelected(agent.id); setConfirmDelete(false); }}
             >
               {agent.realName} · {agent.enabled ? 'ON' : 'OFF'}
             </button>
@@ -302,6 +358,40 @@ export default function CompanyPage() {
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-manager">Manager</Label>
+              <select
+                id="agent-manager"
+                name="reportingManagerId"
+                data-testid="agent-manager"
+                key={`${current.id}-manager`}
+                defaultValue={current.reportingManagerId ?? ''}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">No manager</option>
+                {agents.filter((agent) => agent.id !== current.id).map((agent) => (
+                  <option key={agent.id} value={agent.id}>{agent.realName}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-backup">Backup</Label>
+              <select
+                id="agent-backup"
+                name="backupAgentId"
+                data-testid="agent-backup"
+                key={`${current.id}-backup`}
+                defaultValue={current.backupAgentId ?? ''}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">No backup</option>
+                {agents.filter((agent) => agent.id !== current.id).map((agent) => (
+                  <option key={agent.id} value={agent.id}>{agent.realName}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="model-override">Model override</Label>
             <Input id="model-override" name="modelOverride" data-testid="agent-model-override" key={`${current.id}-model`} defaultValue={current.modelOverride ?? ''} />
@@ -309,7 +399,11 @@ export default function CompanyPage() {
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="aria" data-testid="save-agent">Save</Button>
             <Button type="button" variant="outline" data-testid="agent-toggle" onClick={toggle}>{current.enabled ? 'Turn OFF' : 'Turn ON'}</Button>
-            <Button type="button" variant="ghost" data-testid="agent-delete" onClick={remove}>Delete</Button>
+            {confirmDelete ? (
+              <Button type="button" variant="ghost" data-testid="agent-delete-confirm" onClick={remove}>Confirm delete</Button>
+            ) : (
+              <Button type="button" variant="ghost" data-testid="agent-delete" onClick={() => setConfirmDelete(true)}>Delete</Button>
+            )}
           </div>
         </form>
       )}
@@ -321,10 +415,70 @@ export default function CompanyPage() {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-role">Role title</Label>
-          <Input id="new-role" data-testid="new-agent-role" value={roleTitle} onChange={(event) => setRoleTitle(event.target.value)} />
+          <Input id="new-role" data-testid="new-agent-title" value={roleTitle} onChange={(event) => setRoleTitle(event.target.value)} />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-role-key">Role</Label>
+            <select
+              id="new-role-key"
+              data-testid="new-agent-role"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={roleKey}
+              onChange={(event) => {
+                const next = ROLE_KEYS.find((key) => key === event.target.value);
+                if (next) setRoleKey(next);
+              }}
+            >
+              {ROLE_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-manager">Manager</Label>
+            <select
+              id="new-manager"
+              data-testid="new-agent-manager"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={managerId}
+              onChange={(event) => setManagerId(event.target.value)}
+            >
+              <option value="">No manager</option>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+            </select>
+          </div>
         </div>
         <Button type="submit" variant="outline" data-testid="add-agent">Add</Button>
       </form>
+      {flows.length > 0 && (
+        <div className="space-y-3 max-w-xl border border-border rounded-lg p-4">
+          <h2 className="font-semibold">Flow owners</h2>
+          {flows.map((flow) => (
+            <div key={flow.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+              <p className="text-sm">{flow.name}</p>
+              <select
+                aria-label={`${flow.name} owner`}
+                data-testid={`flow-owner-${flow.flowKey}`}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={flow.ownerAgentId ?? ''}
+                onChange={(event) => void assignFlow(flow.id, { ownerAgentId: event.target.value || null })}
+              >
+                <option value="">Unassigned</option>
+                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+              </select>
+              <select
+                aria-label={`${flow.name} backup`}
+                data-testid={`flow-backup-${flow.flowKey}`}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={flow.backupAgentId ?? ''}
+                onChange={(event) => void assignFlow(flow.id, { backupAgentId: event.target.value || null })}
+              >
+                <option value="">No backup</option>
+                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -10,24 +10,34 @@ import {
   analyzeSchema,
   companyGenerateSchema,
   connectReposSchema,
+  flowAssignSchema,
   githubTokenSchema,
   modelTierPatchSchema,
   setupProjectSchema,
 } from '../schemas/setup.schema';
 import { createProject, connectRepo } from '../services/projects.service';
+import { parseRepoFullName } from '../services/githubClient.service';
 import { saveGithubToken, listGithubRepos } from '../services/githubClient.service';
 import { enqueueProjectAnalysis } from '../services/analysisWorker.service';
 import {
   createAgent,
   deleteAgent,
+  assignFlow,
   generateProjectCompany,
   getCompany,
   getKnowledge,
+  getSetupState,
   updateAgent,
   updateModelTiers,
 } from '../services/company.service';
 
 const router = Router();
+
+router.get('/state', requireAuth, async (req: AriaRequest, res, next) => {
+  try {
+    res.json(await getSetupState(req.user!.workspaceId));
+  } catch (err) { next(err); }
+});
 
 router.post('/project', requireAuth, validate(setupProjectSchema), async (req: AriaRequest, res, next) => {
   try {
@@ -45,7 +55,8 @@ router.post('/repos', requireAuth, validate(connectReposSchema), async (req: Ari
     if (!project) throw new AppError('Project not found', 404, 'NOT_FOUND');
     const connected = [];
     for (const repo of req.body.repos as Array<{ fullName: string; branch: string }>) {
-      const repoUrl = repo.fullName.startsWith('http') ? repo.fullName : `https://github.com/${repo.fullName}`;
+      const parsed = parseRepoFullName(repo.fullName);
+      const repoUrl = `https://github.com/${parsed.owner}/${parsed.repo}`;
       connected.push(await connectRepo(project.id, workspaceId, repoUrl, repo.branch));
     }
     const queued = await enqueueProjectAnalysis(project.id, workspaceId);
@@ -108,6 +119,7 @@ projectInsightRouter.post('/:projectId/company', validate(companyGenerateSchema)
       req.body.size,
       req.body.mix,
       req.body.modelTiers,
+      req.body.force === true,
     );
     res.status(201).json(company);
   } catch (err) { next(err); }
@@ -131,6 +143,13 @@ projectInsightRouter.patch('/:projectId/agents/:agentId', validate(agentPatchSch
   try {
     const agent = await updateAgent(req.params.projectId, req.user!.workspaceId, req.params.agentId, req.body);
     res.json({ agent });
+  } catch (err) { next(err); }
+});
+
+projectInsightRouter.patch('/:projectId/flows/:flowId', validate(flowAssignSchema), async (req: AriaRequest, res, next) => {
+  try {
+    const company = await assignFlow(req.params.projectId, req.user!.workspaceId, req.params.flowId, req.body);
+    res.json(company);
   } catch (err) { next(err); }
 });
 

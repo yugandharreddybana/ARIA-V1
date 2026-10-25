@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  async rewrites() {
+    const middleware = process.env.NEXT_PUBLIC_MIDDLEWARE_URL || 'http://127.0.0.1:3001';
+    return [{ source: '/api/:path*', destination: `${middleware}/api/:path*` }];
+  },
   async headers() {
     return [
       {

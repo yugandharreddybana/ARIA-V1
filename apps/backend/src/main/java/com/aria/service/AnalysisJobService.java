@@ -5,6 +5,7 @@ import com.aria.dto.analysis.AnalysisJobResponse;
 import com.aria.exception.AriaException;
 import com.aria.model.AnalysisJob;
 import com.aria.repository.AnalysisJobRepository;
+import com.aria.security.ProjectAccess;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,8 +19,15 @@ import java.util.UUID;
 public class AnalysisJobService {
 
     private final AnalysisJobRepository repo;
+    private final ProjectAccess access;
 
     public AnalysisJobResponse createJob(AnalysisJobRequest req, String workspaceId) {
+        if (workspaceId == null || workspaceId.isBlank()) throw AriaException.unauthorized("Authentication required");
+        if (req.workspaceId() != null && !req.workspaceId().isBlank() && !req.workspaceId().equals(workspaceId)) {
+            throw AriaException.forbidden("Workspace mismatch");
+        }
+        access.assertProject(req.projectId(), workspaceId);
+        access.assertRepo(req.repoId(), req.projectId());
         var job = AnalysisJob.builder()
                 .id(UUID.randomUUID().toString())
                 .projectId(req.projectId())

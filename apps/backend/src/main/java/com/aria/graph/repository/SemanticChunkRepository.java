@@ -20,6 +20,15 @@ public interface SemanticChunkRepository extends JpaRepository<SemanticChunk, UU
 
     long countByProjectId(UUID projectId);
 
+    @Query("SELECT COUNT(c) FROM SemanticChunk c WHERE c.projectId = :pid AND c.workspaceId = :wid")
+    long countByProjectIdAndWorkspaceId(@Param("pid") UUID projectId, @Param("wid") UUID workspaceId);
+
+    @Query("SELECT COUNT(c) FROM SemanticChunk c WHERE c.projectId = :pid AND c.workspaceId = :wid AND c.summary IS NOT NULL")
+    long countSummarisedByProjectIdAndWorkspaceId(@Param("pid") UUID projectId, @Param("wid") UUID workspaceId);
+
+    @Query("SELECT COUNT(c) FROM SemanticChunk c WHERE c.projectId = :pid AND c.workspaceId = :wid AND c.embedding IS NOT NULL")
+    long countEmbeddedByProjectIdAndWorkspaceId(@Param("pid") UUID projectId, @Param("wid") UUID workspaceId);
+
     @Query("SELECT COUNT(c) FROM SemanticChunk c WHERE c.projectId = :pid AND c.summary IS NOT NULL")
     long countSummarisedByProjectId(@Param("pid") UUID projectId);
 

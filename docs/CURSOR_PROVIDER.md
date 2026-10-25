@@ -23,13 +23,17 @@ ARIA's setup wizard defaults to **Cursor**. The official programmatic surface (r
 
 ## Local tests without a real key
 
-Set `ARIA_LLM_MODE=mock` or use the API key `aria-mock-key`. Test Connection succeeds locally and does not call `api.cursor.com`. GitHub listing and repo reads use `ARIA_GITHUB_MODE=mock` or the token `aria-mock-github`.
+`ARIA_LLM_MODE=mock` (and `ARIA_GITHUB_MODE=mock`) skips the network when `NODE_ENV` is not `production`. A key string is not special. Production ignores mock mode.
+
+To exercise the HTTP path, point `CURSOR_API_BASE` and `GITHUB_API_BASE` at `node scripts/provider-stub.mjs` and leave the modes on `live`. The stub accepts any bearer token and returns a model catalog.
 
 ## Model tiers
 
-Planning tasks resolve to `claude-4.6-opus-thinking` (override per project after checking `GET /v1/models`). Development tasks resolve to `auto`.
+Test Connection calls `GET /v1/models`, picks a planning id and an Auto id from that list, and stores both. Hard-coded ids are only the mock catalog and the last-resort labels in `defaultTierModels`. A live completion without a stored id is rejected.
 
-`auto` is the product name. The Cloud Agents API does not take that string as `model.id` (the legacy v0 note was to send `default`; the current TypeScript/Python SDK exposes Cursor Router as `auto-smart`). `cursorWireSelection('auto')` returns `{ id: 'auto-smart', params: [{ id: 'optimize_for', value: 'cost' }] }` for a later cloud-agent launch. This milestone still does not call `POST /v1/agents`. The token queue records `auto` or the top-tier id, then `complete()` throws `CURSOR_NO_CHAT_API` and the reservation is released.
+`auto` is sent as `{ id: 'auto' }` when the catalog lists it. `auto-smart` is sent with `optimize_for=cost` only when that id itself was stored. `claude-4.6-opus-thinking` is not assumed to be current; the picker prefers `claude-opus-5`, `gpt-5.5`, `grok-4.6`, `claude-fable-5`, or `composer-2.5` when the catalog includes one of them.
+
+This milestone still does not call `POST /v1/agents`. The token queue records the stored id, then `complete()` throws `CURSOR_NO_CHAT_API` and the reservation is released.
 
 ## If Cursor ships a completions API later
 

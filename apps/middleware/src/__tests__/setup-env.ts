@@ -8,6 +8,7 @@ process.env.COOKIE_SECRET ??= 'test-cookie-secret-must-be-32-characters-min';
 process.env.WORKSPACE_ENCRYPTION_KEY ??= 'test-workspace-encryption-key-32b';
 process.env.GITHUB_CLIENT_ID ??= '';
 process.env.GITHUB_CLIENT_SECRET ??= '';
+process.env.AUTH_RATE_LIMIT_MAX ??= '1000';
 process.env.ARIA_LLM_MODE ??= 'mock';
 process.env.ARIA_GITHUB_MODE ??= 'mock';
 process.env.OLLAMA_BASE_URL ??= 'http://127.0.0.1:11434';

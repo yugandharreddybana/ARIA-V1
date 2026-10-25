@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -10,11 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 type ProviderId = 'cursor' | 'gemini' | 'groq' | 'ollama' | 'openai' | 'anthropic' | 'openai_compatible';
 
+const FIXED_HOSTS = new Set<ProviderId>(['cursor', 'gemini', 'groq', 'openai', 'anthropic']);
+
 const PROVIDERS: Array<{ id: ProviderId; label: string; model: string; baseUrl?: string; needsKey: boolean; hint: string }> = [
-  { id: 'cursor', label: 'Cursor', model: 'cursor-agent', baseUrl: 'https://api.cursor.com', needsKey: true, hint: 'Default. Verifies a Cloud Agents API key. Cursor cannot complete chat prompts.' },
+  { id: 'cursor', label: 'Cursor', model: 'cursor-agent', needsKey: true, hint: 'Default. Verifies a Cloud Agents API key. Cursor cannot complete chat prompts.' },
   { id: 'gemini', label: 'Gemini', model: 'gemini-2.0-flash', needsKey: true, hint: 'Google AI Studio key.' },
   { id: 'groq', label: 'Groq', model: 'llama-3.3-70b-versatile', needsKey: true, hint: 'OpenAI-compatible Groq key.' },
-  { id: 'ollama', label: 'Ollama', model: 'qwen2.5-coder:7b', baseUrl: 'http://localhost:11434', needsKey: false, hint: 'Local Ollama server.' },
+  { id: 'ollama', label: 'Ollama', model: 'qwen2.5-coder:7b', baseUrl: 'http://localhost:11434', needsKey: false, hint: 'Local Ollama server. The base URL is required.' },
   { id: 'openai', label: 'OpenAI', model: 'gpt-4o-mini', needsKey: true, hint: 'OpenAI API key.' },
   { id: 'anthropic', label: 'Anthropic', model: 'claude-sonnet-4-5', needsKey: true, hint: 'Anthropic API key.' },
   { id: 'openai_compatible', label: 'OpenAI-compatible', model: 'local-model', baseUrl: 'http://localhost:8080/v1', needsKey: true, hint: 'Any base URL that serves /v1/models and /v1/chat/completions.' },
@@ -22,6 +24,16 @@ const PROVIDERS: Array<{ id: ProviderId; label: string; model: string; baseUrl?:
 
 interface RepoRow { fullName: string; private: boolean; defaultBranch: string }
 interface FlowRow { id: string; name: string; kind: string; description: string }
+interface JobRow { id: string; status: string; errorMessage: string | null }
+interface SetupState {
+  project: { id: string; name: string } | null;
+  llmConfigured: boolean;
+  repoCount: number;
+  knowledgeReady: boolean;
+  summary: string;
+  flows: FlowRow[];
+  jobs: JobRow[];
+}
 
 const EMPTY_MIX = { business: 1, qa: 2, frontend: 1, backend: 1, fullstack: 1, junior: 1, aiml: 0, devops: 0, security: 0 };
 
@@ -46,8 +58,19 @@ export default function SetupPage() {
   const [planningTier, setPlanningTier] = useState<'top' | 'auto'>('top');
   const [developmentTier, setDevelopmentTier] = useState<'top' | 'auto'>('auto');
   const [busy, setBusy] = useState(false);
+  const resumed = useRef(false);
 
   const preset = PROVIDERS.find((item) => item.id === provider) ?? PROVIDERS[0];
+  const allowsBaseUrl = !FIXED_HOSTS.has(provider);
+
+  function llmPayload() {
+    return {
+      provider,
+      model,
+      apiKey: apiKey || undefined,
+      ...(allowsBaseUrl ? { baseUrl: baseUrl || undefined } : {}),
+    };
+  }
 
   function chooseProvider(id: ProviderId) {
     const next = PROVIDERS.find((item) => item.id === id) ?? PROVIDERS[0];
@@ -66,6 +89,7 @@ export default function SetupPage() {
         method: 'POST',
         body: JSON.stringify({ name: projectName }),
       });
+      resumed.current = true;
       setProjectId(data.project.id);
       setStep(2);
     } catch (err) {
@@ -78,7 +102,7 @@ export default function SetupPage() {
     try {
       const result = await api<{ ok: boolean; message: string }>('/workspace/llm-config/test', {
         method: 'POST',
-        body: JSON.stringify({ provider, model, baseUrl: baseUrl || undefined, apiKey: apiKey || undefined }),
+        body: JSON.stringify(llmPayload()),
       });
       setTestMessage(result.message);
       setTested(result.ok);
@@ -95,7 +119,7 @@ export default function SetupPage() {
     try {
       await api('/workspace/llm-config', {
         method: 'PATCH',
-        body: JSON.stringify({ provider, model, baseUrl: baseUrl || undefined, apiKey: apiKey || undefined }),
+        body: JSON.stringify(llmPayload()),
       });
       setStep(3);
     } catch (err) {
@@ -126,24 +150,52 @@ export default function SetupPage() {
         }),
       });
       setStep(4);
-      await pollKnowledge();
+      await pollKnowledge(projectId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not connect repositories');
     } finally { setBusy(false); }
   }
 
-  async function pollKnowledge() {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const data = await api<{ map: { summary: string } | null; flows: FlowRow[] }>(`/projects/${projectId}/knowledge`);
-      if (data.map) {
+  async function pollKnowledge(id: string) {
+    for (let attempt = 0; attempt < 45; attempt++) {
+      const data = await api<{ map: { summary: string } | null; flows: FlowRow[]; jobs: JobRow[] }>(`/projects/${id}/knowledge`);
+      const active = data.jobs.some((job) => job.status === 'queued' || job.status === 'running');
+      const failed = data.jobs.find((job) => job.status === 'failed');
+      if (data.map && !active) {
         setSummary(data.map.summary);
         setFlows(data.flows);
+        setError('');
         return;
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (failed && !active) {
+        setError(failed.errorMessage || 'Analysis failed. Connect the repository again to retry.');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    setError('Analysis is still queued. Refresh the knowledge page in a moment.');
+    setError('Analysis is still running. Leave this page and come back — setup resumes where you left off.');
   }
+
+  useEffect(() => {
+    api<SetupState>('/setup/state').then((state) => {
+      if (resumed.current || !state.project) return;
+      resumed.current = true;
+      setProjectId(state.project.id);
+      setProjectName(state.project.name);
+      if (state.knowledgeReady) {
+        setSummary(state.summary);
+        setFlows(state.flows);
+        setStep(4);
+        return;
+      }
+      if (state.repoCount > 0) {
+        setStep(4);
+        void pollKnowledge(state.project.id);
+        return;
+      }
+      setStep(state.llmConfigured ? 3 : 2);
+    }).catch(() => undefined);
+  }, []);
 
   async function generateCompany(event: React.FormEvent) {
     event.preventDefault();
@@ -209,10 +261,12 @@ export default function SetupPage() {
                 <Label htmlFor="model">Model</Label>
                 <Input id="model" data-testid="llm-model" value={model} onChange={(event) => { setModel(event.target.value); setTested(false); }} />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="base-url">Base URL</Label>
-                <Input id="base-url" data-testid="llm-base-url" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setTested(false); }} />
-              </div>
+              {allowsBaseUrl && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="base-url">Base URL</Label>
+                  <Input id="base-url" data-testid="llm-base-url" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setTested(false); }} />
+                </div>
+              )}
               {preset.needsKey && (
                 <div className="space-y-1.5">
                   <Label htmlFor="api-key">API key</Label>

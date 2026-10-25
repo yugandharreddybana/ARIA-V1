@@ -9,6 +9,7 @@ import {
   cursorWireSelection,
   defaultTierModels,
   resolveModelRoute,
+  selectTierModels,
   taskClassOf,
 } from '../services/modelTiers';
 
@@ -73,12 +74,19 @@ describe('model tiers', () => {
     expect(customTop.modelId).toBe('composer-2');
   });
 
-  it('maps Cursor Auto onto the Cloud Agents router id', () => {
-    expect(cursorWireSelection(CURSOR_AUTO_MODEL)).toEqual({
+  it('sends literal auto and only uses auto-smart when that id was stored', () => {
+    expect(cursorWireSelection(CURSOR_AUTO_MODEL)).toEqual({ id: 'auto' });
+    expect(cursorWireSelection('auto-smart')).toEqual({
       id: 'auto-smart',
       params: [{ id: 'optimize_for', value: 'cost' }],
     });
     expect(cursorWireSelection(CURSOR_TOP_MODEL)).toEqual({ id: CURSOR_TOP_MODEL });
+    const chosen = selectTierModels('cursor', [
+      { id: 'claude-opus-5' },
+      { id: 'auto' },
+      { id: 'claude-4.6-opus-thinking' },
+    ]);
+    expect(chosen).toEqual({ top: 'claude-opus-5', auto: 'auto' });
   });
 
   it('queues the resolved model and names it when Cursor cannot complete', async () => {
@@ -141,21 +149,22 @@ describe('model tier API', () => {
     const company = await request(app).post(`/api/projects/${projectId}/company`).set(auth).send({
       size: 3,
       mix: { business: 0, qa: 0, frontend: 0, backend: 0, fullstack: 0, junior: 0, aiml: 0, devops: 0, security: 0 },
-      modelTiers: { planning: 'top', development: 'auto', autoModel: 'gpt-4o-mini' },
+      modelTiers: { planning: 'top', development: 'auto', autoModel: defaultTierModels('openai').auto },
     });
     expect(company.status).toBe(201);
     expect(company.body.modelTiers.planningModel).toBe(defaultTierModels('openai').top);
-    expect(company.body.modelTiers.developmentModel).toBe('gpt-4o-mini');
+    expect(company.body.modelTiers.developmentModel).toBe(defaultTierModels('openai').auto);
     expect(JSON.stringify(company.body)).not.toContain('aria-mock-key');
 
-    const agent = company.body.agents[0] as { id: string };
+    const agent = (company.body.agents as { id: string; enabled: boolean }[]).find((row) => row.enabled);
+    if (!agent) throw new Error('expected an enabled agent');
     const patched = await request(app).patch(`/api/projects/${projectId}/agents/${agent.id}`).set(auth).send({
       planningTier: 'auto',
-      modelOverride: 'gpt-4o-mini',
+      modelOverride: defaultTierModels('openai').auto,
     });
     expect(patched.status).toBe(200);
     expect(patched.body.agent.planningTier).toBe('auto');
-    expect(patched.body.agent.modelOverride).toBe('gpt-4o-mini');
+    expect(patched.body.agent.modelOverride).toBe(defaultTierModels('openai').auto);
 
     const text = await completeThroughGateway({
       workspaceId,
@@ -165,7 +174,7 @@ describe('model tier API', () => {
       config: { provider: 'openai', model: 'gpt-4o-mini', apiKey: 'aria-mock-key' },
       messages: [{ role: 'user', content: 'Describe the homepage.' }],
     });
-    expect(text).toContain('[gpt-4o-mini]');
+    expect(text).toContain(`[${defaultTierModels('openai').auto}]`);
 
     const other = await request(app).post('/api/auth/signup').send({
       name: 'Other Owner',
