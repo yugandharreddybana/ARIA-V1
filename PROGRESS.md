@@ -57,7 +57,7 @@ Opus review items 1–23 and the re-review (8 remaining must-fixes, near-blockin
 - `node scripts/check-schema-drift.cjs` passed.
 - `pnpm -F @aria/middleware exec tsc --noEmit` passed.
 - `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
-- `pnpm -F @aria/middleware test` — 24 files, 134 tests passed, including an empty worktrees directory after checkout and after a failed local run, the temporary-table delete rejection, and a budget release after `token_budget_monthly` is cleared.
+- `pnpm -F @aria/middleware test` — 24 files, 135 tests passed, including an empty worktrees directory after checkout and after a failed local run, the temporary-table delete rejection, a budget release after `token_budget_monthly` is cleared, and `ANTHROPIC_ENABLED=false` staying off.
 - `node` resolves `@aria/db` and `@aria/shared` to `packages/*/dist/index.js` and loads them.
 - V19's purge functions and V20's `budget_project_scoped` column were applied to the local database with `psql`. Flyway was not repaired. A fresh CI database applies the edited files from scratch.
 - Docker is not installed in this environment. The image boot and compose health check are the `docker-images` CI job.
