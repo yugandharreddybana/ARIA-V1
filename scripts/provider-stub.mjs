@@ -232,7 +232,10 @@ function writeSse(res, agent) {
   ].join('\n');
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   if (agent.kind === 'slow') {
-    setTimeout(() => res.end(sse), 400);
+    const requested = Number(marker(agent.prompt, 'slow'));
+    // [[stub:slow]] stays at 400ms. [[stub:slow=8000]] holds the stream open.
+    const delay = Number.isFinite(requested) && requested > 1 ? requested : 400;
+    setTimeout(() => res.end(sse), delay);
     return;
   }
   res.end(sse);
