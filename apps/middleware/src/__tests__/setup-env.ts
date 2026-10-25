@@ -1,4 +1,15 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+
+try {
+  const stub = JSON.parse(readFileSync('/tmp/aria-provider-stub.json', 'utf8')) as { base?: string };
+  if (stub.base) {
+    process.env.CURSOR_API_BASE ??= stub.base;
+    process.env.GITHUB_API_BASE ??= stub.base;
+  }
+} catch {
+  // The stub file is written by globalSetup. Unit tests that mock GitHub do not need it.
+}
 
 process.env.NODE_ENV = 'test';
 process.env.VITEST = '1';
@@ -9,6 +20,9 @@ process.env.WORKSPACE_ENCRYPTION_KEY ??= 'test-workspace-encryption-key-32b';
 process.env.GITHUB_CLIENT_ID ??= '';
 process.env.GITHUB_CLIENT_SECRET ??= '';
 process.env.AUTH_RATE_LIMIT_MAX ??= '1000';
+process.env.RATE_LIMIT_MAX ??= '10000';
+process.env.ARIA_CURSOR_LOCAL_MODE ??= 'stub';
+process.env.ARIA_DATA_DIR ??= '/tmp/aria-data';
 process.env.ARIA_LLM_MODE ??= 'mock';
 process.env.ARIA_GITHUB_MODE ??= 'mock';
 process.env.OLLAMA_BASE_URL ??= 'http://127.0.0.1:11434';

@@ -8,6 +8,7 @@ import app from '../app';
 import { getPgPool } from '../services/db.client';
 import { processNextAnalysisJob } from '../services/analysisWorker.service';
 import { completeThroughGateway } from '../services/guardedLlm.service';
+import { monthlyBucketId } from '../services/runs/budget';
 
 const MIX = { business: 1, qa: 2, frontend: 1, backend: 1, fullstack: 1, junior: 0, aiml: 0, devops: 0, security: 0 };
 
@@ -143,7 +144,7 @@ describe('review fixes', () => {
   it('refuses regeneration while tickets exist unless force is set, and promotes a backup', async () => {
     const { owner, projectId } = await analyzedProject('regen');
     const company = await request(app).post(`/api/projects/${projectId}/company`).set(owner.auth).send({ size: 8, mix: MIX });
-    expect(company.status).toBe(201);
+    expect(company.status).toBe(202);
     await db.insert(tickets).values({
       projectId,
       type: 'feature',
@@ -164,7 +165,7 @@ describe('review fixes', () => {
     expect(promoted?.ownerAgentId).toBe(flow!.backupAgentId);
 
     const forced = await request(app).post(`/api/projects/${projectId}/company`).set(owner.auth).send({ size: 8, mix: MIX, force: true });
-    expect(forced.status).toBe(201);
+    expect(forced.status).toBe(202);
     expect(forced.body.agents.some((agent: { roleKey: string; enabled: boolean }) => agent.roleKey === 'documentation' && agent.enabled === false)).toBe(true);
     expect(forced.body.agents.some((agent: { roleKey: string; enabled: boolean }) => agent.roleKey === 'pr_coordinator' && agent.enabled === false)).toBe(true);
   });
@@ -210,7 +211,7 @@ describe('review fixes', () => {
     const read = async () => {
       const result = await pool.query(
         `SELECT COALESCE(SUM(tokens_used), 0)::int AS used FROM token_ledger WHERE session_id = $1`,
-        [owner.workspaceId],
+        [monthlyBucketId(owner.workspaceId)],
       );
       return result.rows[0].used as number;
     };

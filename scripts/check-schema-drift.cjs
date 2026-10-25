@@ -35,6 +35,23 @@ if (!/CREATE TABLE IF NOT EXISTS business_flows[\s\S]*UNIQUE \(project_id, flow_
   fail('Flyway is missing UNIQUE (project_id, flow_key)');
 }
 
+const required = ['agent_runs', 'flow_owners', 'ticket_events', 'ticket_reports', 'story_points'];
+for (const name of required) {
+  if (!flyway.includes(name)) fail(`Flyway is missing ${name}`);
+}
+const agentRuns = fs.readFileSync(path.join(root, 'packages/db/src/schema/agent-runs.ts'), 'utf8');
+const flowOwners = fs.readFileSync(path.join(root, 'packages/db/src/schema/flow-owners.ts'), 'utf8');
+if (!agentRuns.includes("pgTable('agent_runs'") || !agentRuns.includes("pgTable('ticket_events'") || !agentRuns.includes("pgTable('ticket_reports'")) {
+  fail('Drizzle is missing agent run, ticket event, or ticket report tables');
+}
+if (!flowOwners.includes("pgTable('flow_owners'")) fail('Drizzle is missing flow_owners');
+if (/owner_agent_id/.test(knowledge) || /owned_flow_ids/.test(skills) || /ownedFlowIds/.test(skills)) {
+  fail('Drizzle still maps owner_agent_id or owned_flow_ids');
+}
+if (!/DROP COLUMN IF EXISTS owner_agent_id/.test(flyway) || !/DROP COLUMN IF EXISTS owned_flow_ids/.test(flyway)) {
+  fail('Flyway does not drop owner_agent_id and owned_flow_ids');
+}
+
 if (failures.length) {
   console.error(failures.map((line) => `- ${line}`).join('\n'));
   process.exit(1);

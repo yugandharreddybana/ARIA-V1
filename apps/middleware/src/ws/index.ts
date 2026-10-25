@@ -17,6 +17,8 @@ import jwt from 'jsonwebtoken';
 import { getJwtPublicKeyPem } from '../config/jwt';
 import { validateEnv } from '../config/env';
 import { getTokenGateway } from '../services/tokenGateway.factory';
+import { db, projects } from '@aria/db';
+import { and, eq } from 'drizzle-orm';
 
 export interface AriaSocketUser {
   userId: string;
@@ -95,9 +97,13 @@ export function createWsServer(httpServer: HttpServer): IOServer {
 
     // ── Project rooms (agent ticket mutations broadcast here) ──
     socket.on('join:project', (payload: { projectId: string }) => {
-      if (typeof payload?.projectId === 'string' && payload.projectId.length > 0) {
-        socket.join(`project:${payload.projectId}`);
-      }
+      const projectId = payload?.projectId;
+      if (typeof projectId !== 'string' || projectId.length === 0) return;
+      void db.query.projects.findFirst({
+        where: and(eq(projects.id, projectId), eq(projects.workspaceId, user.workspaceId)),
+      }).then((project) => {
+        if (project) socket.join(`project:${projectId}`);
+      }).catch(() => undefined);
     });
 
     socket.on('leave:project', (payload: { projectId: string }) => {

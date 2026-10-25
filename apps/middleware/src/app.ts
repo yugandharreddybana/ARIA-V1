@@ -30,6 +30,7 @@ import fleetRoutes from './routes/fleet.routes';
 import workspaceRoutes from './routes/workspace.routes';
 import onboardingRoutes from './routes/onboarding.routes';
 import setupRoutes, { githubConnectRouter, projectInsightRouter } from './routes/setup.routes';
+import { projectM2Router, runM2Router, ticketM2Router } from './routes/m2.routes';
 
 export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   const app = express();
@@ -55,10 +56,13 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/github',           githubConnectRouter);
   app.use('/api/projects',         projectInsightRouter);
   app.use('/api/projects',         projectsRoutes);
+  app.use('/api/projects',         projectM2Router);
+  app.use('/api/runs',             runM2Router);
   app.use('/api/projects',         skillsRoutes);         // /:projectId/skills and /:projectId/teams
   app.use('/api/analysis/jobs',    analysisRoutes);
   app.use('/api/graph',            graphRoutes);
   app.use('/api/tickets',          ticketsRoutes);
+  app.use('/api/tickets',          ticketM2Router);
   app.use('/api/agent/tickets',    agentTicketsRoutes);
   app.use('/api/sessions',         sessionsRoutes);
   app.use('/api/ideas',            ideasRoutes);

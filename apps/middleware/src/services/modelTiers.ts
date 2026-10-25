@@ -13,6 +13,7 @@ export const TASK_TYPES = [
   'architecture',
   'idea_analysis',
   'security_review',
+  'code_review',
   'coding',
   'tests',
   'fixes',
@@ -54,6 +55,7 @@ export function taskClassOf(task: TaskType): TaskClass {
     case 'architecture':
     case 'idea_analysis':
     case 'security_review':
+    case 'code_review':
       return 'planning';
     case 'coding':
     case 'tests':
@@ -147,7 +149,7 @@ const CURSOR_TOP_PREFERENCE = [
   'claude-4.6-opus-thinking',
 ];
 
-const CURSOR_AUTO_PREFERENCE = ['auto', 'auto-smart'];
+const CURSOR_AUTO_PREFERENCE = ['auto-smart', 'auto'];
 
 function catalogHas(catalog: CatalogEntry[], id: string): CatalogEntry | undefined {
   return catalog.find((entry) => entry.id === id || entry.aliases?.includes(id));

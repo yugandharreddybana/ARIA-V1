@@ -88,7 +88,7 @@ describe('milestone 1 setup integration', () => {
       size: 8,
       mix: { business: 1, qa: 2, frontend: 1, backend: 1, fullstack: 1, junior: 0, aiml: 0, devops: 0, security: 0 },
     });
-    expect(company.status).toBe(201);
+    expect(company.status).toBe(202);
     const agents = company.body.agents as Array<{ id: string; roleKey: string; realName: string; enabled: boolean; slug: string }>;
     expect(agents.some((agent) => agent.roleKey === 'ceo')).toBe(true);
     expect(new Set(agents.map((agent) => agent.realName)).size).toBe(agents.length);

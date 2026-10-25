@@ -8,7 +8,7 @@ on:
 
 env:
   PNPM_VERSION: '9.1.0'
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
 
 jobs:
   setup:
@@ -175,6 +175,10 @@ jobs:
           export RATE_LIMIT_MAX=10000
           export GITHUB_CLIENT_ID=""
           export GITHUB_CLIENT_SECRET=""
+          export ARIA_CURSOR_LOCAL_MODE=stub
+          export RUN_WORKER_ENABLED=true
+          export ARIA_DATA_DIR=/tmp/aria-data
+          export ARIA_PUBLIC_URL=http://127.0.0.1:3001
           export NEXT_PUBLIC_MIDDLEWARE_URL="http://localhost:3001"
           node scripts/apply-migrations.cjs
           node scripts/provider-stub.mjs > /tmp/aria-stub.log 2>&1 &

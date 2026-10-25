@@ -14,6 +14,8 @@ import { Sanitizer } from './sanitizer.service';
 import { getTokenGateway } from './tokenGateway.factory';
 import { bindLlmCall, takeLlmCall } from './llmDispatchContext';
 import { mockModeEnabled, type ChatMessage, type LlmEndpoint, type LlmProviderId } from './llmProvider.service';
+import { validateEnv } from '../config/env';
+import { monthlyBucketId } from './runs/budget';
 import { resolveModelRoute, taskTierMap, tierModelMap, type TaskType } from './modelTiers';
 
 const sanitizer = new Sanitizer();
@@ -69,7 +71,8 @@ export async function completeThroughGateway(input: {
   try {
     const response = await gateway.invoke({
       requestId,
-      sessionId: input.workspaceId,
+      sessionId: monthlyBucketId(input.workspaceId),
+      budgetMaxTokens: validateEnv().ARIA_MONTHLY_TOKEN_BUDGET,
       agentId: input.agentId,
       skillSlug: input.skillSlug,
       targetBackend: 'workspace-llm',

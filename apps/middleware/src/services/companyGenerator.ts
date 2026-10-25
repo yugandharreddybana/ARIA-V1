@@ -51,6 +51,13 @@ export interface GeneratedAgent {
   enabled: boolean;
 }
 
+export interface FlowAssignment {
+  flowId: string;
+  layer: 'frontend' | 'backend' | 'fullstack';
+  role: 'owner' | 'backup';
+  agentTempId: string;
+}
+
 export interface GenerateCompanyInput {
   size: number;
   mix: CompanyMix;
@@ -228,8 +235,16 @@ function instructionsFor(seat: Seat, flowNames: string[]): string {
   ].join(' ');
 }
 
-function assignFlows(agents: GeneratedAgent[], flows: FlowRef[]): Map<string, { owner: string; backup: string | null }> {
+function layerFor(flow: FlowRef): 'frontend' | 'backend' | 'fullstack' {
+  const key = `${flow.flowKey} ${flow.name} ${flow.kind}`.toLowerCase();
+  if (flow.kind === 'ui' || /signup|login|home|sign-up|sign-in/.test(key)) return 'frontend';
+  if (flow.kind === 'api' || flow.kind === 'data' || /api|auth/.test(key)) return 'backend';
+  return 'fullstack';
+}
+
+export function assignFlowRows(agents: GeneratedAgent[], flows: FlowRef[]): { owners: Map<string, { owner: string; backup: string | null }>; assignments: FlowAssignment[] } {
   const owners = new Map<string, { owner: string; backup: string | null }>();
+  const assignments: FlowAssignment[] = [];
   const byRole = (role: RoleKey) => agents.filter((agent) => agent.roleKey === role);
   const first = (...roles: RoleKey[]) => {
     for (const role of roles) {
@@ -250,14 +265,21 @@ function assignFlows(agents: GeneratedAgent[], flows: FlowRef[]): Map<string, { 
         : first('cto', 'ceo');
     const backupAgent = backup.tempId === owner.tempId ? agents.find((agent) => agent.tempId !== owner.tempId) ?? null : backup;
     owner.ownedFlowIds.push(flow.id);
+    const layer = layerFor(flow);
     owners.set(flow.id, { owner: owner.tempId, backup: backupAgent?.tempId ?? null });
+    assignments.push({ flowId: flow.id, layer, role: 'owner', agentTempId: owner.tempId });
+    if (backupAgent) assignments.push({ flowId: flow.id, layer, role: 'backup', agentTempId: backupAgent.tempId });
   }
-  return owners;
+  return { owners, assignments };
 }
 
 const ALWAYS_PRESENT: RoleKey[] = ['documentation', 'pr_coordinator'];
 
-export function generateCompany(input: GenerateCompanyInput): { agents: GeneratedAgent[]; flowOwners: Map<string, { owner: string; backup: string | null }> } {
+export function generateCompany(input: GenerateCompanyInput): {
+  agents: GeneratedAgent[];
+  flowOwners: Map<string, { owner: string; backup: string | null }>;
+  flowAssignments: FlowAssignment[];
+} {
   if (!Number.isInteger(input.size) || input.size < 3 || input.size > 40) {
     throw new Error('Company size must be an integer from 3 to 40');
   }
@@ -318,12 +340,13 @@ export function generateCompany(input: GenerateCompanyInput): { agents: Generate
     agents[i].backupTempId = same?.tempId ?? manager?.tempId ?? fallback?.tempId ?? null;
   }
 
-  const flowOwners = assignFlows(agents, input.flows ?? []);
+  const assigned = assignFlowRows(agents, input.flows ?? []);
+  const flowOwners = assigned.owners;
   for (const agent of agents) {
     const owned = (input.flows ?? []).filter((flow) => agent.ownedFlowIds.includes(flow.id)).map((flow) => flow.name);
     const seat = seats[agents.indexOf(agent)];
     agent.instructions = instructionsFor(seat, owned);
   }
 
-  return { agents, flowOwners };
+  return { agents, flowOwners, flowAssignments: assigned.assignments };
 }

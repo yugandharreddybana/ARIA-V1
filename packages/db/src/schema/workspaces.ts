@@ -31,6 +31,8 @@ export const workspaces = pgTable('workspaces', {
   llmModel:                   varchar('llm_model', { length: 200 }),
   llmTierModels:              jsonb('llm_tier_models').notNull().default({}),
   llmModelCatalog:            jsonb('llm_model_catalog').notNull().default([]),
+  llmCatalogRefreshedAt:      timestamp('llm_catalog_refreshed_at', { withTimezone: true }),
+  githubPushTokenEncrypted:   text('github_push_token_encrypted'),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

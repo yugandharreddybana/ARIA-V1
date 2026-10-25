@@ -1,5 +1,5 @@
 import {
-  pgTable, uuid, varchar, text, integer, boolean,
+  pgTable, uuid, varchar, text, integer, bigint, boolean,
   timestamp, index, jsonb,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
@@ -50,8 +50,8 @@ export const skills = pgTable('skills', {
   ownedDomains:    jsonb('owned_domains').notNull().default([]),
   ownedRepoPaths:  jsonb('owned_repo_paths').notNull().default([]),
   triggerKeywords: jsonb('trigger_keywords').notNull().default([]),
-  ownedFlowIds:    jsonb('owned_flow_ids').notNull().default([]),
   backupAgentId:   uuid('backup_agent_id'),
+  tokenBudgetMonthly: bigint('token_budget_monthly', { mode: 'number' }),
   enabled:         boolean('enabled').notNull().default(true),
 
   // ── AI-generated instructions (written by skillFactory during onboarding) ─

@@ -2,6 +2,7 @@
   "name": "@aria/middleware",
   "version": "0.1.0",
   "private": true,
+  "engines": { "node": ">=22.13.0" },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
@@ -9,12 +10,14 @@
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke:cursor": "tsx src/scripts/smoke-cursor.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@aria/shared": "workspace:*",
     "@aria/db": "workspace:*",
+    "@cursor/sdk": "1.0.40",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
@@ -25,6 +28,7 @@
     "helmet": "^7.1.0",
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
+    "pdfkit": "0.15.2",
     "pg": "^8.12.0",
     "postgres": "^3.4.4",
     "socket.io": "^4.7.5",
@@ -39,6 +43,7 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.0",
+    "@types/pdfkit": "^0.13.9",
     "@types/pg": "^8.11.6",
     "@types/uuid": "^10.0.0",
     "socket.io-client": "^4.7.5",

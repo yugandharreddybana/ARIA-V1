@@ -121,7 +121,8 @@ projectInsightRouter.post('/:projectId/company', validate(companyGenerateSchema)
       req.body.modelTiers,
       req.body.force === true,
     );
-    res.status(201).json(company);
+    const { statusCode, ...body } = company;
+    res.status(statusCode).json(body);
   } catch (err) { next(err); }
 });
 
