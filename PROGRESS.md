@@ -6,11 +6,60 @@
 
 ---
 
-## Milestone 2 — agents doing real work through Cursor (planned)
+## Milestone 2 — agent runs backend (this branch)
 
-Plan: `docs/milestones/M2_PLAN.md`. Not started. Backend tasks B1–B18 can start now. Frontend tasks F1–F5 start after the UI simplification PR merges. Open owner questions are in §16 of the plan.
+Branch: `cursor/m2-backend-1c0c`. Plan: `docs/milestones/M2_PLAN.md` (§17 is the ticket log, story points, and evidence). Product spec wins on conflict. Frontend tasks F1–F5 are not in this PR. Agents never merge.
 
-## Milestone 1 — foundation (this branch)
+### Pending owner confirmation
+
+These are the plan §16 defaults, each a config setting, until the owner says otherwise:
+
+- `ARIA_CURSOR_KEY_TYPE=user`
+- `ARIA_MONTHLY_TOKEN_BUDGET=20000000` (tokens, not dollars)
+- `ARIA_MERGE_GUARD_MODE=block`
+- `ARIA_LOCAL_FALLBACK=off` (local worktree worker is not built)
+- `ARIA_AWAITING_MERGE_COUNTS_ACTIVE=false`
+- `ARIA_QA_BROWSER=false` and `ARIA_SECURITY_REVIEW=false`. Before/after screenshots are required in the evidence prompts. The visual-regression suite and the LLM security review stay M3.
+- `ARIA_MAX_REVIEW_FIX_ROUNDS=2` and `ARIA_MAX_QA_FIX_ROUNDS=2`
+- Schedule: `ARIA_WORKDAYS=1,2,3,4,5`, `ARIA_TIMEZONE=UTC`, workday `09:00`–`18:00`, risk ratio `0.8`
+
+### What landed
+
+- **B1.** Node 22 in engines, `.nvmrc`, Dockerfiles, and CI. `@cursor/sdk` `1.0.40`. Stub mode is refused in production.
+- **B2.** Flyway V15 `agent_runs` and `agent_run_logs`. Drizzle matches. `TicketStatus` includes `awaiting_merge` and `blocked`. Drift check passes.
+- **B3–B5.** Queue (`FOR UPDATE SKIP LOCKED`, 90s lease, 30s heartbeat, reaper), worker, redacted logs, runs API, monthly token buckets, agent OFF blocks queued runs and cancels running rows.
+- **B6.** Provider stub covers Cursor agents, SSE, usage, cancel, GitHub PRs, reviews, checks, and branches. Merge endpoints return 418. Vitest global setup points the suite at the stub.
+- **B7–B9.** Structured JSON with one retry. Cloud worker uses `bc-<run id>`, adopts a 409, and falls back to poll on 410. Local planning is a scrubbed child process. The child does not import `@cursor/sdk` yet.
+- **B10.** V16 `flow_owners`. Dropped `business_flows.owner_agent_id`, `business_flows.backup_agent_id`, and `skills.owned_flow_ids`. `skills.backup_agent_id` stays (the agent's own backup). JSON still returns `ownerAgentId` / `backupAgentId` from the join table.
+- **B11–B12.** Knowledge-map and company runs enqueue. Company with an LLM returns 202 and still applies the template roster (so the CEO slug and seat count stay stable). No LLM stays 201. Knowledge enrichment will not strip a summary that mentions signup.
+- **B13–B15.** Merge tripwire, COMMENT-only reviews, diff guards, develop / review / fix, round caps.
+- **B16.** QA stores a report and will not move a ticket to `awaiting_merge` without valid dev and QA evidence. `prWatcher` is not built: an owner merge in GitHub does not yet move the ticket to `done`.
+- **B17.** Config only. `REPO_ACCESS` blocks the run.
+- **B19.** V17 `ticket_events`, hash chain, timeline, Markdown/JSON export, agent append limited to tickets the agent is on.
+- **B20.** V18 story points (Fibonacci, default 1). `due_at` from working days. At-risk at 80% and overdue past `due_at`, each logged once. `GET /api/projects/:id/schedule`. Points above 8 set `splitSuggested`. Omitted points use a length estimate and are logged.
+- **B21.** Dev and QA Markdown plus pdfkit PDFs in `ticket_reports`. Prompt templates require the sections. Gate sends invalid evidence back as a fix round. Content hash is an `evidence` event. Report links go on the PR comment. Downloads are workspace-scoped.
+
+### Verified locally on 2026-10-25
+
+- `node scripts/check-schema-drift.cjs` passed (V15–V18 applied on this machine earlier in the session).
+- `pnpm -F @aria/middleware exec tsc --noEmit`, `pnpm -F @aria/web exec tsc --noEmit`, and `pnpm -F @aria/config exec tsc --noEmit` passed.
+- `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
+- `pnpm -F @aria/middleware test` — 23 files, 106 tests passed. That includes due-date weekends, at-risk/overdue, prompt headings, report validation, PDF generation, the evidence gate, hash-chain immutability, export, and workspace scoping.
+- `mvn` is not installed in this environment, so Java tests were not re-run. No Java sources changed.
+
+### Open
+
+- Live `@cursor/sdk` planning, `repoMirror`, `resolveForRun` (24h catalog refresh and `MODEL_UNAVAILABLE` for a missing pin), `prWatcher`, and `localWorktreeWorker` are not in this PR.
+- Company AI output is not applied; the template roster is. Knowledge AI merge updates the summary only.
+- `budget:warn` is specified and not emitted. `schedule:alert` is.
+- Point estimates on create are a length heuristic, not a planning-agent call.
+- Screenshot capture is a prompt requirement plus a stub PNG. Middleware does not run Playwright. `ARIA_QA_BROWSER` stays false.
+- `smoke:cursor` has not been run against a real key. No scratch-repo ticket has gone through a live develop → owner merge.
+- Two workers racing one claim is not an integration test yet. The partial unique index and `23505` handling are in the claim path.
+
+Non-goals that stay M3 or later: standup ceremony, merge-order coordinator, red/blue execution, ideas and proposals, the learning agent, the visual-regression suite, LLM security review, worker sub-agents, multi-tenant, GitHub webhooks. Frontend F1–F5, including the timeline UI, wait for the UI PR.
+
+## Milestone 1 — foundation (merged, PR #5)
 
 Branch: `cursor/milestone-1-foundation-db70`. PR #5. Product spec: `docs/PRODUCT_SPEC.md`.
 
@@ -41,7 +90,7 @@ Verified locally on 2026-10-25 (Postgres 16 + pgvector and Redis on the host; Do
 - Playwright, live mode against the stub, `BASE_URL=http://localhost:3000`, workers 1, retries 0: milestone + landing + sprint 1–4 on chromium-desktop, chromium-tablet, and chromium-mobile — **213 passed (3.7m)**.
 
 Decisions the owner needs:
-- Cursor still has no chat-completions API. Test Connection stores ids from `GET /v1/models`. Completions throw `CURSOR_NO_CHAT_API` after the queue selects the model. Milestone 2 (agent runs) is not started. Details: `docs/CURSOR_PROVIDER.md`.
+- Cursor still has no chat-completions API. Test Connection stores ids from `GET /v1/models`. Completions throw `CURSOR_NO_CHAT_API` after the queue selects the model. Agent runs are Milestone 2 (see the section above). Details: `docs/CURSOR_PROVIDER.md`.
 - Company size counts ON seats, including leadership. Documentation and the PR coordinator are extra OFF agents when they do not fit.
 - Company generation still dispatches one `company_generation` call. Cursor refuses it. The template org is what you edit.
 - `POST /api/projects/:id/teams` is still the older unvalidated team route. The review asked to disable the unvalidated skill-creation paths, and those return 410.
