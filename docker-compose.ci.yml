@@ -20,6 +20,7 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       RUN_WORKER_ENABLED: "false"
+      ANTHROPIC_ENABLED: "false"
       ARIA_LLM_MODE: mock
       DATABASE_URL: postgresql://${POSTGRES_USER:-aria}:${POSTGRES_PASSWORD:-aria}@postgres:5432/${POSTGRES_DB:-aria_dev}
       REDIS_URL: redis://redis:6379
