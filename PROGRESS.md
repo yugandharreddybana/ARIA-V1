@@ -6,6 +6,10 @@
 
 ---
 
+## Milestone 2 — agents doing real work through Cursor (planned)
+
+Plan: `docs/milestones/M2_PLAN.md`. Not started. Backend tasks B1–B18 can start now. Frontend tasks F1–F5 start after the UI simplification PR merges. Open owner questions are in §16 of the plan.
+
 ## UI simplification (this branch)
 
 Branch: `cursor/simplify-web-ui-d456`. UI in `apps/web`, plus the Playwright suite. Middleware only forwards the bearer token to the concept graph and proxies orchestrator session create. No schema changes.
