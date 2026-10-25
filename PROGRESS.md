@@ -6,6 +6,18 @@
 
 ---
 
+## UI simplification (this branch)
+
+Branch: `cursor/simplify-web-ui-d456`. UI only (`apps/web` and Playwright). No middleware, API, or schema changes.
+
+- Light theme by default, optional dark mode (`aria-theme` on `<html>`), one accent, system font, shared primitives (Button, Input, Card, Badge, Dialog, EmptyState, PageHeader, Table).
+- Sidebar is Projects, Company, Board, Runs, Settings. `/dashboard` redirects to `/projects`. `/sessions` redirects to `/runs`. `/board` renders the ticket board. Signup goes to `/setup`.
+- Setup is one stepper (project, model, GitHub, knowledge, company). The org chart uses custom nodes (name, role, ON/OFF) and a side panel. `components/runs/agent-runs.tsx` is an empty Queue slot for Milestone 2.
+- A project page still opens when the Java analysis service is down. The jobs section shows that error.
+- Verified: `pnpm -F @aria/web exec tsc --noEmit`, `pnpm -F @aria/web lint` (clean). Playwright milestone + landing + sprint 1–4 on chromium-desktop, chromium-tablet, and chromium-mobile: **213 passed**.
+
+Follow-ups: Milestone 2 should fill the Queue slot. `POST /api/projects/:id/skills` still returns 410. Concept graph and analysis jobs need the Java backend. Specs outside CI (`dashboard.spec.ts`, sprint 5+, `apps/e2e/src/agent-kanban.spec.ts`) were not rewritten.
+
 ## Milestone 1 — foundation (this branch)
 
 Branch: `cursor/milestone-1-foundation-db70`. PR #5. Product spec: `docs/PRODUCT_SPEC.md`.

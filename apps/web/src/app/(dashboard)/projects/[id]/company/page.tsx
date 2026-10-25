@@ -15,6 +15,11 @@ import { api, ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PageHeader } from '@/components/ui/page-header';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ErrorNote, LoadingState } from '@/components/ui/empty-state';
+import { AgentNode, type AgentNodeData } from '@/components/company/agent-node';
+import { rememberProject } from '@/lib/project-selection';
 
 interface Agent {
   id: string;
@@ -63,6 +68,8 @@ const ROLE_KEYS = [
   'documentation', 'pr_coordinator',
 ] as const;
 
+const nodeTypes = { agent: AgentNode };
+
 function tierValue(value: FormDataEntryValue | null): 'top' | 'auto' | null {
   return value === 'top' || value === 'auto' ? value : null;
 }
@@ -76,6 +83,7 @@ export default function CompanyPage() {
   const [autoModel, setAutoModel] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [realName, setRealName] = useState('');
   const [roleTitle, setRoleTitle] = useState('Engineer');
   const [roleKey, setRoleKey] = useState<(typeof ROLE_KEYS)[number]>('fullstack');
@@ -90,10 +98,14 @@ export default function CompanyPage() {
     setTiers(data.modelTiers);
     setTopModel(data.modelTiers.topModel ?? '');
     setAutoModel(data.modelTiers.autoModel ?? '');
+    rememberProject(params.id);
   }, [params.id]);
 
   useEffect(() => {
-    load().catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Could not load the company'));
+    setLoading(true);
+    load()
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Could not load the company'))
+      .finally(() => setLoading(false));
   }, [load]);
 
   const current = agents.find((agent) => agent.id === selected) ?? null;
@@ -107,6 +119,19 @@ export default function CompanyPage() {
     }
   }
 
+  const toggleById = useCallback(async (agent: Agent) => {
+    setError('');
+    try {
+      await api(`/projects/${params.id}/agents/${agent.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: !agent.enabled }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'The company could not be updated');
+    }
+  }, [load, params.id]);
+
   const nodes: Node[] = useMemo(() => {
     const columns = new Map<number, number>();
     return agents.map((agent) => {
@@ -114,19 +139,21 @@ export default function CompanyPage() {
       columns.set(agent.hierarchyLevel, column + 1);
       return {
         id: agent.id,
-        position: { x: column * 240, y: (agent.hierarchyLevel - 1) * 140 },
-        data: { label: `${agent.realName}\n${agent.roleTitle}${agent.enabled ? '' : ' · OFF'}` },
-        style: {
-          width: 220,
-          whiteSpace: 'pre-wrap' as const,
-          fontSize: 12,
-          borderRadius: 8,
-          padding: 8,
-          opacity: agent.enabled ? 1 : 0.45,
-        },
+        type: 'agent',
+        position: { x: column * 260, y: (agent.hierarchyLevel - 1) * 160 },
+        data: {
+          slug: agent.slug,
+          name: agent.realName,
+          role: agent.roleTitle,
+          enabled: agent.enabled,
+          selected: agent.id === selected,
+          onOpen: () => { setSelected(agent.id); setConfirmDelete(false); },
+          onToggle: () => { void toggleById(agent); },
+        } satisfies AgentNodeData,
+        draggable: false,
       };
     });
-  }, [agents]);
+  }, [agents, selected, toggleById]);
 
   const edges: Edge[] = useMemo(() => agents.flatMap((agent) => (
     agent.reportingManagerId ? [{ id: `${agent.reportingManagerId}-${agent.id}`, source: agent.reportingManagerId, target: agent.id }] : []
@@ -158,13 +185,7 @@ export default function CompanyPage() {
 
   async function toggle() {
     if (!current) return;
-    await run(async () => {
-      await api(`/projects/${params.id}/agents/${current.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ enabled: !current.enabled }),
-      });
-      await load();
-    });
+    await toggleById(current);
   }
 
   async function remove() {
@@ -225,259 +246,208 @@ export default function CompanyPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Org chart</h1>
-        <Link href={`/projects/${params.id}/knowledge`} className="text-sm text-aria-400">Knowledge map</Link>
-      </div>
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <div className="space-y-6 p-4 md:p-8">
+      <PageHeader
+        title="Company"
+        description="People, who they report to, and whether they are allowed to work."
+        action={(
+          <Link href={`/projects/${params.id}/knowledge`} className="text-sm text-primary">
+            Knowledge map
+          </Link>
+        )}
+      />
+      {error && <ErrorNote>{error}</ErrorNote>}
+      {loading && <LoadingState label="Loading the company…" />}
+
       {tiers && (
-        <form onSubmit={saveTiers} className="space-y-3 max-w-xl border border-border rounded-lg p-4">
-          <h2 className="font-semibold">Model tiers</h2>
-          <p className="text-sm text-muted-foreground">
-            Planning uses {tiers.planningModel}. Development uses {tiers.developmentModel}. An empty model id keeps the provider default.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="project-planning">Planning</Label>
-              <select
-                id="project-planning"
-                data-testid="project-planning-tier"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={tiers.planning}
-                onChange={(event) => setTiers({ ...tiers, planning: event.target.value === 'auto' ? 'auto' : 'top' })}
-              >
-                <option value="top">Top tier</option>
-                <option value="auto">Auto / standard</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="project-development">Development</Label>
-              <select
-                id="project-development"
-                data-testid="project-development-tier"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={tiers.development}
-                onChange={(event) => setTiers({ ...tiers, development: event.target.value === 'top' ? 'top' : 'auto' })}
-              >
-                <option value="auto">Auto / standard</option>
-                <option value="top">Top tier</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="top-model">Top model id</Label>
-              <Input id="top-model" data-testid="project-top-model" value={topModel} onChange={(event) => setTopModel(event.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="auto-model">Auto / standard model id</Label>
-              <Input id="auto-model" data-testid="project-auto-model" value={autoModel} onChange={(event) => setAutoModel(event.target.value)} />
-            </div>
-          </div>
-          <Button type="submit" variant="outline" data-testid="save-model-tiers">Save tiers</Button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Model tiers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={saveTiers} className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Planning uses {tiers.planningModel}. Development uses {tiers.developmentModel}. Leave a model id empty to keep the provider default.
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="project-planning">Planning</Label>
+                  <select id="project-planning" data-testid="project-planning-tier" className="field" value={tiers.planning} onChange={(event) => setTiers({ ...tiers, planning: event.target.value === 'auto' ? 'auto' : 'top' })}>
+                    <option value="top">Top tier</option>
+                    <option value="auto">Auto / standard</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="project-development">Development</Label>
+                  <select id="project-development" data-testid="project-development-tier" className="field" value={tiers.development} onChange={(event) => setTiers({ ...tiers, development: event.target.value === 'top' ? 'top' : 'auto' })}>
+                    <option value="auto">Auto / standard</option>
+                    <option value="top">Top tier</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="top-model">Top model id</Label>
+                  <Input id="top-model" data-testid="project-top-model" value={topModel} onChange={(event) => setTopModel(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="auto-model">Auto / standard model id</Label>
+                  <Input id="auto-model" data-testid="project-auto-model" value={autoModel} onChange={(event) => setAutoModel(event.target.value)} />
+                </div>
+              </div>
+              <Button type="submit" variant="outline" data-testid="save-model-tiers">Save tiers</Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
-      <div data-testid="org-chart" className="h-[480px] border border-border rounded-lg">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          fitView
-          onNodeClick={(_event, node) => setSelected(node.id)}
-        >
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </div>
-      <ul className="flex flex-wrap gap-2">
-        {agents.map((agent) => (
-          <li key={agent.id}>
-            <button
-              type="button"
-              data-testid={`agent-${agent.slug}`}
-              className="text-left text-sm border border-border rounded-md px-2 py-1"
-              onClick={() => { setSelected(agent.id); setConfirmDelete(false); }}
-            >
-              {agent.realName} · {agent.enabled ? 'ON' : 'OFF'}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {current && (
-        <form onSubmit={saveEdits} className="space-y-3 max-w-xl border border-border rounded-lg p-4">
-          <h2 className="font-semibold">{current.realName}</h2>
-          <div className="space-y-1.5">
-            <Label htmlFor="roleTitle">Role</Label>
-            <Input id="roleTitle" name="roleTitle" defaultValue={current.roleTitle} key={`${current.id}-role`} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="description">Responsibilities</Label>
-            <Input id="description" name="description" defaultValue={current.description} key={`${current.id}-desc`} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="instructions">Instructions</Label>
-            <textarea
-              id="instructions"
-              name="instructions"
-              data-testid="agent-instructions"
-              key={`${current.id}-inst`}
-              defaultValue={current.instructions}
-              className="w-full min-h-28 rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Planning model {current.planningModel ?? 'inherits'}. Development model {current.developmentModel ?? 'inherits'}.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div data-testid="org-chart" className="h-[32rem] rounded-lg border bg-card">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            nodesDraggable={false}
+            onNodeClick={(_event, node) => { setSelected(node.id); setConfirmDelete(false); }}
+          >
+            <Background />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+
+        <aside className="space-y-4 rounded-lg border bg-card p-4" aria-label="Person details">
+          {current ? (
+            <form onSubmit={saveEdits} className="space-y-3">
+              <h2 className="font-semibold">{current.realName}</h2>
+              <p className="text-sm text-muted-foreground">
+                {current.enabled ? 'This person is ON and can take work.' : 'This person is OFF and uses no tokens.'}
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="roleTitle">Role</Label>
+                <Input id="roleTitle" name="roleTitle" defaultValue={current.roleTitle} key={`${current.id}-role`} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="description">Responsibilities</Label>
+                <Input id="description" name="description" defaultValue={current.description} key={`${current.id}-desc`} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="instructions">Instructions</Label>
+                <textarea id="instructions" name="instructions" data-testid="agent-instructions" key={`${current.id}-inst`} defaultValue={current.instructions} className="field min-h-28" />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Planning model {current.planningModel ?? 'inherits'}. Development model {current.developmentModel ?? 'inherits'}.
+              </p>
+              <div className="grid grid-cols-1 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="agent-planning">Planning tier</Label>
+                  <select id="agent-planning" name="planningTier" data-testid="agent-planning-tier" key={`${current.id}-ptier`} defaultValue={current.planningTier ?? ''} className="field">
+                    <option value="">Inherit project</option>
+                    <option value="top">Top tier</option>
+                    <option value="auto">Auto / standard</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="agent-development">Development tier</Label>
+                  <select id="agent-development" name="developmentTier" data-testid="agent-development-tier" key={`${current.id}-dtier`} defaultValue={current.developmentTier ?? ''} className="field">
+                    <option value="">Inherit project</option>
+                    <option value="top">Top tier</option>
+                    <option value="auto">Auto / standard</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="agent-manager">Manager</Label>
+                  <select id="agent-manager" name="reportingManagerId" data-testid="agent-manager" key={`${current.id}-manager`} defaultValue={current.reportingManagerId ?? ''} className="field">
+                    <option value="">No manager</option>
+                    {agents.filter((agent) => agent.id !== current.id).map((agent) => (
+                      <option key={agent.id} value={agent.id}>{agent.realName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="agent-backup">Backup</Label>
+                  <select id="agent-backup" name="backupAgentId" data-testid="agent-backup" key={`${current.id}-backup`} defaultValue={current.backupAgentId ?? ''} className="field">
+                    <option value="">No backup</option>
+                    {agents.filter((agent) => agent.id !== current.id).map((agent) => (
+                      <option key={agent.id} value={agent.id}>{agent.realName}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="model-override">Model override</Label>
+                <Input id="model-override" name="modelOverride" data-testid="agent-model-override" key={`${current.id}-model`} defaultValue={current.modelOverride ?? ''} />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" data-testid="save-agent">Save</Button>
+                <Button type="button" variant="outline" data-testid="agent-toggle" onClick={toggle}>{current.enabled ? 'Turn OFF' : 'Turn ON'}</Button>
+                {confirmDelete ? (
+                  <Button type="button" variant="destructive" data-testid="agent-delete-confirm" onClick={remove}>Confirm delete</Button>
+                ) : (
+                  <Button type="button" variant="ghost" data-testid="agent-delete" onClick={() => setConfirmDelete(true)}>Delete</Button>
+                )}
+              </div>
+            </form>
+          ) : (
+            <p className="text-sm text-muted-foreground">Select a person to edit their role, instructions, manager, or backup.</p>
+          )}
+
+          <form onSubmit={addAgent} className="space-y-3 border-t pt-4">
+            <h2 className="font-semibold">Add a person</h2>
             <div className="space-y-1.5">
-              <Label htmlFor="agent-planning">Planning tier</Label>
+              <Label htmlFor="new-name">Name</Label>
+              <Input id="new-name" data-testid="new-agent-name" value={realName} onChange={(event) => setRealName(event.target.value)} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-role">Role title</Label>
+              <Input id="new-role" data-testid="new-agent-title" value={roleTitle} onChange={(event) => setRoleTitle(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-role-key">Role</Label>
               <select
-                id="agent-planning"
-                name="planningTier"
-                data-testid="agent-planning-tier"
-                key={`${current.id}-ptier`}
-                defaultValue={current.planningTier ?? ''}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                id="new-role-key"
+                data-testid="new-agent-role"
+                className="field"
+                value={roleKey}
+                onChange={(event) => {
+                  const next = ROLE_KEYS.find((key) => key === event.target.value);
+                  if (next) setRoleKey(next);
+                }}
               >
-                <option value="">Inherit project</option>
-                <option value="top">Top tier</option>
-                <option value="auto">Auto / standard</option>
+                {ROLE_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="agent-development">Development tier</Label>
-              <select
-                id="agent-development"
-                name="developmentTier"
-                data-testid="agent-development-tier"
-                key={`${current.id}-dtier`}
-                defaultValue={current.developmentTier ?? ''}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="">Inherit project</option>
-                <option value="top">Top tier</option>
-                <option value="auto">Auto / standard</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-manager">Manager</Label>
-              <select
-                id="agent-manager"
-                name="reportingManagerId"
-                data-testid="agent-manager"
-                key={`${current.id}-manager`}
-                defaultValue={current.reportingManagerId ?? ''}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
+              <Label htmlFor="new-manager">Manager</Label>
+              <select id="new-manager" data-testid="new-agent-manager" className="field" value={managerId} onChange={(event) => setManagerId(event.target.value)}>
                 <option value="">No manager</option>
-                {agents.filter((agent) => agent.id !== current.id).map((agent) => (
-                  <option key={agent.id} value={agent.id}>{agent.realName}</option>
-                ))}
+                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
               </select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-backup">Backup</Label>
-              <select
-                id="agent-backup"
-                name="backupAgentId"
-                data-testid="agent-backup"
-                key={`${current.id}-backup`}
-                defaultValue={current.backupAgentId ?? ''}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="">No backup</option>
-                {agents.filter((agent) => agent.id !== current.id).map((agent) => (
-                  <option key={agent.id} value={agent.id}>{agent.realName}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="model-override">Model override</Label>
-            <Input id="model-override" name="modelOverride" data-testid="agent-model-override" key={`${current.id}-model`} defaultValue={current.modelOverride ?? ''} />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" variant="aria" data-testid="save-agent">Save</Button>
-            <Button type="button" variant="outline" data-testid="agent-toggle" onClick={toggle}>{current.enabled ? 'Turn OFF' : 'Turn ON'}</Button>
-            {confirmDelete ? (
-              <Button type="button" variant="ghost" data-testid="agent-delete-confirm" onClick={remove}>Confirm delete</Button>
-            ) : (
-              <Button type="button" variant="ghost" data-testid="agent-delete" onClick={() => setConfirmDelete(true)}>Delete</Button>
-            )}
-          </div>
-        </form>
-      )}
-      <form onSubmit={addAgent} className="space-y-3 max-w-xl border border-border rounded-lg p-4">
-        <h2 className="font-semibold">Add an agent</h2>
-        <div className="space-y-1.5">
-          <Label htmlFor="new-name">Name</Label>
-          <Input id="new-name" data-testid="new-agent-name" value={realName} onChange={(event) => setRealName(event.target.value)} required />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="new-role">Role title</Label>
-          <Input id="new-role" data-testid="new-agent-title" value={roleTitle} onChange={(event) => setRoleTitle(event.target.value)} />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="new-role-key">Role</Label>
-            <select
-              id="new-role-key"
-              data-testid="new-agent-role"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={roleKey}
-              onChange={(event) => {
-                const next = ROLE_KEYS.find((key) => key === event.target.value);
-                if (next) setRoleKey(next);
-              }}
-            >
-              {ROLE_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-manager">Manager</Label>
-            <select
-              id="new-manager"
-              data-testid="new-agent-manager"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={managerId}
-              onChange={(event) => setManagerId(event.target.value)}
-            >
-              <option value="">No manager</option>
-              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
-            </select>
-          </div>
-        </div>
-        <Button type="submit" variant="outline" data-testid="add-agent">Add</Button>
-      </form>
+            <Button type="submit" variant="outline" data-testid="add-agent">Add person</Button>
+          </form>
+        </aside>
+      </div>
+
       {flows.length > 0 && (
-        <div className="space-y-3 max-w-xl border border-border rounded-lg p-4">
-          <h2 className="font-semibold">Flow owners</h2>
-          {flows.map((flow) => (
-            <div key={flow.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
-              <p className="text-sm">{flow.name}</p>
-              <select
-                aria-label={`${flow.name} owner`}
-                data-testid={`flow-owner-${flow.flowKey}`}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={flow.ownerAgentId ?? ''}
-                onChange={(event) => void assignFlow(flow.id, { ownerAgentId: event.target.value || null })}
-              >
-                <option value="">Unassigned</option>
-                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
-              </select>
-              <select
-                aria-label={`${flow.name} backup`}
-                data-testid={`flow-backup-${flow.flowKey}`}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={flow.backupAgentId ?? ''}
-                onChange={(event) => void assignFlow(flow.id, { backupAgentId: event.target.value || null })}
-              >
-                <option value="">No backup</option>
-                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
-              </select>
-            </div>
-          ))}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Flow owners</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {flows.map((flow) => (
+              <div key={flow.id} className="grid grid-cols-1 items-center gap-2 md:grid-cols-3">
+                <p className="text-sm">{flow.name}</p>
+                <select aria-label={`${flow.name} owner`} data-testid={`flow-owner-${flow.flowKey}`} className="field" value={flow.ownerAgentId ?? ''} onChange={(event) => void assignFlow(flow.id, { ownerAgentId: event.target.value || null })}>
+                  <option value="">Unassigned</option>
+                  {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+                </select>
+                <select aria-label={`${flow.name} backup`} data-testid={`flow-backup-${flow.flowKey}`} className="field" value={flow.backupAgentId ?? ''} onChange={(event) => void assignFlow(flow.id, { backupAgentId: event.target.value || null })}>
+                  <option value="">No backup</option>
+                  {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+                </select>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

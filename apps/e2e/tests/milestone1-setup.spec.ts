@@ -8,10 +8,8 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await page.fill('[name="password"]', 'Test1234!');
   await page.fill('[name="confirm"]', 'Test1234!');
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/dashboard/);
-  await expect(page.getByTestId('dashboard-greeting')).toBeVisible();
+  await page.waitForURL(/\/setup/);
 
-  await page.getByTestId('start-setup').click();
   await page.getByTestId('setup-project-name').fill('Demo Shop');
   await page.getByRole('button', { name: 'Continue' }).click();
 

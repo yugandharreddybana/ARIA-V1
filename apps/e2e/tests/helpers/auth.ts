@@ -29,13 +29,13 @@ async function ensureTestUser(): Promise<void> {
 }
 
 export async function revealNav(page: Page): Promise<void> {
-  const dashboard = page.locator('aside').getByRole('link', { name: /^dashboard$/i });
+  const projects = page.locator('aside').getByRole('link', { name: /^projects$/i });
   try {
-    await dashboard.waitFor({ state: 'visible', timeout: 3_000 });
+    await projects.waitFor({ state: 'visible', timeout: 3_000 });
     return;
   } catch {
     await page.getByRole('button', { name: 'Open navigation' }).click();
-    await dashboard.waitFor({ state: 'visible' });
+    await projects.waitFor({ state: 'visible' });
   }
 }
 
@@ -76,7 +76,7 @@ export async function signup(
   const confirm = page.locator('[name="confirm"]');
   if (await confirm.count()) await confirm.fill(password);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
+  await page.waitForURL(/\/(setup|projects|dashboard)/, { timeout: 15_000 });
   return { email, password };
 }
 

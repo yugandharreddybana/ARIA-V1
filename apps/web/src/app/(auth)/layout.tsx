@@ -1,13 +1,10 @@
 import type { ReactNode } from 'react';
-import { BrainCircuit } from 'lucide-react';
+import Link from 'next/link';
 
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      <div className="mb-8 flex items-center gap-2.5">
-        <BrainCircuit className="h-7 w-7 text-aria-500" />
-        <span className="text-2xl font-bold tracking-tight">ARIA</span>
-      </div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-10">
+      <Link href="/" className="mb-8 text-sm font-semibold tracking-tight">ARIA</Link>
       {children}
     </div>
   );

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
+import { PageHeader } from '@/components/ui/page-header';
 
 interface UiDiscoveryRecord {
   ticketId: string;
@@ -71,7 +72,8 @@ export default function UiDiscoveryPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl p-6" data-testid="ui-discovery-page">
+    <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-8" data-testid="ui-discovery-page">
+      <PageHeader title="Discovery" description="Answer these before UI work leaves the backlog." />
       <Card>
         <CardHeader>
           <CardTitle>Turn-1 Discovery — {ticketId}</CardTitle>
@@ -108,7 +110,7 @@ export default function UiDiscoveryPage() {
               <Button type="submit" data-testid="submit" disabled={busy}>
                 {busy ? 'Saving…' : 'Save discovery'}
               </Button>
-              {saved && <span data-testid="saved" className="text-sm text-aria-300">Saved.</span>}
+              {saved && <span data-testid="saved" className="text-sm text-primary">Saved.</span>}
             </div>
           </form>
         </CardContent>

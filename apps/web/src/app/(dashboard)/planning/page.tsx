@@ -43,7 +43,7 @@ function CreateIdeaModal({ projectId, onCreated, onClose }: { projectId: string;
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>New Idea</CardTitle>
@@ -113,7 +113,7 @@ export default function PlanningPage() {
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Lightbulb className="h-5 w-5 text-aria-400" />
+          <Lightbulb className="h-5 w-5 text-primary" />
           <div>
             <h1 className="text-2xl font-bold">Planning</h1>
             <p className="text-sm text-muted-foreground">Idea cards waiting for human approval</p>
