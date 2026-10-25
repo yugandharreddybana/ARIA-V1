@@ -87,15 +87,10 @@ export async function signup(
  */
 export async function createProject(page: Page, name: string): Promise<void> {
   await page.goto('/projects');
-  await page.waitForSelector('button', { timeout: 10_000 });
   await page.getByRole('button', { name: /new project/i }).click();
-  await page.waitForSelector('[id="pname"], [name="name"], input[placeholder*="project" i]', { timeout: 5_000 });
-  // Fill whichever name input is present
-  const nameInput = page.locator('[id="pname"]').or(page.locator('input[placeholder*="platform" i]')).first();
-  await nameInput.fill(name);
-  await page.getByRole('button', { name: /^create$/i }).click();
-  // Wait for the project card to appear in the list
-  await page.waitForSelector(`text=${name}`, { timeout: 10_000 });
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  await page.getByText(name, { exact: true }).first().waitFor({ timeout: 10_000 });
 }
 
 /**

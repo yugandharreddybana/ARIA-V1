@@ -212,7 +212,7 @@ export default function TicketsPage() {
   const joinedProjectRef = useRef<string>('');
 
   // WebSocket for real-time agent updates
-  const { connected, subscribe, unsubscribe } = useAriaSocket();
+  const { connected, lastEvent, subscribe, unsubscribe } = useAriaSocket();
 
   // Load project list on mount
   useEffect(() => {
@@ -264,7 +264,6 @@ export default function TicketsPage() {
   }, [connected, projectId, subscribe, unsubscribe]);
 
   // ── Ticket event listeners (separate effect so they always use fresh state) ──
-  const { lastEvent } = useAriaSocket();
   useEffect(() => {
     if (!lastEvent) return;
 

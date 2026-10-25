@@ -26,7 +26,7 @@ async function assertProjectOwnership(
 export async function fetchConceptGraph(req: AriaRequest, res: Response, next: NextFunction) {
   try {
     await assertProjectOwnership(req.params.projectId, req.user!.workspaceId);
-    const graph = await getConceptGraph(req.params.projectId);
+    const graph = await getConceptGraph(req.params.projectId, req.headers.authorization);
     res.json(graph);
   } catch (e) { next(e); }
 }
@@ -34,7 +34,7 @@ export async function fetchConceptGraph(req: AriaRequest, res: Response, next: N
 export async function deleteConceptGraph(req: AriaRequest, res: Response, next: NextFunction) {
   try {
     await assertProjectOwnership(req.params.projectId, req.user!.workspaceId);
-    await clearConceptGraph(req.params.projectId);
+    await clearConceptGraph(req.params.projectId, req.headers.authorization);
     res.status(204).send();
   } catch (e) { next(e); }
 }

@@ -51,6 +51,10 @@ export default function SignupPage() {
     e.preventDefault();
     if (!form.name.trim()) { setError('Full name is required.'); return; }
     if (!form.email) { setError('Email is required.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     const { passed, score } = evaluatePassword(form.password);
     if (score < 5) {
       const missing = PASSWORD_RULES.filter(r => !passed[r.key]).map(r => r.label).join(', ');
@@ -63,7 +67,8 @@ export default function SignupPage() {
       await signup(form.name.trim(), form.email, form.password);
       router.push('/setup');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      const detail = err instanceof ApiError ? err.details[0]?.message : undefined;
+      setError(detail ?? (err instanceof ApiError ? err.message : 'Something went wrong. Please try again.'));
     } finally {
       setLoading(false);
     }

@@ -11,7 +11,7 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await page.waitForURL(/\/setup/);
 
   await page.getByTestId('setup-project-name').fill('Demo Shop');
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
 
   await expect(page.getByTestId('provider-cursor')).toBeVisible();
   await page.getByTestId('llm-api-key').fill('aria-mock-key');
