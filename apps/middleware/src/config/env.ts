@@ -16,8 +16,10 @@ const envSchema = z.object({
   // Middleware
   COOKIE_SECRET: z.string().min(32),
   MIDDLEWARE_PORT: z.coerce.number().default(3001),
+  HOST: z.string().default('127.0.0.1'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   RATE_LIMIT_MAX: z.coerce.number().default(100),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
 
   // Backend
@@ -40,10 +42,23 @@ const envSchema = z.object({
   TOKEN_BUDGET_HARD_RATIO:  z.coerce.number().min(0).max(1).default(0.95),
   MAX_QUEUE_DEPTH:          z.coerce.number().int().positive().default(50),
 
-  // GitHub OAuth
-  GITHUB_CLIENT_ID: z.string().min(1),
-  GITHUB_CLIENT_SECRET: z.string().min(1),
+  // Secrets at rest (scrypt + AES-256-GCM). Required before any token is stored.
+  WORKSPACE_ENCRYPTION_KEY: z.string().min(16),
+  WORKSPACE_ENCRYPTION_KEY_ID: z.string().regex(/^[\w.-]{1,32}$/).default('k1'),
+
+  // GitHub OAuth is optional. Local signup works without it; repo access uses a PAT.
+  GITHUB_CLIENT_ID: z.string().default(''),
+  GITHUB_CLIENT_SECRET: z.string().default(''),
   GITHUB_CALLBACK_URL: z.string().url().default('http://localhost:3001/api/auth/github/callback'),
+  GITHUB_API_BASE: z.string().url().default('https://api.github.com'),
+
+  // LLM provider defaults. mock skips network in tests and local dry-runs.
+  ARIA_LLM_MODE: z.enum(['live', 'mock']).default('live'),
+  ARIA_GITHUB_MODE: z.enum(['live', 'mock']).default('live'),
+  CURSOR_API_BASE: z.string().url().default('https://api.cursor.com'),
+
+  // Service-to-service auth. Blank in dev bypasses internal hops that check it.
+  ARIA_INTERNAL_SERVICE_TOKEN: z.string().optional(),
 })
 .superRefine((env, ctx) => {
   if (env.ANTHROPIC_ENABLED && !env.ANTHROPIC_API_KEY) {
@@ -51,6 +66,13 @@ const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['ANTHROPIC_API_KEY'],
       message: 'ANTHROPIC_API_KEY is required when ANTHROPIC_ENABLED=true',
+    });
+  }
+  if (env.WORKSPACE_ENCRYPTION_KEY.includes('change-this') || env.WORKSPACE_ENCRYPTION_KEY === 'changeme') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['WORKSPACE_ENCRYPTION_KEY'],
+      message: 'WORKSPACE_ENCRYPTION_KEY is still the example placeholder',
     });
   }
   if (env.TOKEN_BUDGET_WARN_RATIO >= env.TOKEN_BUDGET_HARD_RATIO) {
@@ -69,8 +91,11 @@ export function validateEnv(): ValidatedEnv {
   if (_env) return _env;
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
-    console.error('Invalid env:');
-    result.error.issues.forEach(i => console.error(`  ${i.path.join('.')}: ${i.message}`));
+    const lines = result.error.issues.map(i => `  ${i.path.join('.')}: ${i.message}`);
+    console.error(`Invalid env:\n${lines.join('\n')}`);
+    if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+      throw new Error(`Invalid env:\n${lines.join('\n')}`);
+    }
     process.exit(1);
   }
   _env = result.data;

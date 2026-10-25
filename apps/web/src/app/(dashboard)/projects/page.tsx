@@ -44,7 +44,7 @@ function CreateModal({ onCreated, onClose }: { onCreated: (p: Project) => void; 
             {err && <p className="text-sm text-destructive">{err}</p>}
             <div className="space-y-1.5">
               <Label htmlFor="pname">Name</Label>
-              <Input id="pname" value={name} onChange={e => setName(e.target.value)}
+              <Input id="pname" name="name" value={name} onChange={e => setName(e.target.value)}
                 placeholder="My Platform" autoFocus />
             </div>
             <div className="space-y-1.5">
@@ -120,7 +120,7 @@ export default function ProjectsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map(p => (
             <Link key={p.id} href={`/projects/${p.id}`}>
-              <Card className="hover:border-aria-500/50 transition-colors cursor-pointer h-full">
+              <Card data-testid="project-card" className="hover:border-aria-500/50 transition-colors cursor-pointer h-full">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <CardTitle className="text-base">{p.name}</CardTitle>

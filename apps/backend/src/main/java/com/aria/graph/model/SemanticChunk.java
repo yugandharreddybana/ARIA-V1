@@ -2,7 +2,6 @@ package com.aria.graph.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -78,7 +77,6 @@ public class SemanticChunk {
     @Column(name = "version_hash", nullable = false, length = 64)
     private String versionHash;
 
-    @CreationTimestamp
     @UpdateTimestamp
     @Column(name = "last_updated_at", nullable = false)
     private Instant lastUpdatedAt;

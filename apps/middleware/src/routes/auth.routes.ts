@@ -4,13 +4,14 @@ import { authController } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { signupSchema, loginSchema } from '../schemas/auth.schemas';
+import { validateEnv } from '../config/env';
 import githubRoutes from './github.routes';
 
 const authRouter = Router();
 
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: validateEnv().AUTH_RATE_LIMIT_MAX,
   message: { success: false, error: 'Too many auth attempts, please try again later.', code: 'RATE_LIMITED' },
   standardHeaders: 'draft-7',
   legacyHeaders: false,

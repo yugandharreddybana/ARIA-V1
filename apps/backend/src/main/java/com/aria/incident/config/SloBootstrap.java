@@ -60,10 +60,10 @@ public class SloBootstrap {
         }
     }
 
-    record ParsedSlo(String service, String name, String metric, double threshold,
+    public record ParsedSlo(String service, String name, String metric, double threshold,
                      String comparison, int windowSeconds, String description) {}
 
-    static List<ParsedSlo> parse(String yaml) {
+    public static List<ParsedSlo> parse(String yaml) {
         List<ParsedSlo> out = new ArrayList<>();
         String service = null, name = null, metric = null, comparison = null, description = null;
         double threshold = 0;

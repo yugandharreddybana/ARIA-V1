@@ -37,8 +37,15 @@ public class DeadlockBreakerService {
 
     @Transactional
     public List<ContractDebt> sweep() {
+        return sweep(null);
+    }
+
+    @Transactional
+    public List<ContractDebt> sweep(UUID workspaceId) {
         Instant now = Instant.now();
-        List<AgentHeartbeat> recent = heartbeats.latestPerAgentSince(now.minus(HEARTBEAT_WINDOW));
+        List<AgentHeartbeat> recent = heartbeats.latestPerAgentSince(now.minus(HEARTBEAT_WINDOW)).stream()
+                .filter(hb -> workspaceId == null || workspaceId.equals(hb.getWorkspaceId()))
+                .toList();
         Map<String, AgentHeartbeat> byAgent = new HashMap<>();
         Map<String, String> waitGraph = new HashMap<>();
         for (AgentHeartbeat hb : recent) {
@@ -66,6 +73,7 @@ public class DeadlockBreakerService {
                     producer, consumers, draftRef);
 
             ContractDebt cd = ContractDebt.builder()
+                    .workspaceId(workspaceId)
                     .sessionId(byAgent.get(producer).getSessionId())
                     .producerAgent(producer)
                     .consumerAgents(toJsonArray(consumers))

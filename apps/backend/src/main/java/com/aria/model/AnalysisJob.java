@@ -20,10 +20,10 @@ public class AnalysisJob {
     @Column(nullable = false, updatable = false)
     private String id;
 
-    @Column(name = "project_id", nullable = false)
+    @Column(name = "project_id", nullable = false, columnDefinition = "uuid")
     private String projectId;
 
-    @Column(name = "repo_id", nullable = false)
+    @Column(name = "repo_id", nullable = false, columnDefinition = "uuid")
     private String repoId;
 
     @Column(name = "repo_url", nullable = false)
@@ -32,7 +32,7 @@ public class AnalysisJob {
     @Column(nullable = false)
     private String branch;
 
-    @Column(name = "workspace_id", nullable = false)
+    @Column(name = "workspace_id", nullable = false, columnDefinition = "uuid")
     private String workspaceId;
 
     @Column(nullable = false)

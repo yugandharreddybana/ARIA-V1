@@ -19,9 +19,7 @@ test.describe('Sprint 4 — AI Chat', () => {
 
   test('S4-AI03: model selector dropdown is visible', async ({ page }) => {
     await page.goto('/ai');
-    await expect(
-      page.locator('[data-testid="model-selector"], select, [role="combobox"]'),
-    ).toBeVisible();
+    await expect(page.getByRole('combobox').first()).toBeVisible();
   });
 
   test('S4-AI04: empty state prompt chips render before first message', async ({ page }) => {
@@ -29,12 +27,7 @@ test.describe('Sprint 4 — AI Chat', () => {
     // If there are no messages, suggestion chips should be shown
     const messages = page.locator('[data-testid="chat-message"]');
     if (await messages.count() === 0) {
-      const chips = page.locator('[data-testid="suggestion-chip"], .suggestion-chip');
-      // Either chips OR a welcome message must exist
-      const welcome = page.getByText(/how can i help|start a conversation|ask me/i);
-      const hasChips   = await chips.count() > 0;
-      const hasWelcome = await welcome.count() > 0;
-      expect(hasChips || hasWelcome).toBeTruthy();
+      await expect(page.getByTestId('suggestion-chip').first()).toBeVisible();
     }
   });
 
@@ -76,7 +69,8 @@ test.describe('Sprint 4 — AI Chat', () => {
   });
 
   test('S4-AI10: chat page is inaccessible without login', async ({ page }) => {
-    // Navigate without calling login() — should redirect to /login
+    await page.evaluate(() => localStorage.clear());
+    await page.context().clearCookies();
     await page.goto('/ai');
     await page.waitForURL(/\/login/, { timeout: 10_000 });
   });

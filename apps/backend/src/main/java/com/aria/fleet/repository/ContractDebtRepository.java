@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface ContractDebtRepository extends JpaRepository<ContractDebt, UUID> {
     List<ContractDebt> findByReconciledAtIsNull();
+    List<ContractDebt> findByWorkspaceIdAndReconciledAtIsNull(UUID workspaceId);
 }

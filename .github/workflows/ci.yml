@@ -40,6 +40,20 @@ jobs:
   unit-tests:
     needs: setup
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_USER: aria, POSTGRES_PASSWORD: aria, POSTGRES_DB: aria_dev }
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready -U aria" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DATABASE_URL: postgresql://aria:aria@localhost:5432/aria_dev
+      WORKSPACE_ENCRYPTION_KEY: ci-workspace-encryption-key-32chars
+      COOKIE_SECRET: ci-cookie-secret-must-be-at-least-32
+      ARIA_LLM_MODE: mock
+      ARIA_GITHUB_MODE: mock
+      GITHUB_CLIENT_ID: ''
+      GITHUB_CLIENT_SECRET: ''
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -47,6 +61,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
+      - run: node scripts/apply-migrations.cjs
+      - run: node scripts/check-schema-drift.cjs
       - run: pnpm -F @aria/middleware test
 
   java-tests:
@@ -80,7 +96,11 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Run anti-test-dodging
         if: steps.diff.outputs.files != ''
-        run: pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts ${{ steps.diff.outputs.files }}
+        env:
+          GATE_FILES: ${{ steps.diff.outputs.files }}
+        run: |
+          mapfile -t files < <(printf '%s\n' "$GATE_FILES")
+          pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts "${files[@]}"
 
   anti-slop:
     needs: setup
@@ -104,11 +124,16 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Run anti-slop gate
         if: steps.diff.outputs.files != ''
-        run: pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts ${{ steps.diff.outputs.files }}
+        env:
+          GATE_FILES: ${{ steps.diff.outputs.files }}
+        run: |
+          mapfile -t files < <(printf '%s\n' "$GATE_FILES")
+          pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts "${files[@]}"
 
   e2e:
     needs: [typecheck, unit-tests]
-    runs-on: ubuntu-latest
+    # Playwright 1.60 ships no Chromium build for ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -131,13 +156,35 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - run: pnpm install --frozen-lockfile=false
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm -F @aria/e2e exec playwright install --with-deps chromium
       - name: Bring up stack
         run: |
           bash scripts/generate-keys.sh
-          # NOTE: E2E job runs the stack via pnpm dev rather than docker-compose so CI doesn't depend on
-          # docker-in-docker. Ollama-dependent tests skip when OLLAMA_BASE_URL is unreachable.
-          pnpm -F @aria/middleware dev &
-          pnpm -F @aria/web dev &
-          sleep 15
-      - run: pnpm -F @aria/e2e test --project=${{ matrix.project }}
+          export JWT_PRIVATE_KEY="$(base64 -w 0 private_key.pem)"
+          export JWT_PUBLIC_KEY="$(base64 -w 0 public_key.pem)"
+          rm -f private_key.pem public_key.pem
+          export DATABASE_URL="postgresql://aria:aria@localhost:5432/aria_dev"
+          export POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DB=aria_dev POSTGRES_USER=aria POSTGRES_PASSWORD=aria
+          export COOKIE_SECRET="ci-cookie-secret-must-be-at-least-32"
+          export WORKSPACE_ENCRYPTION_KEY="ci-workspace-encryption-key-32chars"
+          export ARIA_LLM_MODE=live
+          export ARIA_GITHUB_MODE=live
+          export CURSOR_API_BASE=http://127.0.0.1:4010
+          export GITHUB_API_BASE=http://127.0.0.1:4010
+          export AUTH_RATE_LIMIT_MAX=2000
+          export RATE_LIMIT_MAX=10000
+          export GITHUB_CLIENT_ID=""
+          export GITHUB_CLIENT_SECRET=""
+          export NEXT_PUBLIC_MIDDLEWARE_URL="http://localhost:3001"
+          node scripts/apply-migrations.cjs
+          node scripts/provider-stub.mjs > /tmp/aria-stub.log 2>&1 &
+          nohup pnpm -F @aria/middleware dev > /tmp/aria-middleware.log 2>&1 &
+          nohup pnpm -F @aria/web dev > /tmp/aria-web.log 2>&1 &
+          for i in $(seq 1 90); do
+            curl -sf http://127.0.0.1:3001/api/health >/dev/null && curl -sf http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 2
+          done
+          echo "stack did not become healthy" >&2
+          tail -n 80 /tmp/aria-stub.log /tmp/aria-middleware.log /tmp/aria-web.log >&2 || true
+          exit 1
+      - run: pnpm -F @aria/e2e exec playwright test tests/milestone1-setup.spec.ts tests/auth/landing.spec.ts tests/sprint1-auth.spec.ts tests/sprint2-projects.spec.ts tests/sprint3-analysis.spec.ts tests/sprint4-tickets.spec.ts tests/sprint4-sessions.spec.ts tests/sprint4-planning.spec.ts tests/sprint4-team.spec.ts tests/sprint4-settings.spec.ts tests/sprint4-ai.spec.ts --project=${{ matrix.project }}

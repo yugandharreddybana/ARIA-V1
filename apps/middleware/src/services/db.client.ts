@@ -21,3 +21,10 @@ export async function closePgPool(): Promise<void> {
     pool = null;
   }
 }
+
+export function resetPgPoolForTests(): void {
+  if (pool) {
+    void pool.end().catch(() => undefined);
+    pool = null;
+  }
+}

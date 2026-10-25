@@ -8,9 +8,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate",
-    "studio": "drizzle-kit studio"
+    "studio": "drizzle-kit studio",
+    "check-drift": "node ../../scripts/check-schema-drift.cjs"
   },
   "dependencies": {
     "drizzle-orm": "^0.31.0",

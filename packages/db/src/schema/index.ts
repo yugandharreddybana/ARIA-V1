@@ -10,3 +10,4 @@ export * from './memory';
 export * from './analysis-jobs';
 export * from './concept-graph';
 export * from './onboarding-proposals';
+export * from './knowledge';

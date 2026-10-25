@@ -12,8 +12,9 @@ export const analysisJobs = pgTable('analysis_jobs', {
   repoUrl:      text('repo_url').notNull(),
   branch:       text('branch').notNull().default('main'),
   workspaceId:  uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  status:       text('status').notNull().default('queued'),
-  errorMessage: text('error_message'),
+  status:        text('status').notNull().default('queued'),
+  errorMessage:  text('error_message'),
+  resultSummary: text('result_summary'),
   createdAt:    tstz('created_at').notNull().defaultNow(),
   updatedAt:    tstz('updated_at').notNull().defaultNow(),
 });

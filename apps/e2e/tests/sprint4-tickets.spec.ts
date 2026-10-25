@@ -37,7 +37,7 @@ test.describe('Sprint 4 — Tickets Kanban', () => {
     if (await btn.isEnabled()) {
       await btn.click();
       await page.click('button[type="submit"]');
-      await expect(page.locator('[role="alert"]')).toBeVisible();
+      await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible();
     }
   });
 

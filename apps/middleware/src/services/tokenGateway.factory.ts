@@ -10,6 +10,8 @@ import { PgReplayFrameRepository } from './replay.repository';
 import { PgTokenLedgerRepository } from './ledger.repository';
 import { getPgPool } from './db.client';
 import { validateEnv } from '../config/env';
+import { completeChat } from './llmProvider.service';
+import { takeLlmCall } from './llmDispatchContext';
 import type { BackendDispatcher, GatewayRequest } from './tokenGateway.service';
 
 let singleton: TokenGateway | null = null;
@@ -18,6 +20,17 @@ let singleton: TokenGateway | null = null;
 class RoutingDispatcher implements BackendDispatcher {
   constructor(private readonly ollama: OllamaDispatcher, private readonly anthropic: AnthropicDispatcher) {}
   async dispatch(req: GatewayRequest, backend: Backend) {
+    if (backend.backendId === 'workspace-llm') {
+      if (!req.requestId) throw new Error('Missing provider call for this gateway request');
+      const call = takeLlmCall(req.requestId);
+      if (!call) throw new Error('Missing provider call for this gateway request');
+      const responseText = await completeChat(call.config, call.messages);
+      return {
+        responseText,
+        responseTokens: Math.max(1, Math.ceil(responseText.length / 4)),
+        promptTokensActual: req.promptTokensEstimated,
+      };
+    }
     return backend.type === 'local'
       ? this.ollama.dispatch(req, backend)
       : this.anthropic.dispatch(req, backend);
@@ -39,6 +52,15 @@ export function getTokenGateway(): TokenGateway {
       maxContextTokensPerRequest: 32_000,
     },
   ];
+  backends.push({
+    backendId: 'workspace-llm',
+    type: 'remote',
+    modelId: 'workspace',
+    tier: 'team',
+    requestsPerMinuteLimit: 30,
+    tokensPerMinuteLimit: 40_000,
+    tokensPerDayLimit: 200_000,
+  });
   if (env.ANTHROPIC_ENABLED) {
     backends.push({
       backendId: 'anthropic-sonnet',
@@ -74,4 +96,8 @@ export function getTokenGateway(): TokenGateway {
     hardRatio: env.TOKEN_BUDGET_HARD_RATIO,
   });
   return singleton;
+}
+
+export function _resetTokenGatewayForTests(): void {
+  singleton = null;
 }

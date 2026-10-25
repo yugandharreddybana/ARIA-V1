@@ -54,4 +54,7 @@ public class Incident {
 
     @Column(name = "resolved_at")
     private Instant resolvedAt;
+
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
 }

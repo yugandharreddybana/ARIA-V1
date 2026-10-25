@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { TEST_EMAIL, TEST_PASSWORD, TEST_NAME, login } from './helpers/auth';
+import { TEST_EMAIL, TEST_PASSWORD, TEST_NAME, login, revealNav } from './helpers/auth';
 
 test.describe('Sprint 1 — Authentication', () => {
 
@@ -23,7 +23,7 @@ test.describe('Sprint 1 — Authentication', () => {
   test('S1-03: Login with empty fields shows validation errors', async ({ page }) => {
     await page.goto('/login');
     await page.click('button[type="submit"]');
-    await expect(page.locator('[role="alert"], .text-destructive')).toBeVisible();
+    await expect(page.locator('.text-destructive').first()).toBeVisible();
   });
 
   test('S1-04: Login with wrong credentials shows error', async ({ page }) => {
@@ -31,7 +31,7 @@ test.describe('Sprint 1 — Authentication', () => {
     await page.fill('[name="email"]', 'wrong@aria.dev');
     await page.fill('[name="password"]', 'wrongpassword');
     await page.click('button[type="submit"]');
-    await expect(page.locator('[role="alert"], .text-destructive')).toBeVisible();
+    await expect(page.locator('.text-destructive').first()).toBeVisible();
   });
 
   test('S1-05: Signup page renders all fields', async ({ page }) => {
@@ -66,13 +66,15 @@ test.describe('Sprint 1 — Authentication', () => {
 
   test('S1-10: Sidebar shows ARIA logo and nav items after login', async ({ page }) => {
     await login(page);
-    await expect(page.getByText('ARIA')).toBeVisible();
+    await revealNav(page);
+    await expect(page.locator('aside').getByText('ARIA', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: /dashboard/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /tickets/i })).toBeVisible();
   });
 
   test('S1-11: Logout clears session and redirects to login', async ({ page }) => {
     await login(page);
+    await revealNav(page);
     await page.click('button[title="Sign out"]');
     await page.waitForURL(/\/login/);
   });

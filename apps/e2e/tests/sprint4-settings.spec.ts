@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login } from './helpers/auth';
+import { login, revealNav } from './helpers/auth';
 
 test.describe('Sprint 4 — Settings', () => {
 
@@ -7,7 +7,7 @@ test.describe('Sprint 4 — Settings', () => {
 
   test('S4-SET01: settings page loads with heading', async ({ page }) => {
     await page.goto('/settings');
-    await expect(page.getByRole('heading', { name: /settings|account/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   });
 
   test('S4-SET02: settings page shows user email or name', async ({ page }) => {
@@ -26,11 +26,9 @@ test.describe('Sprint 4 — Settings', () => {
 
   test('S4-SET03: settings nav link in sidebar is reachable', async ({ page }) => {
     await page.goto('/dashboard');
-    const settingsLink = page.getByRole('link', { name: /settings/i });
-    if (await settingsLink.count() > 0) {
-      await settingsLink.click();
-      await expect(page).toHaveURL(/\/settings/);
-    }
+    await revealNav(page);
+    await page.getByRole('link', { name: /^settings$/i }).click();
+    await expect(page).toHaveURL(/\/settings/);
   });
 
 });

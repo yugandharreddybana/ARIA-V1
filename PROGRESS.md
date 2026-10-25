@@ -2,12 +2,52 @@
 
 > This is the session handoff file. READ at session start, UPDATE at session end.
 > Pair with `MEMORY.md` (file index + decisions + anti-patterns) and `IMPLEMENTATION.md` (full 17-phase build plan).
+> Where this file or `v27_9.md` / `IMPLEMENTATION.md` disagree with `docs/PRODUCT_SPEC.md`, the product spec wins.
 
 ---
 
-## 🔄 Active Sprint
+## Milestone 1 — foundation (this branch)
 
-**Sprint 11 — Phase 6: IDE / LSP Integration**  *(queued)*
+Branch: `cursor/milestone-1-foundation-db70`. PR #5. Product spec: `docs/PRODUCT_SPEC.md`.
+
+Shipped, including the review-fix pass:
+- Email signup works without GitHub OAuth. Repo access is a personal access token, encrypted at rest.
+- Setup UI resumes a half-finished setup, polls analysis until the map exists or a job fails, and does not send a custom base URL for Cursor, Gemini, Groq, OpenAI, or Anthropic.
+- Secrets use scrypt + AES-256-GCM. New rows are `gcm:v2` with a key id and AAD (workspace id + column). Older `scrypt:v1` and legacy rows still decrypt. The example placeholder key is rejected.
+- Knowledge map reads root and workspace manifests first, ignores tests and docs for flows, treats only the root `app/page.tsx` as the homepage, and detects data entities from `CREATE TABLE`, `model X {`, `pgTable(`, and `@Entity`. A unit test runs the builder against this repo's real tree.
+- One knowledge map per project. Re-analysis upserts flows on `(project_id, flow_key)` and keeps owners. Multiple repos merge. A repo with a queued or running job is not queued again. Jobs stuck `running` for 10 minutes go back to `queued`.
+- Company regeneration and agent delete run in a transaction. Regeneration returns 409 while sessions or tickets exist unless `force` is set. Deleting an owner promotes the backup. A manager, backup, or flow owner must belong to the same project.
+- Documentation and PR-coordinator agents are always created. They are OFF when the seat count does not already include them. Size is the count of ON seats.
+- Org chart: errors surface, delete asks for confirmation, add picks a role and a manager, and owner / backup / manager can be reassigned.
+- Model tiers: planning defaults to `top`, development to `auto`. Test Connection lists the provider's models, stores both tier ids, and later edits must be in that catalog. `auto` is sent as `{ id: 'auto' }`. `auto-smart` is used only when that id was stored. Completions still go through one token-gateway singleton whose ledger is in Postgres.
+- Mock mode is `ARIA_LLM_MODE=mock` or `ARIA_GITHUB_MODE=mock`, and only when `NODE_ENV` is not production. Live tests and CI e2e use `scripts/provider-stub.mjs`.
+- Legacy unvalidated skill creation (`POST /api/projects/:id/skills` and onboarding commit) returns 410.
+- Java `@AuthenticationPrincipal` resolves `AriaAuthentication`. Analysis, graph, distillation, incidents, migrations, and fleet writes are scoped to the caller's workspace.
+- Flyway V14. Drizzle matches the named text columns, nullable `skills.project_id`, and `UNIQUE(project_id, flow_key)`. `drizzle-kit` generate/migrate scripts are removed. CI runs `scripts/check-schema-drift.cjs`. Middleware listens on `127.0.0.1` unless `HOST` is set (Compose sets `0.0.0.0`).
+- CI e2e runs the milestone spec, the landing spec, and sprint 1–4 specs on desktop, tablet, and mobile.
+
+Verified locally on 2026-10-25 (Postgres 16 + pgvector and Redis on the host; Docker is not installed here):
+- `node scripts/apply-migrations.cjs` applied V14. `node scripts/check-schema-drift.cjs` passed.
+- `pnpm -F @aria/middleware exec tsc --noEmit` and `pnpm -F @aria/web exec tsc --noEmit` passed.
+- `pnpm -F @aria/middleware exec eslint src --ext .ts` passed.
+- `pnpm -F @aria/web lint` passed with one existing warning in `src/components/ui/select.tsx`.
+- `pnpm -F @aria/middleware exec vitest run` — 21 files, 94 tests passed.
+- `mvn -B -ntp -f apps/backend/pom.xml test` — exit 0 (1 skipped: `AriaBackendApplicationTests`).
+- `mvn -B -ntp -f apps/backend/pom.xml -DskipTests spring-boot:run` validated 14 Flyway migrations, started, and `GET /actuator/health` returned `{"status":"UP"}`.
+- Playwright, live mode against the stub, `BASE_URL=http://localhost:3000`, workers 1, retries 0: milestone + landing + sprint 1–4 on chromium-desktop, chromium-tablet, and chromium-mobile — **213 passed (3.7m)**.
+
+Decisions the owner needs:
+- Cursor still has no chat-completions API. Test Connection stores ids from `GET /v1/models`. Completions throw `CURSOR_NO_CHAT_API` after the queue selects the model. Milestone 2 (agent runs) is not started. Details: `docs/CURSOR_PROVIDER.md`.
+- Company size counts ON seats, including leadership. Documentation and the PR coordinator are extra OFF agents when they do not fit.
+- Company generation still dispatches one `company_generation` call. Cursor refuses it. The template org is what you edit.
+- `POST /api/projects/:id/teams` is still the older unvalidated team route. The review asked to disable the unvalidated skill-creation paths, and those return 410.
+- Duplicate legacy columns (`tickets.assigned_to`, `skills.model`, and similar) stay so Hibernate validate keeps working.
+
+Out of scope: Cursor agent runs, agents writing code or PRs, merge order, ceremonies, red/blue execution, learning.
+
+## 🔄 Later
+
+**Sprint 11 — Phase 6: IDE / LSP Integration**  *(not this milestone)*
 - Spec anchors: §18M (Deep Native IDE/LSP Integration).
 - DoD checklist: see IMPLEMENTATION.md §8.
 

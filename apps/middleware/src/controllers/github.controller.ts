@@ -14,9 +14,17 @@ function purge() {
 
 export async function githubStart(req: Request, res: Response) {
   purge();
+  const { clientId, clientSecret, callbackUrl, scope } = getGithubOAuthConfig();
+  if (!clientId || !clientSecret) {
+    res.status(400).json({
+      success: false,
+      error: 'GitHub OAuth is not configured. Sign up with email and connect a personal access token during setup.',
+      code: 'GITHUB_OAUTH_DISABLED',
+    });
+    return;
+  }
   const state = randomBytes(16).toString('hex');
   stateStore.set(state, Date.now());
-  const { clientId, callbackUrl, scope } = getGithubOAuthConfig();
   const url = new URL(GITHUB_AUTHORIZE_URL);
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', callbackUrl);

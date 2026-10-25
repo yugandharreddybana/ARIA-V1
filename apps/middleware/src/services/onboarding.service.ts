@@ -137,7 +137,7 @@ export async function saveScoutAndTriggerAnalysis(
 
   // Get GitHub token for repo analysis (stored encrypted on workspace)
   const ghTokenRaw = ws.githubAccessTokenEncrypted
-    ? decryptApiKey(ws.githubAccessTokenEncrypted)
+    ? decryptApiKey(ws.githubAccessTokenEncrypted, { workspaceId, column: 'github_access_token_encrypted' })
     : null;
 
   // Fire-and-forget: run analysis + skill generation in background
@@ -277,92 +277,8 @@ export async function deleteProposalSkill(
 
 // ─── Step 6: commit ─────────────────────────────────────────────────────────
 export async function commitProposal(
-  workspaceId: string,
+  _workspaceId: string,
 ): Promise<CommitProposalResponse> {
-  const proposal = await getActiveProposal(workspaceId);
-  if (!proposal) throw new AppError('No proposal found', 404, 'NOT_FOUND');
-  if (proposal.status !== 'ready') throw new AppError('Proposal is not ready yet', 400, 'CONFLICT');
-  if (!proposal.projectId) throw new AppError('No project linked to proposal', 400, 'CONFLICT');
-
-  const proposedSkills = proposal.proposedSkills as unknown as ProposedSkill[];
-  const projectId = proposal.projectId;
-
-  // ── 1. Group skills by department to create teams ────────────────────────
-  const deptMap = new Map<string, ProposedSkill[]>();
-  for (const s of proposedSkills) {
-    const arr = deptMap.get(s.department) ?? [];
-    arr.push(s);
-    deptMap.set(s.department, arr);
-  }
-
-  const teamRows: { id: string; department: string }[] = [];
-  for (const [department] of deptMap) {
-    const [team] = await db.insert(teams).values({ projectId, name: department, department }).returning();
-    teamRows.push({ id: team.id, department });
-  }
-
-  // ── 2. Insert skills (two passes to handle self-referencing reportingManagerId) ─
-  // Pass 1: insert all skills without reportingManagerId
-  const tempIdToDbId = new Map<string, string>();
-  for (const ps of proposedSkills) {
-    const teamId = teamRows.find(t => t.department === ps.department)?.id;
-    const [inserted] = await db.insert(skills).values({
-      projectId,
-      teamId:           teamId ?? null,
-      slug:             ps.slug,
-      realName:         ps.realName,
-      roleTitle:        ps.roleTitle,
-      department:       ps.department,
-      hierarchyLevel:   ps.hierarchyLevel,
-      riskClass:        ps.riskClass,
-      description:      ps.description,
-      instructions:     ps.instructions,
-      ownedDomains:     ps.ownedDomains,
-      ownedRepoPaths:   ps.ownedRepoPaths,
-      triggerKeywords:  ps.triggerKeywords,
-      status:           'active',
-      idleMode:         'learning',
-      // reportingManagerId set in Pass 2
-    }).returning();
-    tempIdToDbId.set(ps.tempId, inserted.id);
-  }
-
-  // Pass 2: update reportingManagerId now that all DB ids exist
-  for (const ps of proposedSkills) {
-    if (!ps.reportingManagerTempId) continue;
-    const skillDbId   = tempIdToDbId.get(ps.tempId)!;
-    const managerDbId = tempIdToDbId.get(ps.reportingManagerTempId);
-    if (!managerDbId) continue;
-    await db.update(skills)
-      .set({ reportingManagerId: managerDbId, updatedAt: new Date() })
-      .where(eq(skills.id, skillDbId));
-  }
-
-  // ── 3. Insert teamMembers ────────────────────────────────────────────────
-  for (const ps of proposedSkills) {
-    const teamId  = teamRows.find(t => t.department === ps.department)?.id;
-    const skillId = tempIdToDbId.get(ps.tempId);
-    if (!teamId || !skillId) continue;
-
-    let memberRole: 'lead' | 'member' | 'scrum_master' | 'observer' = 'member';
-    if (ps.slug === 'scrum-master') memberRole = 'scrum_master';
-    else if (ps.hierarchyLevel <= 3) memberRole = 'lead';
-
-    await db.insert(teamMembers).values({ teamId, skillId, role: memberRole });
-  }
-
-  // ── 4. Mark proposal committed + workspace onboarding complete ──────────
-  await db.update(onboardingProposals)
-    .set({ status: 'committed', updatedAt: new Date() })
-    .where(eq(onboardingProposals.id, proposal.id));
-
-  await db.update(workspaces)
-    .set({ onboardingCompletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(workspaces.id, workspaceId));
-
-  return {
-    projectId,
-    skillCount: proposedSkills.length,
-    teamCount:  teamRows.length,
-  };
+  void _workspaceId;
+  throw new AppError('Company generation is the only way to create agents', 410, 'LEGACY_SKILL_PATH');
 }

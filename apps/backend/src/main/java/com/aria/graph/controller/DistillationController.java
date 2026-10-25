@@ -5,6 +5,9 @@ import com.aria.graph.dto.DistilledContextPayload;
 import com.aria.graph.service.ConceptGraphBuilder;
 import com.aria.graph.service.DistillationEngine;
 import com.aria.graph.repository.SemanticChunkRepository;
+import com.aria.security.AriaAuthentication;
+import com.aria.security.ProjectAccess;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -28,25 +31,39 @@ public class DistillationController {
     private final DistillationEngine engine;
     private final ConceptGraphBuilder builder;
     private final SemanticChunkRepository chunks;
+    private final ProjectAccess access;
 
     @PostMapping("/distill")
-    public ResponseEntity<DistilledContextPayload> distill(@Valid @RequestBody DistillRequest req) {
+    public ResponseEntity<DistilledContextPayload> distill(
+            @Valid @RequestBody DistillRequest req,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        AriaAuthentication caller = ProjectAccess.require(auth);
+        access.assertProject(req.projectId().toString(), caller.workspaceId());
         return ResponseEntity.ok(engine.distill(req));
     }
 
-    public record RebuildRequest(UUID projectId, UUID workspaceId, String path, String content) {}
+    public record RebuildRequest(UUID projectId, String path, String content) {}
 
     @PostMapping("/graph/rebuild")
-    public ResponseEntity<Map<String, Object>> rebuild(@RequestBody RebuildRequest req) {
-        int saved = builder.ingestFile(req.projectId(), req.workspaceId(), req.path(), req.content());
+    public ResponseEntity<Map<String, Object>> rebuild(
+            @RequestBody RebuildRequest req,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        AriaAuthentication caller = ProjectAccess.require(auth);
+        access.assertProject(req.projectId().toString(), caller.workspaceId());
+        int saved = builder.ingestFile(req.projectId(), UUID.fromString(caller.workspaceId()), req.path(), req.content());
         return ResponseEntity.ok(Map.of("path", req.path(), "chunks_saved", saved));
     }
 
     @GetMapping("/graph/coverage/{projectId}")
-    public ResponseEntity<Map<String, Object>> coverage(@PathVariable UUID projectId) {
-        long total       = chunks.countByProjectId(projectId);
-        long summarised  = chunks.countSummarisedByProjectId(projectId);
-        long embedded    = chunks.countEmbeddedByProjectId(projectId);
+    public ResponseEntity<Map<String, Object>> coverage(
+            @PathVariable UUID projectId,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        AriaAuthentication caller = ProjectAccess.require(auth);
+        access.assertProject(projectId.toString(), caller.workspaceId());
+        UUID workspaceId = UUID.fromString(caller.workspaceId());
+        long total       = chunks.countByProjectIdAndWorkspaceId(projectId, workspaceId);
+        long summarised  = chunks.countSummarisedByProjectIdAndWorkspaceId(projectId, workspaceId);
+        long embedded    = chunks.countEmbeddedByProjectIdAndWorkspaceId(projectId, workspaceId);
         double pctSummary = total > 0 ? (double) summarised / total : 0.0;
         double pctVector  = total > 0 ? (double) embedded / total : 0.0;
         return ResponseEntity.ok(Map.of(

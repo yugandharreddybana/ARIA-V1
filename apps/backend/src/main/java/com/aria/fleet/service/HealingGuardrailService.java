@@ -35,8 +35,15 @@ public class HealingGuardrailService {
     /** Returns every detected cycle (each cycle is the list of agents in traversal order). */
     @Transactional
     public List<List<String>> scan() {
+        return scan(null);
+    }
+
+    @Transactional
+    public List<List<String>> scan(UUID workspaceId) {
         Instant since = Instant.now().minus(HEARTBEAT_WINDOW);
-        List<AgentHeartbeat> recent = heartbeats.latestPerAgentSince(since);
+        List<AgentHeartbeat> recent = heartbeats.latestPerAgentSince(since).stream()
+                .filter(hb -> workspaceId == null || workspaceId.equals(hb.getWorkspaceId()))
+                .toList();
 
         Map<String, String> waitGraph = new HashMap<>();
         for (AgentHeartbeat hb : recent) {
@@ -50,6 +57,7 @@ public class HealingGuardrailService {
             log.error("FLEET_HEALING_CIRCUIT_BREAKER cycle={}", cycle);
             breakers.save(FleetCircuitBreaker.builder()
                     .cycle(toJsonArray(cycle))
+                    .workspaceId(workspaceId)
                     .build());
         }
         return cycles;

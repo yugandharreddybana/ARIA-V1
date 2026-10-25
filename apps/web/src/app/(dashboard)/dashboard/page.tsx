@@ -103,7 +103,7 @@ export default function DashboardPage() {
     return (
       <div className="p-6 max-w-2xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold">{greeting}, {user?.name?.split(' ')[0]} 👋</h1>
+          <h1 data-testid="dashboard-greeting" className="text-2xl font-bold">{greeting}, {user?.name?.split(' ')[0]} 👋</h1>
           <p className="text-sm text-muted-foreground mt-1">Welcome to ARIA — let&apos;s set up your first project.</p>
         </div>
         <div className="flex flex-col items-center justify-center py-20 text-center gap-5 border border-dashed border-border rounded-xl">
@@ -117,9 +117,14 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex gap-3">
-            <Link href="/projects">
+            <Link href="/setup" data-testid="start-setup">
               <Button variant="aria">
-                <Plus className="h-4 w-4 mr-2" /> Create First Project
+                <Plus className="h-4 w-4 mr-2" /> Start setup
+              </Button>
+            </Link>
+            <Link href="/projects">
+              <Button variant="outline">
+                Create First Project
               </Button>
             </Link>
           </div>
@@ -144,7 +149,7 @@ export default function DashboardPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold">{greeting}, {user?.name?.split(' ')[0]} 👋</h1>
+        <h1 data-testid="dashboard-greeting" className="text-2xl font-bold">{greeting}, {user?.name?.split(' ')[0]} 👋</h1>
         <p className="text-sm text-muted-foreground mt-1">Here&apos;s your workspace at a glance</p>
       </div>
 

@@ -24,10 +24,10 @@ public class ConceptEdge {
     @Column(nullable = false, updatable = false)
     private String id;
 
-    @Column(name = "project_id", nullable = false)
+    @Column(name = "project_id", nullable = false, columnDefinition = "uuid")
     private String projectId;
 
-    @Column(name = "workspace_id", nullable = false)
+    @Column(name = "workspace_id", nullable = false, columnDefinition = "uuid")
     private String workspaceId;
 
     @ManyToOne(fetch = FetchType.LAZY)

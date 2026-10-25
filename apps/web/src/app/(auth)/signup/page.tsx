@@ -182,7 +182,7 @@ export default function SignupPage() {
     setStep1Loading(true); setStep1Error(null);
     try {
       await signup(form.name.trim(), form.email, form.password);
-      setStep(2);
+      router.push('/dashboard');
     } catch (err) {
       setStep1Error(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     } finally {
@@ -447,7 +447,7 @@ export default function SignupPage() {
                     Get a free API key at{' '}
                     <a href="https://build.nvidia.com" target="_blank" rel="noopener noreferrer"
                       className="underline text-aria-400 hover:text-aria-300">build.nvidia.com</a>
-                    {' '}→ Explore Models → any model → "Get API Key".
+                    {' '}→ Explore Models → any model → Get API Key.
                   </p>
                   <p>Keys always start with <code className="font-mono bg-aria-900/60 px-1 rounded">nvapi-</code>.</p>
                 </div>

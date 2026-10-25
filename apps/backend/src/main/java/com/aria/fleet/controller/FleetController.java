@@ -8,13 +8,17 @@ import com.aria.fleet.repository.AgentHeartbeatRepository;
 import com.aria.fleet.repository.ContractDebtRepository;
 import com.aria.fleet.repository.FleetCircuitBreakerRepository;
 import com.aria.fleet.service.*;
+import com.aria.security.AriaAuthentication;
+import com.aria.security.ProjectAccess;
 import jakarta.validation.Valid;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * V27.9 §17.4 + §18I — Fleet Commander + Deadlock Breaker REST surface.
@@ -41,26 +45,43 @@ public class FleetController {
     private final AgentHeartbeatRepository heartbeats;
     private final ContractDebtRepository debts;
     private final FleetCircuitBreakerRepository breakers;
+    private final ProjectAccess access;
 
     @PostMapping("/agents")
-    public ResponseEntity<AgentRegistryService.RegistrationResult> register(@Valid @RequestBody RegisterAgentRequest req) {
-        return ResponseEntity.ok(registry.register(req.agentId(), req.agentFamily()));
+    public ResponseEntity<AgentRegistryService.RegistrationResult> register(
+            @Valid @RequestBody RegisterAgentRequest req,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        String workspaceId = ProjectAccess.require(auth).workspaceId();
+        var result = registry.register(req.agentId(), req.agentFamily());
+        access.stampText("agent_registry", "agent_id", req.agentId(), workspaceId);
+        return ResponseEntity.ok(result);
     }
 
     @PostMapping("/events")
-    public ResponseEntity<FleetOutcome> publish(@Valid @RequestBody PublishEventRequest req) {
-        return ResponseEntity.ok(commander.publish(
-                req.epicId(), req.topic(), req.payload(), req.agentId(), req.signature()));
+    public ResponseEntity<FleetOutcome> publish(
+            @Valid @RequestBody PublishEventRequest req,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        String workspaceId = ProjectAccess.require(auth).workspaceId();
+        FleetOutcome saved = commander.publish(
+                req.epicId(), req.topic(), req.payload(), req.agentId(), req.signature());
+        access.stampUuid("fleet_outcomes", saved.getId().toString(), workspaceId);
+        saved.setWorkspaceId(UUID.fromString(workspaceId));
+        return ResponseEntity.ok(saved);
     }
 
     @GetMapping("/events")
-    public ResponseEntity<List<FleetOutcome>> recent(@RequestParam(required = false) String epicId) {
-        return ResponseEntity.ok(commander.recent(epicId));
+    public ResponseEntity<List<FleetOutcome>> recent(
+            @RequestParam(required = false) String epicId,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        return ResponseEntity.ok(commander.recent(epicId, UUID.fromString(ProjectAccess.require(auth).workspaceId())));
     }
 
     @PostMapping("/heartbeats")
-    public ResponseEntity<AgentHeartbeat> heartbeat(@Valid @RequestBody HeartbeatRequest req) {
+    public ResponseEntity<AgentHeartbeat> heartbeat(
+            @Valid @RequestBody HeartbeatRequest req,
+            @AuthenticationPrincipal AriaAuthentication auth) {
         AgentHeartbeat saved = heartbeats.save(AgentHeartbeat.builder()
+                .workspaceId(UUID.fromString(ProjectAccess.require(auth).workspaceId()))
                 .agentId(req.agentId())
                 .sessionId(req.sessionId())
                 .skillSlug(req.skillSlug())
@@ -74,29 +95,31 @@ public class FleetController {
     }
 
     @PostMapping("/heal/scan")
-    public ResponseEntity<Map<String, Object>> healScan() {
-        List<List<String>> cycles = guardrail.scan();
+    public ResponseEntity<Map<String, Object>> healScan(@AuthenticationPrincipal AriaAuthentication auth) {
+        List<List<String>> cycles = guardrail.scan(UUID.fromString(ProjectAccess.require(auth).workspaceId()));
         return ResponseEntity.ok(Map.of("cycles_detected", cycles.size(), "cycles", cycles));
     }
 
     @PostMapping("/deadlock/sweep")
-    public ResponseEntity<List<ContractDebt>> deadlockSweep() {
-        return ResponseEntity.ok(deadlockBreaker.sweep());
+    public ResponseEntity<List<ContractDebt>> deadlockSweep(@AuthenticationPrincipal AriaAuthentication auth) {
+        return ResponseEntity.ok(deadlockBreaker.sweep(UUID.fromString(ProjectAccess.require(auth).workspaceId())));
     }
 
     @PostMapping("/shadow")
-    public ResponseEntity<Map<String, Object>> openShadow(@Valid @RequestBody OpenShadowBranchRequest req) {
-        String branch = shadow.open(req.ticketRef(), req.speculativeDiff());
+    public ResponseEntity<Map<String, Object>> openShadow(
+            @Valid @RequestBody OpenShadowBranchRequest req,
+            @AuthenticationPrincipal AriaAuthentication auth) {
+        String branch = shadow.open(req.ticketRef(), req.speculativeDiff(), UUID.fromString(ProjectAccess.require(auth).workspaceId()));
         return ResponseEntity.ok(Map.of("branch", branch));
     }
 
     @GetMapping("/debts")
-    public ResponseEntity<List<ContractDebt>> openDebts() {
-        return ResponseEntity.ok(debts.findByReconciledAtIsNull());
+    public ResponseEntity<List<ContractDebt>> openDebts(@AuthenticationPrincipal AriaAuthentication auth) {
+        return ResponseEntity.ok(debts.findByWorkspaceIdAndReconciledAtIsNull(UUID.fromString(ProjectAccess.require(auth).workspaceId())));
     }
 
     @GetMapping("/breakers")
-    public ResponseEntity<?> openBreakers() {
-        return ResponseEntity.ok(breakers.findByClearedAtIsNull());
+    public ResponseEntity<?> openBreakers(@AuthenticationPrincipal AriaAuthentication auth) {
+        return ResponseEntity.ok(breakers.findByWorkspaceIdAndClearedAtIsNull(UUID.fromString(ProjectAccess.require(auth).workspaceId())));
     }
 }

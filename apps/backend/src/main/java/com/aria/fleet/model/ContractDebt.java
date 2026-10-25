@@ -25,6 +25,9 @@ public class ContractDebt {
     @Column(name = "session_id")
     private UUID sessionId;
 
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
+
     @Column(name = "producer_agent", nullable = false, length = 200)
     private String producerAgent;
 

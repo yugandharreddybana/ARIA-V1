@@ -26,4 +26,8 @@ public class AriaException extends RuntimeException {
     public static AriaException unauthorized(String message) {
         return new AriaException(message, HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
     }
+
+    public static AriaException forbidden(String message) {
+        return new AriaException(message, HttpStatus.FORBIDDEN, "FORBIDDEN");
+    }
 }

@@ -43,25 +43,22 @@ export async function saveLlmConfigHandler(
       testConnection?: boolean;
     };
 
-    // Optionally test connectivity before saving
-    if (body.testConnection) {
-      const result = await testLlmConnectivity(
-        body.provider,
-        body.baseUrl,
-        body.model,
-        body.apiKey,
-      );
-      if (!result.ok) {
-        res.status(422).json({
-          success: false,
-          error: result.message,
-          code: 'LLM_CONNECTION_FAILED',
-        });
-        return;
-      }
+    const result = await testLlmConnectivity(
+      body.provider,
+      body.baseUrl,
+      body.model,
+      body.apiKey,
+    );
+    if (!result.ok) {
+      res.status(422).json({
+        success: false,
+        error: result.message,
+        code: 'LLM_CONNECTION_FAILED',
+      });
+      return;
     }
 
-    await saveLlmConfig(req.user!.workspaceId, req.body);
+    await saveLlmConfig(req.user!.workspaceId, req.body, result);
     const saved = await getLlmConfig(req.user!.workspaceId);
     res.json({ success: true, config: saved });
   } catch (e) {

@@ -25,6 +25,9 @@ public class AgentHeartbeat {
     @Column(name = "agent_id", nullable = false, length = 200)
     private String agentId;
 
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
+
     @Column(name = "session_id")
     private UUID sessionId;
 

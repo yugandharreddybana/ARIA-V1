@@ -25,6 +25,9 @@ public class FleetCircuitBreaker {
     @Column(nullable = false, columnDefinition = "jsonb")
     private String cycle;             // ["agent-a","agent-b","agent-c"]
 
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
+
     @CreationTimestamp
     @Column(name = "detected_at", nullable = false, updatable = false)
     private Instant detectedAt;
