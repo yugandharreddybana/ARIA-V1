@@ -1,4 +1,5 @@
 import { validateEnv } from '../../config/env';
+import { cursorWireSelection } from '../modelTiers';
 import { RunError } from '../runs/errors';
 import type { AgentRunRow } from '../runs/runQueue';
 
@@ -71,6 +72,7 @@ export function cursorCloudWorker(): CodeWorker {
           autoCreatePR: task.autoCreatePR,
           workOnCurrentBranch: task.workOnCurrentBranch,
           prUrl: task.prUrl ?? undefined,
+          model: task.run.model_id ? cursorWireSelection(task.run.model_id) : undefined,
         }),
         signal: AbortSignal.timeout(20_000),
       });

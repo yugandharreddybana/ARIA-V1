@@ -11,6 +11,7 @@ export interface PlanRequest<T> {
   run: AgentRunRow;
   schema: z.ZodType<T>;
   instructions: string;
+  tools?: 'read_only' | 'none';
   onLog(kind: string, text: string): void;
 }
 
@@ -44,6 +45,8 @@ function cursorLocalReasoner(workspaceId: string): ReasoningModel {
           stub,
           timeoutMs: 60_000,
           apiKey: llm?.apiKey || 'stub',
+          modelId: req.run.model_id || 'auto',
+          tools: req.tools ?? (req.run.activity === 'company_generation' ? 'none' : 'read_only'),
         });
         text = result.text;
       } catch (err) {

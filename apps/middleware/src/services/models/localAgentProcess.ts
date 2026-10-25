@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { validateEnv } from '../../config/env';
 import { RunError } from '../runs/errors';
@@ -19,9 +20,18 @@ export function scrubbedEnv(apiKey: string): NodeJS.ProcessEnv {
   };
 }
 
-export function runLocalAgent(input: { prompt: string; stub: boolean; timeoutMs: number; apiKey: string }): Promise<LocalRun> {
+export function runLocalAgent(input: {
+  prompt: string;
+  stub: boolean;
+  timeoutMs: number;
+  apiKey: string;
+  modelId?: string;
+  tools?: 'read_only' | 'none';
+}): Promise<LocalRun> {
   const childPath = path.join(__dirname, 'localAgentChild.ts');
   const env = scrubbedEnv(input.apiKey);
+  const cwd = path.join(env.HOME || '/tmp/aria-data', 'planner-cwd');
+  mkdirSync(cwd, { recursive: true });
   return new Promise((resolve, reject) => {
     const child: ChildProcess = spawn(process.execPath, ['--experimental-strip-types', childPath], {
       env,
@@ -47,6 +57,13 @@ export function runLocalAgent(input: { prompt: string; stub: boolean; timeoutMs:
       clearTimeout(timer);
       if (code && code !== 0) reject(new RunError('RUN_ERROR', stderr.slice(0, 300) || `child exit ${code}`, true));
     });
-    child.send({ type: 'start', prompt: input.prompt, stub: input.stub });
+    child.send({
+      type: 'start',
+      prompt: input.prompt,
+      stub: input.stub,
+      modelId: input.modelId,
+      tools: input.tools ?? 'read_only',
+      cwd,
+    });
   });
 }

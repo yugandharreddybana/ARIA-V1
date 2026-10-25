@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { validateEnv } from '../../config/env';
 import { getPgPool } from '../db.client';
 import { applyCompanyRoster } from './companyApply';
-import { generateCompany } from '../companyGenerator';
+import { acceptCompanyPlan, type PlannedAgent } from './companyRoster';
+import { generateCompany, type CompanyMix } from '../companyGenerator';
 import { reasoningFor } from '../models/reasoning';
 import { RunError } from '../runs/errors';
 import type { AgentRunRow } from '../runs/runQueue';
@@ -10,54 +10,93 @@ import { append } from '../runs/runLogs';
 import { emitProject } from '../runs/hub';
 
 const companySchema = z.object({
-  agents: z.array(z.object({ roleKey: z.string() })).min(1),
+  agents: z.array(z.object({
+    roleKey: z.string(),
+    realName: z.string(),
+    roleTitle: z.string(),
+    department: z.string(),
+    managerIndex: z.number().int().nullable(),
+    backupIndex: z.number().int().nullable().default(null),
+    description: z.string().default(''),
+    instructions: z.string().default(''),
+    skills: z.array(z.string()).default([]),
+    flows: z.array(z.object({
+      flowKey: z.string(),
+      layer: z.string(),
+      role: z.string(),
+    })).default([]),
+  })).min(1),
 });
+
+const EMPTY_MIX: CompanyMix = { business: 0, qa: 0, frontend: 0, backend: 0, fullstack: 0, junior: 0, aiml: 0, devops: 0, security: 0 };
 
 export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 'ai' | 'template'; text: string }> {
   const size = Number(run.input.size ?? 8);
-  const mix = run.input.mix as Parameters<typeof generateCompany>[0]['mix'];
+  const mix = (run.input.mix as CompanyMix | undefined) ?? { ...EMPTY_MIX, business: 1, qa: 1, frontend: 1, backend: 1, fullstack: 1 };
+  const safeSize = Number.isInteger(size) ? size : 8;
   const flows = await getPgPool().query<{ id: string; flow_key: string; name: string; kind: string }>(
     `SELECT id, flow_key, name, kind FROM business_flows WHERE project_id = $1::uuid`,
     [run.project_id],
   );
-  const template = generateCompany({
-    size: Number.isInteger(size) ? size : 8,
-    mix: mix ?? { business: 1, qa: 1, frontend: 1, backend: 1, fullstack: 1, junior: 0, aiml: 0, devops: 0, security: 0 },
-    seed: run.project_id,
-    flows: flows.rows.map((flow) => ({ id: flow.id, flowKey: flow.flow_key, name: flow.name, kind: flow.kind })),
-  });
+  const flowRefs = flows.rows.map((flow) => ({ id: flow.id, flowKey: flow.flow_key, name: flow.name, kind: flow.kind }));
+  const template = generateCompany({ size: safeSize, mix, seed: run.project_id, flows: flowRefs });
   const model = await reasoningFor(run.workspace_id);
-  try {
-    await model.plan({
-      run,
-      schema: companySchema,
-      instructions: 'Return a company roster as JSON with an agents array. Seat count must match the request.',
-      onLog: (kind, text) => { void append(run.id, kind === 'error' ? 'error' : 'status', text); },
-    });
-    await applyCompanyRoster({
-      projectId: run.project_id,
-      size,
-      mix: template.agents.length ? (mix ?? { business: 0, qa: 0, frontend: 0, backend: 0, fullstack: 0, junior: 0, aiml: 0, devops: 0, security: 0 }) : template as never,
-      agents: template.agents,
-      assignments: template.flowAssignments,
-      planningModel: 'template',
-      source: 'template',
-      runId: run.id,
-    });
-  } catch (err) {
-    if (!(err instanceof RunError) || err.code !== 'SCHEMA_INVALID') throw err;
-    await applyCompanyRoster({
-      projectId: run.project_id,
-      size: Number.isInteger(size) ? size : 8,
-      mix: mix ?? { business: 1, qa: 1, frontend: 1, backend: 1, fullstack: 1, junior: 0, aiml: 0, devops: 0, security: 0 },
-      agents: template.agents,
-      assignments: template.flowAssignments,
-      planningModel: run.model_id || 'template',
-      source: 'template',
-      runId: run.id,
-    });
+  const marker = typeof run.input.fixture === 'string' ? `\n${run.input.fixture}` : '';
+  let accepted: Awaited<ReturnType<typeof acceptCompanyPlan>> = null;
+  let reason = 'planner did not return a roster';
+  for (let attempt = 1; attempt <= 2 && !accepted; attempt++) {
+    try {
+      const planned = await model.plan({
+        run,
+        schema: companySchema,
+        tools: 'none',
+        instructions: [
+          'Return a company roster as JSON with an agents array.',
+          `Seat count must be ${safeSize}. Mix ${JSON.stringify(mix)}.`,
+          'One CEO with a null managerIndex. Names unique. Manager graph acyclic.',
+          'Each agent: roleKey, realName, roleTitle, department, managerIndex, backupIndex, description, instructions, skills, flows.',
+          marker,
+        ].join('\n'),
+        onLog: (kind, text) => { void append(run.id, kind === 'error' ? 'error' : 'status', text); },
+      });
+      accepted = await acceptCompanyPlan({
+        size: safeSize,
+        mix,
+        seed: run.project_id,
+        flows: flowRefs,
+        agents: planned.value.agents as PlannedAgent[],
+      });
+      if (!accepted) reason = `roster failed validation on attempt ${attempt}`;
+    } catch (err) {
+      if (!(err instanceof RunError) || err.code !== 'SCHEMA_INVALID') throw err;
+      reason = err.message;
+    }
   }
+  if (accepted) {
+    await applyCompanyRoster({
+      projectId: run.project_id,
+      size: safeSize,
+      mix,
+      agents: accepted.agents,
+      assignments: accepted.assignments,
+      planningModel: run.model_id || 'planner',
+      source: 'ai',
+      runId: run.id,
+    });
+    emitProject(run.project_id, 'company:updated', { projectId: run.project_id, source: 'ai' });
+    return { outputSource: 'ai', text: 'ai company applied' };
+  }
+  await applyCompanyRoster({
+    projectId: run.project_id,
+    size: safeSize,
+    mix,
+    agents: template.agents,
+    assignments: template.flowAssignments,
+    planningModel: run.model_id || 'template',
+    source: 'template',
+    runId: run.id,
+  });
+  await append(run.id, 'status', `template company applied after two failed validations: ${reason}`);
   emitProject(run.project_id, 'company:updated', { projectId: run.project_id, source: 'template' });
-  void validateEnv();
   return { outputSource: 'template', text: 'template company applied' };
 }

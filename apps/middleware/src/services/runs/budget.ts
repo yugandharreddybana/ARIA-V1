@@ -4,6 +4,7 @@ import { validateEnv } from '../../config/env';
 import { getPgPool } from '../db.client';
 import type { RunErrorCode } from './errors';
 import { RunError } from './errors';
+import { emitProject } from './hub';
 
 const NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 
@@ -61,6 +62,7 @@ export async function reserveRun(input: {
   activity: string;
   projectBudget: number | null;
   agentBudget: number | null;
+  projectId?: string | null;
 }): Promise<BudgetDecision> {
   const env = validateEnv();
   const estimate = await estimateFor(input.activity);
@@ -93,7 +95,24 @@ export async function reserveRun(input: {
            last_updated_at = NOW()`,
     [workspaceId, runtimeBackend(input.activity), estimate.reserve],
   );
+  await noteBudget(input.workspaceId, input.projectId ?? null, workspaceMax);
   return { ok: true, reserved: estimate.reserve };
+}
+
+export async function noteBudget(workspaceId: string, projectId: string | null, limit: number): Promise<void> {
+  if (!projectId || limit <= 0) return;
+  const ratio = validateEnv().TOKEN_BUDGET_WARN_RATIO;
+  const used = await usageOf(monthlyBucketId(workspaceId));
+  if (used / limit >= ratio) emitProject(projectId, 'budget:warn', { projectId, used, limit });
+}
+
+async function usageOf(sessionId: string): Promise<number> {
+  const result = await getPgPool().query<{ projected: string }>(
+    `SELECT COALESCE(SUM(tokens_used + tokens_reserved), 0)::text AS projected
+       FROM token_ledger WHERE session_id = $1::uuid`,
+    [sessionId],
+  );
+  return Number(result.rows[0]?.projected ?? 0);
 }
 
 function runtimeBackend(activity: string): string {
@@ -107,6 +126,8 @@ export async function settleRun(input: {
   activity: string;
   reserved: number;
   actual: number;
+  projectId?: string | null;
+  limit?: number | null;
 }): Promise<void> {
   await getPgPool().query(
     `UPDATE token_ledger
@@ -116,6 +137,7 @@ export async function settleRun(input: {
       WHERE session_id = $1::uuid AND backend_id = $2`,
     [monthlyBucketId(input.workspaceId), runtimeBackend(input.activity), input.actual, input.reserved],
   );
+  if (input.projectId && input.limit) await noteBudget(input.workspaceId, input.projectId, input.limit);
 }
 
 export async function releaseRun(workspaceId: string, activity: string, reserved: number): Promise<void> {

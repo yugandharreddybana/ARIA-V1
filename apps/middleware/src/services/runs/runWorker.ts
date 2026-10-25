@@ -1,8 +1,11 @@
 import { validateEnv } from '../../config/env';
+import { getPgPool } from '../db.client';
 import { executeCompany } from '../activities/company';
 import { executeFix, executeDevelop, executeQa, executeReview, prepareDevelop } from '../activities/delivery';
 import { executeKnowledge } from '../activities/knowledgeMap';
 import { releaseRun, reserveRun, settleRun, usageTotal } from './budget';
+import { resolveForRun } from '../models/resolveForRun';
+import { maybeWatchPulls } from '../tickets/prWatcher';
 import { RunError, asRunError } from './errors';
 import { append, flush } from './runLogs';
 import { block, claim, claimById, fail, getRun, heartbeat, markTokensReserved, reap, releaseLeases, succeed, type RunRuntime } from './runQueue';
@@ -25,6 +28,11 @@ async function executeClaimed(run: NonNullable<Awaited<ReturnType<typeof getRun>
   beat.unref?.();
   let reserved = 0;
   try {
+    run.model_id = await resolveForRun(run);
+    await getPgPool().query(
+      `UPDATE agent_runs SET model_id = $2, updated_at = NOW() WHERE id = $1::uuid`,
+      [run.id, run.model_id],
+    );
     if (run.activity === 'develop') await prepareDevelop(run);
     const project = await import('../db.client').then(async ({ getPgPool }) => {
       const result = await getPgPool().query<{ token_budget_monthly: string | null; agent_budget: string | null }>(
@@ -34,12 +42,14 @@ async function executeClaimed(run: NonNullable<Awaited<ReturnType<typeof getRun>
       );
       return result.rows[0];
     });
+    const projectBudget = project?.token_budget_monthly ? Number(project.token_budget_monthly) : null;
     const decision = await reserveRun({
       workspaceId: run.workspace_id,
       agentId: run.agent_id,
       activity: run.activity,
-      projectBudget: project?.token_budget_monthly ? Number(project.token_budget_monthly) : null,
+      projectBudget,
       agentBudget: project?.agent_budget ? Number(project.agent_budget) : null,
+      projectId: run.project_id,
     });
     if (!decision.ok) {
       await block(run.id, decision.code || 'BUDGET_EXCEEDED', 'Monthly token budget would be exceeded');
@@ -48,7 +58,14 @@ async function executeClaimed(run: NonNullable<Awaited<ReturnType<typeof getRun>
     reserved = decision.reserved;
     await markTokensReserved(run.id, reserved);
     const result = await dispatch(run);
-    await settleRun({ workspaceId: run.workspace_id, activity: run.activity, reserved, actual: usageTotal({ total: result.tokensTotal }) || 1 });
+    await settleRun({
+      workspaceId: run.workspace_id,
+      activity: run.activity,
+      reserved,
+      actual: usageTotal({ total: result.tokensTotal }) || 1,
+      projectId: run.project_id,
+      limit: projectBudget ?? validateEnv().ARIA_MONTHLY_TOKEN_BUDGET,
+    });
     await succeed(run.id, result);
   } catch (err) {
     const runError = asRunError(err);
@@ -141,4 +158,5 @@ export async function tick(): Promise<void> {
   await dispatchReadyTickets();
   const { scanSchedule } = await import('../tickets/ticketActions');
   await scanSchedule();
+  await maybeWatchPulls();
 }

@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const sdkCreate = vi.hoisted(() => vi.fn());
+vi.mock('@cursor/sdk', () => ({ Agent: { create: sdkCreate } }));
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -15,6 +18,10 @@ import { backoffMs, p90 } from '../services/runs/budget';
 import { redact } from '../services/runs/runLogs';
 import { githubRequest, MergeForbiddenError } from '../services/githubClient.service';
 import { runLocalAgent, scrubbedEnv } from '../services/models/localAgentProcess';
+import { planWithCursorSdk } from '../services/models/cursorSdkPlanner';
+import { catalogIsStale } from '../services/models/resolveForRun';
+import { acceptCompanyPlan } from '../services/activities/companyRoster';
+import { mergeKnowledgeState } from '../services/activities/knowledgeMerge';
 
 const cal: WorkCalendar = { workdays: [1, 2, 3, 4, 5], timeZone: 'UTC', startMinutes: 9 * 60, endMinutes: 18 * 60 };
 
@@ -147,5 +154,104 @@ describe('pdf, hash, guards', () => {
     expect(env.CURSOR_API_KEY).toBe('secret-key');
     const child = await runLocalAgent({ prompt: '[[stub:env]]', stub: true, timeoutMs: 10_000, apiKey: 'secret-key' });
     expect(JSON.parse(child.text).envKeys).toEqual(['CURSOR_API_KEY', 'HOME', 'LANG', 'PATH']);
+  });
+
+  it('calls the live Cursor SDK with plan mode and an empty setting source list', async () => {
+    sdkCreate.mockResolvedValue({
+      send: vi.fn().mockResolvedValue({ wait: vi.fn().mockResolvedValue({ status: 'finished', result: '{"ok":true}' }) }),
+      close: vi.fn(),
+    });
+    const text = await planWithCursorSdk({
+      prompt: 'plan the change',
+      apiKey: 'live-key',
+      modelId: 'claude-opus-5',
+      tools: 'read_only',
+      cwd: '/tmp/aria-planner',
+    });
+    expect(text).toBe('{"ok":true}');
+    expect(sdkCreate).toHaveBeenCalledWith({
+      apiKey: 'live-key',
+      model: { id: 'claude-opus-5' },
+      mode: 'plan',
+      tools: ['read', 'grep', 'glob', 'ls'],
+      local: { cwd: '/tmp/aria-planner', settingSources: [] },
+    });
+    const none = await planWithCursorSdk({ prompt: 'roster', apiKey: 'live-key', modelId: 'auto', tools: 'none', cwd: '/tmp/aria-planner' });
+    expect(none).toBe('{"ok":true}');
+    expect(sdkCreate).toHaveBeenLastCalledWith(expect.objectContaining({ tools: [] }));
+  });
+
+  it('refreshes a catalog older than 24 hours', () => {
+    expect(catalogIsStale(null, Date.now())).toBe(true);
+    expect(catalogIsStale(new Date(Date.now() - 25 * 60 * 60 * 1000), Date.now())).toBe(true);
+    expect(catalogIsStale(new Date(), Date.now())).toBe(false);
+  });
+});
+
+const zeroMix = { business: 0, qa: 0, frontend: 0, backend: 0, fullstack: 0, junior: 0, aiml: 0, devops: 0, security: 0 };
+
+describe('company roster and knowledge merge', () => {
+  it('accepts a validated AI roster and rejects a manager cycle', async () => {
+    const accepted = await acceptCompanyPlan({
+      size: 3,
+      mix: zeroMix,
+      seed: 'roster',
+      flows: [],
+      agents: [
+        { roleKey: 'ceo', realName: 'Maya Chen', roleTitle: 'Chief Executive Officer', department: 'Leadership', managerIndex: null, backupIndex: 1, description: 'Leads.', instructions: 'Do not merge.', skills: ['strategy'], flows: [] },
+        { roleKey: 'cto', realName: 'Luis Ortega', roleTitle: 'Chief Technology Officer', department: 'Engineering', managerIndex: 0, backupIndex: 0, description: 'Architecture.', instructions: 'Keep it small.', skills: ['architecture'], flows: [] },
+        { roleKey: 'product_owner', realName: 'Amelia Brooks', roleTitle: 'Product Owner', department: 'Product', managerIndex: 0, backupIndex: 0, description: 'Backlog.', instructions: 'Write criteria.', skills: ['backlog'], flows: [] },
+      ],
+    });
+    expect(accepted?.agents.find((agent) => agent.slug === 'ceo')?.realName).toBe('Maya Chen');
+    const cycled = await acceptCompanyPlan({
+      size: 3,
+      mix: zeroMix,
+      seed: 'roster',
+      flows: [],
+      agents: [
+        { roleKey: 'ceo', realName: 'Maya Chen', roleTitle: 'Chief Executive Officer', department: 'Leadership', managerIndex: null, backupIndex: 1, description: 'Leads.', instructions: 'Do not merge.', skills: [], flows: [] },
+        { roleKey: 'cto', realName: 'Luis Ortega', roleTitle: 'Chief Technology Officer', department: 'Engineering', managerIndex: 2, backupIndex: 0, description: 'Architecture.', instructions: 'Keep it small.', skills: [], flows: [] },
+        { roleKey: 'product_owner', realName: 'Amelia Brooks', roleTitle: 'Product Owner', department: 'Product', managerIndex: 1, backupIndex: 0, description: 'Backlog.', instructions: 'Write criteria.', skills: [], flows: [] },
+      ],
+    });
+    expect(cycled).toBeNull();
+  });
+
+  it('updates flows and stack and keeps an owner-edited layer', () => {
+    const merged = mergeKnowledgeState({
+      summary: 'Signup lets a user create an account.',
+      flowNames: ['Signup'],
+      techStack: [{ name: 'Node' }],
+      modules: [{ name: 'web', path: 'apps/web/package.json', fileCount: 1 }],
+      apis: [],
+      dataModel: [],
+      flows: [{
+        id: 'flow-1', flowKey: 'signup', name: 'Signup', kind: 'ui', description: 'old', layer: 'backend',
+        entryPoints: ['apps/web/src/app/signup/page.tsx'], hasOwner: true,
+      }],
+      knownPaths: new Set(['apps/web/package.json', 'apps/web/src/app/signup/page.tsx']),
+      ai: {
+        summary: 'Rewritten map without the signup word.',
+        techStack: [{ name: 'TypeScript', evidence: 'package.json' }],
+        modules: [
+          { name: 'web', path: 'apps/web/package.json', fileCount: 2 },
+          { name: 'invented', path: 'no/such/file.ts', fileCount: 1 },
+        ],
+        flows: [
+          { flowKey: 'signup', name: 'Signup', kind: 'ui', layer: 'frontend', description: 'Account creation.', entryPoints: ['apps/web/src/app/signup/page.tsx', 'missing/page.tsx'] },
+          { flowKey: 'billing', name: 'Billing', kind: 'api', layer: 'backend', description: 'Invoices.', entryPoints: ['apps/web/package.json'] },
+        ],
+        apis: [],
+        dataModel: [],
+      },
+    });
+    expect(merged.summary.toLowerCase()).toContain('signup');
+    expect(merged.modules.map((mod) => mod.path)).toEqual(['apps/web/package.json']);
+    expect(merged.techStack).toEqual([{ name: 'TypeScript', evidence: 'package.json' }]);
+    expect(merged.updates[0].layer).toBe('backend');
+    expect(merged.updates[0].description).toBe('Account creation.');
+    expect(merged.updates[0].entryPoints).toEqual(['apps/web/src/app/signup/page.tsx']);
+    expect(merged.inserts.map((flow) => flow.flowKey)).toEqual(['billing']);
   });
 });

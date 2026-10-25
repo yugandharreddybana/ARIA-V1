@@ -29,14 +29,14 @@ These are the plan §16 defaults, each a config setting, until the owner says ot
 - **B2.** Flyway V15 `agent_runs` and `agent_run_logs`. Drizzle matches. `TicketStatus` includes `awaiting_merge` and `blocked`. Drift check passes.
 - **B3–B5.** Queue (`FOR UPDATE SKIP LOCKED`, 90s lease, 30s heartbeat, reaper), worker, redacted logs, runs API, monthly token buckets, agent OFF blocks queued runs and cancels running rows.
 - **B6.** Provider stub covers Cursor agents, SSE, usage, cancel, GitHub PRs, reviews, checks, and branches. Merge endpoints return 418. Vitest global setup points the suite at the stub.
-- **B7–B9.** Structured JSON with one retry. Cloud worker uses `bc-<run id>`, adopts a 409, and falls back to poll on 410. Local planning is a scrubbed child process. The child does not import `@cursor/sdk` yet.
+- **B7–B9.** Structured JSON with one retry. Cloud worker uses `bc-<run id>`, adopts a 409, and falls back to poll on 410. Local planning is a scrubbed child process. The live child calls `planWithCursorSdk` (`Agent.create`, plan mode, tool allowlist, empty `settingSources`). `ARIA_CURSOR_LOCAL_MODE=stub` stays the CI default and never imports the SDK. `resolveForRun` refreshes a catalog older than 24h, or an empty one, or a missing id, and blocks a missing agent pin with `MODEL_UNAVAILABLE`.
 - **B10.** V16 `flow_owners`. Dropped `business_flows.owner_agent_id`, `business_flows.backup_agent_id`, and `skills.owned_flow_ids`. `skills.backup_agent_id` stays (the agent's own backup). JSON still returns `ownerAgentId` / `backupAgentId` from the join table.
-- **B11–B12.** Knowledge-map and company runs enqueue. Company with an LLM returns 202 and still applies the template roster (so the CEO slug and seat count stay stable). No LLM stays 201. Knowledge enrichment will not strip a summary that mentions signup.
+- **B11–B12.** Knowledge-map and company runs enqueue. A validated AI roster (names, instructions, seat count, one CEO, acyclic managers) is applied with `company_source=ai`. Template fallback runs only after two failed validations, and the reason is logged. No LLM stays 201. Knowledge merge updates summary, tech stack, modules, APIs, data model, and flows. Unknown paths are dropped. Owner-edited flow layers stay. A schema-invalid plan leaves `source=template` and does not delete flows. A summary that omits a flow name still keeps that name.
 - **B13–B15.** Merge tripwire, COMMENT-only reviews, diff guards, develop / review / fix, round caps.
-- **B16.** QA stores a report and will not move a ticket to `awaiting_merge` without valid dev and QA evidence. `prWatcher` is not built: an owner merge in GitHub does not yet move the ticket to `done`.
+- **B16.** QA stores a report and will not move a ticket to `awaiting_merge` without valid dev and QA evidence. `prWatcher` polls every 60s with `If-None-Match`. An owner merge moves the ticket to `done` and cancels queued runs. A closed or abandoned pull (closed, no `merged_at`) moves it to `rejected`. Both write a `status_change` ticket event.
 - **B17.** Config only. `REPO_ACCESS` blocks the run.
 - **B19.** V17 `ticket_events`, hash chain, timeline, Markdown/JSON export, agent append limited to tickets the agent is on.
-- **B20.** V18 story points (Fibonacci, default 1). `due_at` from working days. At-risk at 80% and overdue past `due_at`, each logged once. `GET /api/projects/:id/schedule`. Points above 8 set `splitSuggested`. Omitted points use a length estimate and are logged.
+- **B20.** V18 story points (Fibonacci, default 1). `due_at` from working days. At-risk at 80% and overdue past `due_at`, each logged once. `GET /api/projects/:id/schedule`. Points above 8 set `splitSuggested`. Omitted points come from the planning agent when a workspace model is configured. The length heuristic is the fallback, including when the planner returns non-JSON. The event records `source` as `owner`, `planner`, or `heuristic`. `budget:warn` fires at 80% of the project limit.
 - **B21.** Dev and QA Markdown plus pdfkit PDFs in `ticket_reports`. Prompt templates require the sections. Gate sends invalid evidence back as a fix round. Content hash is an `evidence` event. Report links go on the PR comment. Downloads are workspace-scoped.
 
 ### Verified locally on 2026-10-25
@@ -44,18 +44,14 @@ These are the plan §16 defaults, each a config setting, until the owner says ot
 - `node scripts/check-schema-drift.cjs` passed (V15–V18 applied on this machine earlier in the session).
 - `pnpm -F @aria/middleware exec tsc --noEmit`, `pnpm -F @aria/web exec tsc --noEmit`, and `pnpm -F @aria/config exec tsc --noEmit` passed.
 - `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
-- `pnpm -F @aria/middleware test` — 23 files, 106 tests passed. That includes due-date weekends, at-risk/overdue, prompt headings, report validation, PDF generation, the evidence gate, hash-chain immutability, export, and workspace scoping.
-- `mvn` is not installed in this environment, so Java tests were not re-run. No Java sources changed.
+- `pnpm -F @aria/middleware test` — 23 files, 116 tests passed. That includes the live SDK plan-mode call (mocked), AI company roster and cyclic-manager fallback, knowledge merge (flows, modules, stack, owner layer), pull watcher merge and close, `budget:warn`, the two-worker claim race, catalog refresh with a missing pin, planner story points, due-date weekends, evidence gate, and the hash chain.
+- `mvn` is not installed in this environment, so Java tests were not re-run. No Java sources changed. Java CI is the check.
 
 ### Open
 
-- Live `@cursor/sdk` planning, `repoMirror`, `resolveForRun` (24h catalog refresh and `MODEL_UNAVAILABLE` for a missing pin), `prWatcher`, and `localWorktreeWorker` are not in this PR.
-- Company AI output is not applied; the template roster is. Knowledge AI merge updates the summary only.
-- `budget:warn` is specified and not emitted. `schedule:alert` is.
-- Point estimates on create are a length heuristic, not a planning-agent call.
-- Screenshot capture is a prompt requirement plus a stub PNG. Middleware does not run Playwright. `ARIA_QA_BROWSER` stays false.
-- `smoke:cursor` has not been run against a real key. No scratch-repo ticket has gone through a live develop → owner merge.
-- Two workers racing one claim is not an integration test yet. The partial unique index and `23505` handling are in the claim path.
+- `repoMirror` and `localWorktreeWorker` are not in this PR. `ARIA_LOCAL_FALLBACK` stays off.
+- Screenshot capture is a prompt requirement plus a stub PNG. Middleware does not run Playwright. `ARIA_QA_BROWSER` stays false. The visual-regression suite stays M3.
+- `smoke:cursor` has not been run against a real key. No scratch-repo ticket has gone through a live develop → owner merge. The SDK import is wired; CI still uses the stub.
 
 Non-goals that stay M3 or later: standup ceremony, merge-order coordinator, red/blue execution, ideas and proposals, the learning agent, the visual-regression suite, LLM security review, worker sub-agents, multi-tenant, GitHub webhooks. Frontend F1–F5, including the timeline UI, wait for the UI PR.
 

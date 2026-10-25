@@ -3,7 +3,8 @@ import { tickets, projects } from '@aria/db';
 import { eq, and } from 'drizzle-orm';
 import { AppError } from '../middleware/error.middleware';
 import type { CreateTicketRequest, UpdateTicketRequest } from '@aria/shared';
-import { estimatePoints, splitSuggested } from './tickets/schedule';
+import { splitSuggested } from './tickets/schedule';
+import { estimateStoryPoints } from './tickets/pointEstimate';
 import { appendTicketEvent } from './tickets/ticketEvents';
 import { applyTransition, approveTicket, assertHumanStatus, workCalendar } from './tickets/ticketActions';
 import { dueAt } from './tickets/schedule';
@@ -38,7 +39,11 @@ export async function createTicket(
   });
   if (!project) throw new AppError('Project not found or access denied', 404, 'NOT_FOUND');
 
-  const points = data.storyPoints ?? estimatePoints(data.title, data.description);
+  const estimated = data.storyPoints == null
+    ? await estimateStoryPoints(workspaceId, data.title, data.description)
+    : null;
+  const points = data.storyPoints ?? estimated?.points ?? 1;
+  const pointSource = data.storyPoints ? 'owner' : estimated?.source ?? 'heuristic';
   const [ticket] = await db
     .insert(tickets)
     .values({
@@ -62,7 +67,7 @@ export async function createTicket(
       eventType: data.storyPoints ? 'owner_decision' : 'agent_action',
       actorKind: data.storyPoints ? 'owner' : 'system',
       summary: data.storyPoints ? `Owner set ${points} story points` : `Estimated ${points} story points`,
-      detail: { storyPoints: points, splitSuggested: splitSuggested(points), source: data.storyPoints ? 'owner' : 'heuristic' },
+      detail: { storyPoints: points, splitSuggested: splitSuggested(points), source: pointSource },
     });
   }
   return ticket;

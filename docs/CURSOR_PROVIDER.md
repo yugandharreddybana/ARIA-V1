@@ -11,7 +11,7 @@ ARIA's setup wizard defaults to **Cursor**. The official programmatic surface (r
 
 `complete()` for provider `cursor` still throws `CURSOR_NO_CHAT_API`. Cursor has no chat-completions API. Planning does not go through that function. Coding does not either.
 
-`ARIA_CURSOR_LOCAL_MODE=stub` (the CI and vitest default) makes the child return fixture text and never calls the network. Stub mode is refused when `NODE_ENV=production`. The live child does not import `@cursor/sdk` yet: a live planning run returns a short stub sentence until that import is wired. `pnpm -F @aria/middleware smoke:cursor` skips with exit 0 when `CURSOR_API_KEY` is unset, and otherwise calls `GET /v1/models`. It is owner-run, not CI.
+`ARIA_CURSOR_LOCAL_MODE=stub` (the CI and vitest default) makes the child return fixture text and never calls the network. Stub mode is refused when `NODE_ENV=production`. A live planning child imports `planWithCursorSdk`, which calls `@cursor/sdk` `Agent.create` with `mode: "plan"`, the tool allowlist, and `local.settingSources: []`. CI does not take that path. `pnpm -F @aria/middleware smoke:cursor` skips with exit 0 when `CURSOR_API_KEY` is unset, and otherwise calls `GET /v1/models`. It is owner-run, not CI.
 
 ## Agents never merge
 

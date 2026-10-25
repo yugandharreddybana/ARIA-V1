@@ -6,14 +6,21 @@ export function extractJson(text: string): unknown {
     const parsed = tryParse(fenced[i][1]);
     if (parsed !== undefined) return parsed;
   }
-  const start = text.lastIndexOf('{');
-  if (start >= 0) {
-    const balanced = sliceBalanced(text, start);
-    if (balanced) {
-      const parsed = tryParse(balanced);
-      if (parsed !== undefined) return parsed;
+  const direct = tryParse(text.trim());
+  if (direct !== undefined && direct !== null && typeof direct === 'object') return direct;
+  let best: unknown;
+  let bestLength = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    const balanced = sliceBalanced(text, i);
+    if (!balanced || balanced.length <= bestLength) continue;
+    const parsed = tryParse(balanced);
+    if (parsed !== undefined) {
+      best = parsed;
+      bestLength = balanced.length;
     }
   }
+  if (best !== undefined) return best;
   throw new Error('No JSON object in model output');
 }
 
