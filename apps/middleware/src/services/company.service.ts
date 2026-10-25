@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { analysisJobs, businessFlows, db, knowledgeMaps, projectRepos, projects, skills, teamMembers, workspaces } from '@aria/db';
 import { AppError } from '../middleware/error.middleware';
 import { generateCompany, type CompanyMix, type GeneratedAgent, type RoleKey } from './companyGenerator';
@@ -7,8 +7,10 @@ import { logger } from '../config/logger';
 import { getPgPool } from './db.client';
 import { loadWorkspaceLlm, providerId } from './guardedLlm.service';
 import { applyCompanyRoster } from './activities/companyApply';
-import { decorateFlows, removeAgent, setOwners, type FlowLayer } from './flows/flowOwners';
-import { enqueue } from './runs/runQueue';
+import { decorateFlows, ownersOf, setOwners, type FlowLayer } from './flows/flowOwners';
+import { enqueue, blockQueuedForAgent, cancelRunningForAgent, unblockQueuedForAgent } from './runs/runQueue';
+import { codeWorkerFor } from './models/codeWorker';
+import { workspaceCursorKey } from './models/cursorKey';
 import { readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
 
 export interface AgentView {
@@ -245,30 +247,23 @@ export async function generateProjectCompany(
   };
   const llm = await loadWorkspaceLlm(workspaceId);
   if (!llm) {
-    await applyCompanyRoster({ ...roster, source: 'template' });
+    await applyCompanyRoster({ ...roster, source: 'template', force });
     return { ...(await getCompany(projectId, workspaceId)), statusCode: 201 as const };
   }
+  await applyCompanyRoster({ ...roster, source: 'template', force });
+  const prior = await getPgPool().query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM agent_runs WHERE project_id = $1::uuid AND activity = 'company_generation'`,
+    [projectId],
+  );
   const queued = await enqueue({
     workspaceId,
     projectId,
     activity: 'company_generation',
     taskType: 'company_generation',
     runtime: llm.provider === 'cursor' ? 'cursor_local' : 'chat',
-    idempotencyKey: `company:${projectId}:${Date.now()}`,
+    idempotencyKey: `company:${projectId}:r${Number(prior.rows[0]?.n ?? 0) + 1}`,
     input: { size, mix },
   });
-  try {
-    const { processRunById } = await import('./runs/runWorker');
-    await processRunById(queued.id);
-  } catch (err) {
-    logger.info('Company run fell back to the template', {
-      projectId,
-      message: err instanceof Error ? err.message.slice(0, 180) : 'skipped',
-    });
-    await applyCompanyRoster({ ...roster, source: 'template', runId: queued.id });
-  }
-  const company = await getCompany(projectId, workspaceId);
-  if (!company.agents.length) await applyCompanyRoster({ ...roster, source: 'template', runId: queued.id });
   return { ...(await getCompany(projectId, workspaceId)), statusCode: 202 as const, runId: queued.id };
 }
 
@@ -322,10 +317,22 @@ export async function updateAgent(projectId: string, workspaceId: string, agentI
     updatedAt: new Date(),
   }).where(eq(skills.id, agentId));
   if (patch.enabled === false) {
-    const { blockQueuedForAgent, cancelRunningForAgent } = await import('./runs/runQueue');
     await blockQueuedForAgent(agentId, 'agent_off');
-    await cancelRunningForAgent(agentId);
+    const running = await cancelRunningForAgent(agentId);
+    const cloud = running.filter((run) => run.external_agent_id && run.external_run_id);
+    if (cloud.length) {
+      try {
+        const apiKey = await workspaceCursorKey(workspaceId);
+        const worker = codeWorkerFor();
+        for (const run of cloud) {
+          await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
+        }
+      } catch (err) {
+        logger.info('Cloud cancel skipped', { agentId, message: err instanceof Error ? err.message.slice(0, 180) : 'skipped' });
+      }
+    }
   }
+  if (patch.enabled === true) await unblockQueuedForAgent(agentId);
   const updated = await db.query.skills.findFirst({ where: eq(skills.id, agentId) });
   return toView(updated!);
 }
@@ -375,6 +382,14 @@ export async function createAgent(projectId: string, workspaceId: string, input:
   return toView(created!);
 }
 
+function sqlRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === 'object' && Array.isArray((result as { rows?: unknown }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
+}
+
 export async function deleteAgent(projectId: string, workspaceId: string, agentId: string) {
   await ownedProject(projectId, workspaceId);
   const existing = await db.query.skills.findFirst({
@@ -382,8 +397,18 @@ export async function deleteAgent(projectId: string, workspaceId: string, agentI
   });
   if (!existing) throw new AppError('Agent not found', 404, 'NOT_FOUND');
   const managerId = existing.reportingManagerId;
-  await removeAgent(agentId);
   await db.transaction(async (tx) => {
+    const owned = await tx.execute(sql`
+      DELETE FROM flow_owners WHERE agent_id = ${agentId}::uuid AND role = 'owner' RETURNING flow_id, layer
+    `);
+    const rows = sqlRows<{ flow_id: string; layer: string }>(owned);
+    for (const row of rows) {
+      await tx.execute(sql`
+        UPDATE flow_owners SET role = 'owner'
+         WHERE flow_id = ${row.flow_id}::uuid AND layer = ${row.layer} AND role = 'backup'
+      `);
+    }
+    await tx.execute(sql`DELETE FROM flow_owners WHERE agent_id = ${agentId}::uuid`);
     await tx.update(skills).set({ reportingManagerId: managerId }).where(and(
       eq(skills.projectId, projectId),
       eq(skills.reportingManagerId, agentId),
@@ -416,10 +441,15 @@ export async function assignFlow(projectId: string, workspaceId: string, flowId:
   if (patch.ownerAgentId) await assertSameProjectAgent(projectId, patch.ownerAgentId, 'Owner');
   if (patch.backupAgentId) await assertSameProjectAgent(projectId, patch.backupAgentId, 'Backup');
   const layer = (flow.layer === 'frontend' || flow.layer === 'backend' || flow.layer === 'fullstack' ? flow.layer : 'fullstack') as FlowLayer;
-  const next: Array<{ agentId: string; layer: FlowLayer; role: 'owner' | 'backup' }> = [];
+  const current = await ownersOf(flowId);
+  const next = current.filter((owner) => {
+    if (owner.layer !== layer) return true;
+    if (owner.role === 'owner') return patch.ownerAgentId === undefined;
+    return patch.backupAgentId === undefined;
+  });
   if (patch.ownerAgentId) next.push({ agentId: patch.ownerAgentId, layer, role: 'owner' });
   if (patch.backupAgentId) next.push({ agentId: patch.backupAgentId, layer, role: 'backup' });
-  if (next.length) await setOwners(flowId, next);
+  await setOwners(flowId, next, projectId);
   return getCompany(projectId, workspaceId);
 }
 

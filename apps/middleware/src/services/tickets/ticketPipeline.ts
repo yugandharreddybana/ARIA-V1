@@ -100,13 +100,20 @@ export function transition(status: PipelineStatus, event: PipelineEvent, ctx: Tr
       if (ctx.returnTo === 'qa') return { status: 'in_qa', effects: [{ type: 'enqueue', activity: 'qa' }] };
       return { status: 'ready_for_review', effects: [{ type: 'enqueue', activity: 'review' }] };
     case 'pr_merged':
+      if (status !== 'awaiting_merge' && status !== 'in_qa' && status !== 'ready_for_review' && status !== 'in_progress') {
+        return { status, effects: [], reason: 'pr_merged only leaves an open pull' };
+      }
       return { status: 'done', effects: [{ type: 'cancelRuns' }, { type: 'emit', name: 'done' }] };
     case 'pr_closed':
+      if (status === 'done' || status === 'rejected' || status === 'backlog') {
+        return { status, effects: [], reason: 'pr_closed does not apply' };
+      }
       return { status: 'rejected', effects: [{ type: 'cancelRuns' }] };
     case 'unblock':
       if (status !== 'blocked') return { status, effects: [], reason: 'unblock only leaves blocked' };
       return { status: 'ready_for_dev', effects: [] };
     case 'reject':
+      if (status === 'done' || status === 'rejected') return { status, effects: [], reason: 'reject does not leave a terminal ticket' };
       return { status: 'rejected', effects: [{ type: 'cancelRuns' }] };
     default: {
       const neverEvent: never = event;

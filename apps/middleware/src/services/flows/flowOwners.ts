@@ -33,12 +33,21 @@ export async function ownersOf(flowId: string): Promise<FlowOwnerInput[]> {
   }));
 }
 
-export async function setOwners(flowId: string, owners: FlowOwnerInput[]): Promise<void> {
+export async function setOwners(flowId: string, owners: FlowOwnerInput[], projectId?: string): Promise<void> {
   assertOwnerInvariant(owners);
   const pool = getPgPool();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (projectId) {
+      const agents = await client.query<{ id: string }>(
+        `SELECT id FROM skills WHERE project_id = $1::uuid AND id = ANY($2::uuid[])`,
+        [projectId, owners.map((owner) => owner.agentId)],
+      );
+      if (agents.rows.length !== new Set(owners.map((owner) => owner.agentId)).size) {
+        throw new AppError('Flow owner is not an agent on this project', 403, 'FORBIDDEN');
+      }
+    }
     await client.query(`DELETE FROM flow_owners WHERE flow_id = $1::uuid`, [flowId]);
     for (const owner of owners) {
       await client.query(
@@ -55,7 +64,7 @@ export async function setOwners(flowId: string, owners: FlowOwnerInput[]): Promi
   }
 }
 
-export async function routeTicket(flowId: string | null, layer: FlowLayer | null, projectId?: string): Promise<string | null> {
+export async function routeTicket(flowId: string | null, layer: FlowLayer | null, projectId: string): Promise<string | null> {
   if (flowId) {
     const owners = await ownersOf(flowId);
     const wanted = layer ?? 'fullstack';
@@ -67,10 +76,9 @@ export async function routeTicket(flowId: string | null, layer: FlowLayer | null
     if (fallback) return fallback.agentId;
   }
   const dev = await getPgPool().query<{ id: string }>(
-    `SELECT id FROM skills WHERE enabled = true AND role_key = 'fullstack'
-        AND ($1::uuid IS NULL OR project_id = $1::uuid)
+    `SELECT id FROM skills WHERE enabled = true AND role_key = 'fullstack' AND project_id = $1::uuid
       ORDER BY created_at LIMIT 1`,
-    [projectId ?? null],
+    [projectId],
   );
   return dev.rows[0]?.id ?? null;
 }

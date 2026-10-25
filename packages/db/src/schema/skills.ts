@@ -1,6 +1,6 @@
 import {
   pgTable, uuid, varchar, text, integer, bigint, boolean,
-  timestamp, index, jsonb,
+  timestamp, index, jsonb, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { projects } from './projects';
@@ -10,10 +10,12 @@ export const teams = pgTable('teams', {
   id:                 uuid('id').primaryKey().defaultRandom(),
   projectId:          uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   name:               varchar('name', { length: 255 }).notNull(),
+  description:        text('description'),
   department:         varchar('department', { length: 100 }),
   leadSkillId:        uuid('lead_skill_id'),
   scrumMasterSkillId: uuid('scrum_master_skill_id'),
   createdAt:          timestamp('created_at').notNull().defaultNow(),
+  updatedAt:          timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ({ projectIdx: index('teams_project_idx').on(t.projectId) }));
 
 // ── Skills (agents) ────────────────────────────────────────────────────────
@@ -25,7 +27,7 @@ export const skills = pgTable('skills', {
   // ── Org hierarchy ──────────────────────────────────────────────────────
   // null reportingManagerId  → this agent is the root (CEO)
   // hierarchyLevel: 1=CEO  2=C-suite  3=Directors/Leads  4=Scrum Master  5=ICs
-  reportingManagerId: uuid('reporting_manager_id'),  // self-ref; FK enforced in migration
+  reportingManagerId: uuid('reporting_manager_id').references((): AnyPgColumn => skills.id, { onDelete: 'set null' }),
   hierarchyLevel:     integer('hierarchy_level').notNull().default(5),
   department:         varchar('department', { length: 100 }),
 
@@ -37,7 +39,8 @@ export const skills = pgTable('skills', {
   // Legacy V1 columns. Still written so older readers keep a name.
   name:      text('name'),
   role:      text('role'),
-  model:     text('model'),
+  systemPrompt: text('system_prompt'),
+  model:     text('model').notNull().default('llama3'),
   modelTaskTiers: jsonb('model_task_tiers').$type<{ planning?: 'top' | 'auto'; development?: 'top' | 'auto' }>(),
   modelOverride: text('model_override'),
 
@@ -50,7 +53,7 @@ export const skills = pgTable('skills', {
   ownedDomains:    jsonb('owned_domains').notNull().default([]),
   ownedRepoPaths:  jsonb('owned_repo_paths').notNull().default([]),
   triggerKeywords: jsonb('trigger_keywords').notNull().default([]),
-  backupAgentId:   uuid('backup_agent_id'),
+  backupAgentId:   uuid('backup_agent_id').references((): AnyPgColumn => skills.id, { onDelete: 'set null' }),
   tokenBudgetMonthly: bigint('token_budget_monthly', { mode: 'number' }),
   enabled:         boolean('enabled').notNull().default(true),
 
@@ -69,6 +72,7 @@ export const teamMembers = pgTable('team_members', {
   teamId:    uuid('team_id').notNull().references(() => teams.id,   { onDelete: 'cascade' }),
   skillId:   uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
   role:      text('role').notNull().default('member'),
+  joinedAt:  timestamp('joined_at').notNull().defaultNow(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({ teamIdx: index('team_members_team_idx').on(t.teamId) }));
 

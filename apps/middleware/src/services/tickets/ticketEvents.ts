@@ -13,7 +13,7 @@ export const EVENT_TYPES = [
 ] as const;
 
 export type TicketEventType = typeof EVENT_TYPES[number];
-export type ActorKind = 'agent' | 'owner' | 'system';
+export type ActorKind = 'agent' | 'owner' | 'system' | 'human';
 
 export interface TicketEventRow {
   id: string;
@@ -55,10 +55,17 @@ export async function appendTicketEvent(input: {
   const pool = getPgPool();
   const client = await pool.connect();
   try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
     await client.query('BEGIN');
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [input.ticketId]);
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`events:${input.ticketId}`]);
+    // Qualify seq. `SELECT seq::text ... ORDER BY seq` sorts the text alias ("9" > "10").
     const prior = await client.query<{ seq: string; hash: string }>(
-      `SELECT seq::text, hash FROM ticket_events WHERE ticket_id = $1::uuid ORDER BY seq DESC LIMIT 1`,
+      `SELECT t.seq::text AS seq, t.hash
+         FROM ticket_events t
+        WHERE t.ticket_id = $1::uuid
+        ORDER BY t.seq DESC
+        LIMIT 1`,
       [input.ticketId],
     );
     const seq = Number(prior.rows[0]?.seq ?? 0) + 1;
@@ -97,9 +104,14 @@ export async function appendTicketEvent(input: {
     );
     await client.query('COMMIT');
     return inserted.rows[0];
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+      if ((code === '23514' || code === '23505') && attempt < 2) continue;
+      throw err;
+    }
+    }
+    throw new Error('ticket event was not appended');
   } finally {
     client.release();
   }
@@ -125,7 +137,7 @@ export async function listTicketEvents(ticketId: string, filter: {
     params.push(filter.afterSeq);
     clauses.push(`seq > $${params.length}`);
   }
-  params.push(Math.min(filter.limit ?? 100, 500));
+  params.push(Math.min(filter.limit ?? 100, 5000));
   const result = await getPgPool().query<TicketEventRow>(
     `SELECT * FROM ticket_events WHERE ${clauses.join(' AND ')} ORDER BY seq LIMIT $${params.length}`,
     params,
@@ -158,16 +170,19 @@ export function verifyChain(rows: TicketEventRow[]): { ok: boolean; brokenAt: nu
   return { ok: true, brokenAt: null };
 }
 
-export function eventsToMarkdown(ticketKey: string, rows: TicketEventRow[]): string {
+export function eventsToMarkdown(ticketKey: string, rows: TicketEventRow[], truncated = false): string {
   const lines = [`# ${ticketKey} activity`, ''];
   for (const row of rows) {
     lines.push(`## ${row.seq}. ${row.event_type} (${row.actor_kind})`);
     lines.push(row.summary);
+    lines.push(`Hash: ${row.hash}`);
+    lines.push(`Detail: ${row.detail_canonical}`);
     if (row.run_id) lines.push(`Run: ${row.run_id}`);
     if (row.pr_url) lines.push(`PR: ${row.pr_url}`);
     if (row.commit_sha) lines.push(`Commit: ${row.commit_sha}`);
     lines.push('');
   }
+  if (truncated) lines.push('Export truncated. Request a later cursor to continue.');
   return lines.join('\n');
 }
 

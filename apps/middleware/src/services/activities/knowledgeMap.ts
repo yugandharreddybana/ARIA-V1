@@ -8,6 +8,7 @@ import type { AgentRunRow } from '../runs/runQueue';
 import { append } from '../runs/runLogs';
 import { emitProject } from '../runs/hub';
 import { mergeKnowledgeState, type AiKnowledge, type MergeFlow, type MergeModule } from './knowledgeMerge';
+import { Sanitizer } from '../sanitizer.service';
 
 const knowledgeSchema = z.object({
   summary: z.string().min(1),
@@ -25,7 +26,7 @@ const knowledgeSchema = z.object({
   dataModel: z.array(z.object({ name: z.string().optional(), source: z.string().optional() })).default([]),
 });
 
-export async function executeKnowledge(run: AgentRunRow): Promise<{ outputSource: 'ai' | 'template'; text: string }> {
+export async function executeKnowledge(run: AgentRunRow): Promise<{ outputSource: 'ai' | 'template'; text: string; tokensTotal?: number }> {
   const model = await reasoningFor(run.workspace_id);
   const existing = await db.query.knowledgeMaps.findFirst({ where: eq(knowledgeMaps.projectId, run.project_id) });
   const marker = typeof run.input.fixture === 'string' ? `\n${run.input.fixture}` : '';
@@ -34,7 +35,13 @@ export async function executeKnowledge(run: AgentRunRow): Promise<{ outputSource
       run,
       schema: knowledgeSchema,
       tools: 'read_only',
-      instructions: `Return JSON {summary, techStack, modules, flows, apis, dataModel}. Keep every flow name from the draft. Drop paths that are not in the repository.${marker}`,
+      instructions: [
+        'Return JSON {summary, techStack, modules, flows, apis, dataModel}.',
+        'Keep every flow name from the draft. Drop paths that are not in the repository.',
+        `Draft summary: ${(existing?.summary || '').slice(0, 2000)}`,
+        `Repository paths: ${JSON.stringify(existing?.modules ?? []).slice(0, 4000)}`,
+        marker,
+      ].join('\n'),
       onLog: (kind, text) => { void append(run.id, kind === 'error' ? 'error' : 'status', text); },
     });
     if (existing) {
@@ -89,6 +96,17 @@ async function applyKnowledgeMerge(
   const knownPaths = new Set<string>();
   for (const mod of modules) if (mod && typeof mod.path === 'string') knownPaths.add(mod.path);
   for (const flow of flows) for (const entry of flow.entryPoints) knownPaths.add(entry);
+  const sanitizer = new Sanitizer();
+  for (const flow of ai.flows) {
+    if (flow.name) {
+      const cleaned = await sanitizer.sanitize(flow.name);
+      flow.name = cleaned.trustLabel === 'rejected' ? '' : cleaned.cleaned;
+    }
+    if (flow.description) {
+      const cleaned = await sanitizer.sanitize(flow.description);
+      flow.description = cleaned.trustLabel === 'rejected' ? '' : cleaned.cleaned;
+    }
+  }
   const merged = mergeKnowledgeState({
     summary: existing.summary,
     flowNames: flows.map((flow) => flow.name),
@@ -100,36 +118,38 @@ async function applyKnowledgeMerge(
     ai,
     knownPaths,
   });
-  await db.update(knowledgeMaps).set({
-    summary: merged.summary,
-    techStack: merged.techStack,
-    modules: merged.modules,
-    apis: merged.apis,
-    dataModel: merged.dataModel,
-    source: 'ai',
-    agentRunId: run.id,
-    updatedAt: new Date(),
-  }).where(eq(knowledgeMaps.id, mapId));
-  for (const flow of merged.updates) {
-    await db.update(businessFlows).set({
-      name: flow.name,
-      kind: flow.kind,
-      description: flow.description,
-      layer: flow.layer,
-      entryPoints: flow.entryPoints,
+  await db.transaction(async (tx) => {
+    await tx.update(knowledgeMaps).set({
+      summary: merged.summary,
+      techStack: merged.techStack,
+      modules: merged.modules,
+      apis: merged.apis,
+      dataModel: merged.dataModel,
+      source: 'ai',
+      agentRunId: run.id,
       updatedAt: new Date(),
-    }).where(eq(businessFlows.id, flow.id));
-  }
-  for (const flow of merged.inserts) {
-    await db.insert(businessFlows).values({
-      projectId,
-      knowledgeMapId: mapId,
-      flowKey: flow.flowKey,
-      name: flow.name,
-      kind: flow.kind,
-      description: flow.description,
-      layer: flow.layer,
-      entryPoints: flow.entryPoints,
-    });
-  }
+    }).where(eq(knowledgeMaps.id, mapId));
+    for (const flow of merged.updates) {
+      await tx.update(businessFlows).set({
+        name: flow.name,
+        kind: flow.kind,
+        description: flow.description,
+        layer: flow.layer,
+        entryPoints: flow.entryPoints,
+        updatedAt: new Date(),
+      }).where(eq(businessFlows.id, flow.id));
+    }
+    for (const flow of merged.inserts) {
+      await tx.insert(businessFlows).values({
+        projectId,
+        knowledgeMapId: mapId,
+        flowKey: flow.flowKey,
+        name: flow.name,
+        kind: flow.kind,
+        description: flow.description,
+        layer: flow.layer,
+        entryPoints: flow.entryPoints,
+      });
+    }
+  });
 }

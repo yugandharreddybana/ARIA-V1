@@ -52,6 +52,142 @@ if (!/DROP COLUMN IF EXISTS owner_agent_id/.test(flyway) || !/DROP COLUMN IF EXI
   fail('Flyway does not drop owner_agent_id and owned_flow_ids');
 }
 
+function columnSpec(text) {
+  return { notNull: /\bNOT NULL\b/i.test(text), references: /\bREFERENCES\b/i.test(text) };
+}
+
+function splitTopLevel(body) {
+  const parts = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of body) {
+    if (ch === '(') depth += 1;
+    if (ch === ')' && depth > 0) depth -= 1;
+    if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current);
+  return parts;
+}
+
+function drizzleTables(source) {
+  const tables = new Map();
+  const starts = [...source.matchAll(/pgTable\('([a-z0-9_]+)',\s*\{/g)];
+  for (const start of starts) {
+    const name = start[1];
+    const from = start.index + start[0].length;
+    let depth = 1;
+    let to = from;
+    while (to < source.length && depth > 0) {
+      const ch = source[to];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      to += 1;
+    }
+    const body = source.slice(from, to - 1);
+    const columns = new Map();
+    const lines = body.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const match = lines[i].match(/^\s*\w+:\s*[A-Za-z0-9_$.]+\('([a-z0-9_]+)'/);
+      if (!match) continue;
+      let block = lines[i];
+      while (!/,\s*$/.test(block.trim()) && i + 1 < lines.length && !/^\s*\w+:/.test(lines[i + 1])) {
+        i += 1;
+        block += lines[i];
+      }
+      columns.set(match[1], { notNull: block.includes('.notNull('), references: block.includes('.references(') });
+    }
+    tables.set(name, columns);
+  }
+  return tables;
+}
+
+function flywayTables(sql) {
+  const stripped = sql.replace(/--[^\n]*/g, '');
+  const tables = new Map();
+  const ensure = (name) => {
+    if (!tables.has(name)) tables.set(name, new Map());
+    return tables.get(name);
+  };
+  const createRe = /CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z0-9_]+)\s*\(/gi;
+  let create = createRe.exec(stripped);
+  while (create) {
+    const columns = ensure(create[1]);
+    let i = create.index + create[0].length;
+    let depth = 1;
+    let body = '';
+    while (i < stripped.length && depth > 0) {
+      const ch = stripped[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth -= 1;
+      if (depth > 0) body += ch;
+      i += 1;
+    }
+    for (const part of splitTopLevel(body)) {
+      const line = part.trim();
+      if (!line || /^(PRIMARY|UNIQUE|CONSTRAINT|CHECK|FOREIGN)\b/i.test(line)) continue;
+      const match = line.match(/^([a-z0-9_]+)\s+/i);
+      if (!match) continue;
+      columns.set(match[1].toLowerCase(), columnSpec(line));
+    }
+    create = createRe.exec(stripped);
+  }
+  const alterRe = /ALTER TABLE(?: IF EXISTS)?\s+([a-z0-9_]+)\s+([\s\S]*?);/gi;
+  let alter = alterRe.exec(stripped);
+  while (alter) {
+    const table = alter[1].toLowerCase();
+    const body = alter[2];
+    const columns = ensure(table);
+    for (const added of body.matchAll(/ADD COLUMN(?: IF NOT EXISTS)?\s+([a-z0-9_]+)\s+([^,]+)/gi)) {
+      columns.set(added[1].toLowerCase(), columnSpec(added[2]));
+    }
+    for (const dropped of body.matchAll(/DROP COLUMN(?: IF EXISTS)?\s+([a-z0-9_]+)/gi)) {
+      columns.delete(dropped[1].toLowerCase());
+    }
+    for (const setNull of body.matchAll(/ALTER COLUMN\s+([a-z0-9_]+)\s+SET NOT NULL/gi)) {
+      const current = columns.get(setNull[1].toLowerCase()) || { notNull: false, references: false };
+      columns.set(setNull[1].toLowerCase(), { ...current, notNull: true });
+    }
+    for (const dropNull of body.matchAll(/ALTER COLUMN\s+([a-z0-9_]+)\s+DROP NOT NULL/gi)) {
+      const current = columns.get(dropNull[1].toLowerCase()) || { notNull: false, references: false };
+      columns.set(dropNull[1].toLowerCase(), { ...current, notNull: false });
+    }
+    for (const fk of body.matchAll(/FOREIGN KEY\s*\(([a-z0-9_]+)\)\s*REFERENCES/gi)) {
+      const current = columns.get(fk[1].toLowerCase()) || { notNull: false, references: false };
+      columns.set(fk[1].toLowerCase(), { ...current, references: true });
+    }
+    alter = alterRe.exec(stripped);
+  }
+  return tables;
+}
+
+const drizzle = new Map();
+for (const file of fs.readdirSync(path.join(root, 'packages/db/src/schema')).filter((name) => name.endsWith('.ts'))) {
+  for (const [name, columns] of drizzleTables(fs.readFileSync(path.join(root, 'packages/db/src/schema', file), 'utf8'))) {
+    drizzle.set(name, columns);
+  }
+}
+const flywayColumns = flywayTables(flyway);
+for (const [table, columns] of flywayColumns) {
+  if (!drizzle.has(table) || columns.size === 0) continue;
+  const mirror = drizzle.get(table);
+  for (const [column, spec] of columns) {
+    const other = mirror.get(column);
+    if (!other) {
+      fail(`${table}.${column} is in Flyway and missing from Drizzle`);
+      continue;
+    }
+    if (spec.notNull && !other.notNull) {
+      fail(`${table}.${column} is NOT NULL in Flyway and nullable in Drizzle`);
+    }
+    if (spec.references !== other.references) fail(`${table}.${column} foreign key differs`);
+  }
+}
+
 if (failures.length) {
   console.error(failures.map((line) => `- ${line}`).join('\n'));
   process.exit(1);

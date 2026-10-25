@@ -39,13 +39,26 @@ These are the plan §16 defaults, each a config setting, until the owner says ot
 - **B20.** V18 story points (Fibonacci, default 1). `due_at` from working days. At-risk at 80% and overdue past `due_at`, each logged once. `GET /api/projects/:id/schedule`. Points above 8 set `splitSuggested`. Omitted points come from the planning agent when a workspace model is configured. The length heuristic is the fallback, including when the planner returns non-JSON. The event records `source` as `owner`, `planner`, or `heuristic`. `budget:warn` fires at 80% of the project limit.
 - **B21.** Dev and QA Markdown plus pdfkit PDFs in `ticket_reports`. Prompt templates require the sections. Gate sends invalid evidence back as a fix round. Content hash is an `evidence` event. Report links go on the PR comment. Downloads are workspace-scoped.
 
+### Review fix pass (PR #9, do not merge from the agent)
+
+Opus review items 1–23 and the should-fix list are addressed on `cursor/m2-backend-1c0c`. Not merged.
+
+- Cloud worker uses the workspace encrypted key, `repos[{url,startingRef,prUrl}]`, `{agent,run}`, SSE `event:` lines, `git.branches[]`, `GET /v1/agents/{id}/usage?runId=` `totalTokens`, and a timeout on every call. The provider stub follows that contract.
+- The planner child resolves `localAgentChild.js` when the `.ts` source is absent, kills the process group, and uses a 20 minute timeout. `tsc` emits `dist/services/models/localAgentChild.js`. Running that file with a stub start message returned `{"storyPoints":5}`. Docker is not installed in this environment, so the image itself was not booted.
+- Queue terminal writes require `status` and `lease_owner`. A lost lease aborts the run. Ticks do not overlap. Transitions lock the ticket row. Dispatch takes one ready ticket per agent. Human status changes are logged and cancel runs.
+- Merge guard fails closed. Review and QA read the GitHub diff, files, and PR number. QA fails on pending, timed out, cancelled, and error checks. Evidence is the committed `evidence/` file at the current head SHA. UI-affected comes from the diff.
+- Flow-owner writes check the project. Client requests cannot append `actor_kind=agent`. `flowId` must belong to the project.
+- V17 no longer creates a role. V19 keeps the purge behind the trigger GUC. Drizzle matches Flyway, including nullability and foreign keys. `scripts/check-schema-drift.cjs` compares those.
+- Ticket event sequence is ordered by `ticket_events.seq`, not the `seq::text` output alias (`"9"` sorted above `"10"`). A full working day is due at the next open. Deleting an owner promotes the backup from the postgres.js row list.
+
 ### Verified locally on 2026-10-25
 
-- `node scripts/check-schema-drift.cjs` passed (V15–V18 applied on this machine earlier in the session).
-- `pnpm -F @aria/middleware exec tsc --noEmit`, `pnpm -F @aria/web exec tsc --noEmit`, and `pnpm -F @aria/config exec tsc --noEmit` passed.
+- `node scripts/check-schema-drift.cjs` passed.
+- `pnpm -F @aria/middleware exec tsc --noEmit` passed. `pnpm -F @aria/middleware build` passed.
 - `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed.
-- `pnpm -F @aria/middleware test` — 23 files, 116 tests passed. That includes the live SDK plan-mode call (mocked), AI company roster and cyclic-manager fallback, knowledge merge (flows, modules, stack, owner layer), pull watcher merge and close, `budget:warn`, the two-worker claim race, catalog refresh with a missing pin, planner story points, due-date weekends, evidence gate, and the hash chain.
-- `mvn` is not installed in this environment, so Java tests were not re-run. No Java sources changed. Java CI is the check.
+- `pnpm -F @aria/middleware test` — 24 files, 125 tests passed, including `reviewAcceptance.integration.test.ts` (develop → review → QA, fix round cap, stub failures, merge guard, cancel, lease loss, IDOR, WebSocket room).
+- `pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts` on the changed middleware tests passed.
+- Java sources were not changed. Java CI remains the check.
 
 ### Open
 

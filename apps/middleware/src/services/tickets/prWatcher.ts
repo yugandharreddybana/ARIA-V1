@@ -31,7 +31,9 @@ export async function watchPullRequests(): Promise<void> {
   for (const ticket of rows.rows) {
     try {
       const token = await readGithubToken(ticket.workspace_id);
-      const fullName = ticket.repo_name || 'acme/demo-app';
+      const fromUrl = ticket.pr_url?.match(/github\.com\/([^/]+\/[^/]+)\/pull\//);
+      const fullName = ticket.repo_name || fromUrl?.[1];
+      if (!fullName) continue;
       const pulled = await getPull(token, fullName, ticket.pr_number, etags.get(ticket.id));
       if (pulled.etag) etags.set(ticket.id, pulled.etag);
       if (pulled.status === 304 || !pulled.pull) continue;

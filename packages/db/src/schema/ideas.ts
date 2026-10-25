@@ -1,9 +1,21 @@
-import { pgTable, uuid, varchar, text, boolean, timestamp, pgEnum, jsonb, index } from 'drizzle-orm/pg-core';
+import { integer, pgTable, uuid, varchar, text, boolean, timestamp, pgEnum, jsonb, index } from 'drizzle-orm/pg-core';
 import { projects } from './projects';
 import { skills } from './skills';
+import { users } from './users';
 
 export const ideaStatusEnum = pgEnum('idea_status', ['draft','ready_for_review','approved','rejected','in_development']);
 export const featureSpecStatusEnum = pgEnum('feature_spec_status', ['draft','pending_approval','approved','rejected','in_development']);
+
+export const ideas = pgTable('ideas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  status: text('status').notNull().default('draft'),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
 
 export const ideaCards = pgTable('idea_cards', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -31,6 +43,9 @@ export const ideaCards = pgTable('idea_cards', {
 export const featureSpecs = pgTable('feature_specs', {
   id: uuid('id').primaryKey().defaultRandom(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  ideaId: uuid('idea_id').notNull().references(() => ideas.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  version: integer('version').notNull().default(1),
   ideaCardId: uuid('idea_card_id').notNull().references(() => ideaCards.id),
   title: varchar('title', { length: 500 }).notNull(),
   problem: text('problem').notNull(),

@@ -3,11 +3,15 @@ import { tickets, projects } from '@aria/db';
 import { eq, and } from 'drizzle-orm';
 import { AppError } from '../middleware/error.middleware';
 import type { CreateTicketRequest, UpdateTicketRequest } from '@aria/shared';
-import { splitSuggested } from './tickets/schedule';
-import { estimateStoryPoints } from './tickets/pointEstimate';
+import { estimatePoints, splitSuggested } from './tickets/schedule';
 import { appendTicketEvent } from './tickets/ticketEvents';
 import { applyTransition, approveTicket, assertHumanStatus, workCalendar } from './tickets/ticketActions';
 import { dueAt } from './tickets/schedule';
+import { loadWorkspaceLlm } from './guardedLlm.service';
+import { enqueue } from './runs/runQueue';
+import { getPgPool } from './db.client';
+import { codeWorkerFor } from './models/codeWorker';
+import { workspaceCursorKey } from './models/cursorKey';
 
 function sanitise(s: string, max: number): string {
   return s.trim().slice(0, max);
@@ -39,11 +43,9 @@ export async function createTicket(
   });
   if (!project) throw new AppError('Project not found or access denied', 404, 'NOT_FOUND');
 
-  const estimated = data.storyPoints == null
-    ? await estimateStoryPoints(workspaceId, data.title, data.description)
-    : null;
-  const points = data.storyPoints ?? estimated?.points ?? 1;
-  const pointSource = data.storyPoints ? 'owner' : estimated?.source ?? 'heuristic';
+  if (data.flowId) await assertFlowInProject(data.projectId, data.flowId);
+  const points = data.storyPoints ?? estimatePoints(data.title, data.description);
+  const pointSource = data.storyPoints ? 'owner' : 'heuristic';
   const [ticket] = await db
     .insert(tickets)
     .values({
@@ -69,14 +71,34 @@ export async function createTicket(
       summary: data.storyPoints ? `Owner set ${points} story points` : `Estimated ${points} story points`,
       detail: { storyPoints: points, splitSuggested: splitSuggested(points), source: pointSource },
     });
+    if (!data.storyPoints) {
+      const llm = await loadWorkspaceLlm(workspaceId);
+      if (llm) {
+        await enqueue({
+          workspaceId,
+          projectId: data.projectId,
+          ticketId: ticket.id,
+          activity: 'story_points',
+          taskType: 'story_points',
+          runtime: llm.provider === 'cursor' ? 'cursor_local' : 'chat',
+          idempotencyKey: `ticket:${ticket.id}:story_points`,
+        });
+      }
+    }
   }
   return ticket;
+}
+
+async function assertFlowInProject(projectId: string, flowId: string): Promise<void> {
+  const flow = await getPgPool().query(`SELECT id FROM business_flows WHERE id = $1::uuid AND project_id = $2::uuid`, [flowId, projectId]);
+  if (!flow.rows[0]) throw new AppError('Flow is not on this project', 422, 'FLOW_NOT_IN_PROJECT');
 }
 
 export async function updateTicket(
   ticketId: string,
   workspaceId: string,
   data: UpdateTicketRequest,
+  actorUserId?: string,
 ) {
   if (!ticketId) throw new AppError('ticketId is required', 400, 'VALIDATION_ERROR');
 
@@ -124,7 +146,45 @@ export async function updateTicket(
   }
   if (data.status !== undefined) {
     assertHumanStatus(data.status);
-    patch.status = data.status;
+    if (data.status === 'ready_for_dev' && existing.status !== 'backlog' && existing.status !== 'ready_for_dev') {
+      throw new AppError('ready_for_dev only leaves backlog', 422, 'ILLEGAL_TRANSITION');
+    }
+    if (data.status !== existing.status) {
+      patch.status = data.status;
+      const cloud = await getPgPool().query<{ external_agent_id: string; external_run_id: string }>(
+        `SELECT external_agent_id, external_run_id FROM agent_runs
+          WHERE ticket_id = $1::uuid AND status = 'running'
+            AND external_agent_id IS NOT NULL AND external_run_id IS NOT NULL`,
+        [ticketId],
+      );
+      await appendTicketEvent({
+        workspaceId,
+        projectId: existing.projectId,
+        ticketId,
+        eventType: 'status_change',
+        actorKind: 'human',
+        summary: `${existing.status} -> ${data.status} (human)`,
+        detail: { from: existing.status, to: data.status, event: 'human_status', userId: actorUserId ?? null },
+      });
+      await getPgPool().query(
+        `UPDATE agent_runs
+            SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
+                lease_owner = NULL, lease_expires_at = NULL
+          WHERE ticket_id = $1::uuid AND status IN ('queued', 'running')`,
+        [ticketId],
+      );
+      if (cloud.rows.length) {
+        try {
+          const apiKey = await workspaceCursorKey(workspaceId);
+          const worker = codeWorkerFor();
+          for (const run of cloud.rows) {
+            await worker.cancel({ agentId: run.external_agent_id, runId: run.external_run_id }, apiKey);
+          }
+        } catch {
+          // The database row is already cancelled if the provider is unreachable.
+        }
+      }
+    }
   }
   if (data.assignedSkillId !== undefined) patch.assignedSkillId = data.assignedSkillId;
   if (data.humanApproved !== undefined) patch.humanApproved = data.humanApproved;
@@ -135,7 +195,10 @@ export async function updateTicket(
     patch.splitSuggested = splitSuggested(data.storyPoints);
     if (existing.workStartedAt) patch.dueAt = dueAt(new Date(existing.workStartedAt), data.storyPoints, workCalendar());
   }
-  if (data.flowId !== undefined) patch.flowId = data.flowId;
+  if (data.flowId !== undefined) {
+    if (data.flowId) await assertFlowInProject(existing.projectId, data.flowId);
+    patch.flowId = data.flowId;
+  }
   if (data.layer !== undefined) patch.layer = data.layer;
 
   const [updated] = await db

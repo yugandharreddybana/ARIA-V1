@@ -1,4 +1,8 @@
-import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { customType, pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex, type AnyPgColumn } from 'drizzle-orm/pg-core';
+
+const bytea = customType<{ data: Buffer }>({
+  dataType() { return 'bytea'; },
+});
 import { projects, projectRepos } from './projects';
 import { skills } from './skills';
 import { tickets } from './tickets';
@@ -12,7 +16,7 @@ export const agentRuns = pgTable('agent_runs', {
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   agentId: uuid('agent_id').references(() => skills.id, { onDelete: 'set null' }),
   ticketId: uuid('ticket_id').references(() => tickets.id, { onDelete: 'set null' }),
-  parentRunId: uuid('parent_run_id'),
+  parentRunId: uuid('parent_run_id').references((): AnyPgColumn => agentRuns.id, { onDelete: 'set null' }),
   activity: text('activity').notNull(),
   taskType: text('task_type').notNull(),
   runtime: text('runtime').notNull(),
@@ -101,6 +105,7 @@ export const ticketReports = pgTable('ticket_reports', {
   markdown: text('markdown').notNull(),
   contentHash: text('content_hash').notNull(),
   pdfSha256: text('pdf_sha256').notNull(),
+  pdfBytes: bytea('pdf_bytes').notNull(),
   valid: boolean('valid').notNull(),
   errors: jsonb('errors').notNull().default([]),
   runId: uuid('run_id'),

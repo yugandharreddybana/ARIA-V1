@@ -2,7 +2,7 @@ import { validateEnv } from '../../config/env';
 import { getPgPool } from '../db.client';
 import { AppError } from '../../middleware/error.middleware';
 import { evidenceAllowsMerge } from '../evidence/reports';
-import { enqueue, type RunActivity, type RunRuntime } from '../runs/runQueue';
+import { enqueueOn, type RunActivity, type RunRuntime } from '../runs/runQueue';
 import { emitProject } from '../runs/hub';
 import { appendTicketEvent } from './ticketEvents';
 import { dueAt, parseMinutes, parseWorkdays, scheduleState, type WorkCalendar } from './schedule';
@@ -71,98 +71,137 @@ function runtimeFor(activity: RunActivity, codeRuntime: string): RunRuntime {
 export async function applyTransition(ticketId: string, event: PipelineEvent, extra: {
   reason?: string;
   returnTo?: 'review' | 'qa';
-  actorKind?: 'agent' | 'owner' | 'system';
+  actorKind?: 'agent' | 'owner' | 'system' | 'human';
   agentId?: string | null;
   runId?: string | null;
   prUrl?: string | null;
+  findings?: string | null;
+  commitSha?: string | null;
+  actorUserId?: string | null;
 } = {}): Promise<{ status: PipelineStatus }> {
   if (event === 'qa_passed') {
-    const gate = await evidenceAllowsMerge(ticketId);
+    const gate = await evidenceAllowsMerge(ticketId, extra.commitSha);
     if (!gate.ok) {
       return applyTransition(ticketId, 'qa_failed', { ...extra, reason: gate.reason, returnTo: 'qa' });
     }
   }
-  const ticket = await loadTicket(ticketId);
-  const env = validateEnv();
-  const next = transition(ticket.status, event, {
-    reviewRounds: await rounds(ticketId, 'review'),
-    qaRounds: await rounds(ticketId, 'qa'),
-    maxReviewRounds: env.ARIA_MAX_REVIEW_FIX_ROUNDS,
-    maxQaRounds: env.ARIA_MAX_QA_FIX_ROUNDS,
-    returnTo: extra.returnTo,
-  });
-  if (next.status === ticket.status && next.effects.length === 0) {
-    throw new AppError(next.reason || 'Illegal ticket transition', 422, 'ILLEGAL_TRANSITION');
-  }
-  let started = ticket.work_started_at ? new Date(ticket.work_started_at) : null;
-  let due = ticket.due_at ? new Date(ticket.due_at) : null;
-  let schedule = ticket.schedule_state;
-  if (next.status === 'in_progress' && !started) {
-    started = new Date();
-    due = dueAt(started, Number(ticket.story_points), workCalendar());
-    schedule = 'on_track';
-  }
-  if (next.status === 'done' || next.status === 'rejected') schedule = 'done';
-  await getPgPool().query(
-    `UPDATE tickets
-        SET status = $2, status_reason = $3, work_started_at = $4, due_at = $5, schedule_state = $6,
-            human_approved = CASE WHEN $7 THEN true ELSE human_approved END, updated_at = NOW()
-      WHERE id = $1::uuid`,
-    [ticketId, next.status, extra.reason ?? next.reason ?? null, started, due, schedule, event === 'approve'],
-  );
-  await appendTicketEvent({
-    workspaceId: ticket.workspace_id,
-    projectId: ticket.project_id,
-    ticketId,
-    eventType: 'status_change',
-    actorKind: extra.actorKind ?? 'system',
-    agentId: extra.agentId,
-    runId: extra.runId,
-    summary: `${ticket.status} -> ${next.status} (${event})`,
-    prUrl: extra.prUrl ?? ticket.pr_url,
-    detail: { from: ticket.status, to: next.status, event, reason: extra.reason ?? next.reason ?? null },
-  });
-  emitProject(ticket.project_id, 'ticket:updated', { id: ticketId, status: next.status });
-  const project = await getPgPool().query<{ code_runtime: string }>(`SELECT code_runtime FROM projects WHERE id = $1::uuid`, [ticket.project_id]);
-  const codeRuntime = project.rows[0]?.code_runtime ?? 'cursor_cloud';
-  for (const effect of next.effects) {
-    if (effect.type === 'cancelRuns') {
-      await getPgPool().query(
-        `UPDATE agent_runs SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW()
-          WHERE ticket_id = $1::uuid AND status IN ('queued', 'running')`,
-        [ticketId],
-      );
+  const client = await getPgPool().connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query<TicketRow>(
+      `SELECT t.id, t.project_id, p.workspace_id, t.status, t.story_points, t.work_started_at, t.due_at,
+              t.schedule_state, t.ticket_key, t.assigned_skill_id, t.flow_id, t.layer, t.human_approved,
+              t.title, t.description,
+              (SELECT pr_url FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_url IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_url
+         FROM tickets t JOIN projects p ON p.id = t.project_id
+        WHERE t.id = $1::uuid
+        FOR UPDATE OF t`,
+      [ticketId],
+    );
+    const ticket = locked.rows[0];
+    if (!ticket) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+    const env = validateEnv();
+    const reviewCount = await client.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM agent_runs WHERE ticket_id = $1::uuid AND activity = 'fix' AND status = 'succeeded' AND input->>'returnTo' = 'review'`,
+      [ticketId],
+    );
+    const qaCount = await client.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM agent_runs WHERE ticket_id = $1::uuid AND activity = 'fix' AND status = 'succeeded' AND input->>'returnTo' = 'qa'`,
+      [ticketId],
+    );
+    const next = transition(ticket.status, event, {
+      reviewRounds: Number(reviewCount.rows[0]?.n ?? 0),
+      qaRounds: Number(qaCount.rows[0]?.n ?? 0),
+      maxReviewRounds: env.ARIA_MAX_REVIEW_FIX_ROUNDS,
+      maxQaRounds: env.ARIA_MAX_QA_FIX_ROUNDS,
+      returnTo: extra.returnTo,
+    });
+    if (next.status === ticket.status && next.effects.length === 0) {
+      throw new AppError(next.reason || 'Illegal ticket transition', 422, 'ILLEGAL_TRANSITION');
     }
-    if (effect.type === 'enqueue') {
-      const n = await getPgPool().query<{ n: string }>(
-        `SELECT COUNT(*)::text AS n FROM agent_runs WHERE ticket_id = $1::uuid AND activity = $2`,
-        [ticketId, effect.activity],
-      );
-      const agentId = effect.activity === 'develop' || effect.activity === 'fix' ? ticket.assigned_skill_id : await pickAgent(ticket, effect.activity);
-      await enqueue({
-        workspaceId: ticket.workspace_id,
-        projectId: ticket.project_id,
-        agentId,
-        ticketId,
-        activity: effect.activity,
-        taskType: taskType(effect.activity),
-        runtime: runtimeFor(effect.activity, codeRuntime),
-        idempotencyKey: `ticket:${ticketId}:${effect.activity}:${Number(n.rows[0]?.n ?? 0) + 1}`,
-        input: { returnTo: effect.returnTo ?? null, prUrl: extra.prUrl ?? ticket.pr_url },
-      });
-      await appendTicketEvent({
-        workspaceId: ticket.workspace_id,
-        projectId: ticket.project_id,
-        ticketId,
-        eventType: 'agent_action',
-        actorKind: 'system',
-        agentId,
-        summary: `Queued ${effect.activity}`,
-        detail: { activity: effect.activity, returnTo: effect.returnTo ?? null },
-      });
+    let started = ticket.work_started_at ? new Date(ticket.work_started_at) : null;
+    let due = ticket.due_at ? new Date(ticket.due_at) : null;
+    let schedule = ticket.schedule_state;
+    if (next.status === 'in_progress' && !started) {
+      started = new Date();
+      due = dueAt(started, Number(ticket.story_points), workCalendar());
+      schedule = 'on_track';
     }
+    if (next.status === 'done' || next.status === 'rejected') schedule = 'done';
+    const updated = await client.query(
+      `UPDATE tickets
+          SET status = $2, status_reason = $3, work_started_at = $4, due_at = $5, schedule_state = $6,
+              human_approved = CASE WHEN $7 THEN true ELSE human_approved END, updated_at = NOW()
+        WHERE id = $1::uuid AND status = $8`,
+      [ticketId, next.status, extra.reason ?? next.reason ?? null, started, due, schedule, event === 'approve', ticket.status],
+    );
+    if ((updated.rowCount ?? 0) === 0) throw new AppError('Ticket changed before the transition committed', 409, 'ILLEGAL_TRANSITION');
+    const project = await client.query<{ code_runtime: string }>(`SELECT code_runtime FROM projects WHERE id = $1::uuid`, [ticket.project_id]);
+    const codeRuntime = project.rows[0]?.code_runtime ?? 'cursor_cloud';
+    for (const effect of next.effects) {
+      if (effect.type === 'cancelRuns') {
+        await client.query(
+          `UPDATE agent_runs SET status = 'cancelled', error_code = 'CANCELLED', finished_at = NOW(), updated_at = NOW(),
+                  lease_owner = NULL, lease_expires_at = NULL
+            WHERE ticket_id = $1::uuid AND status IN ('queued', 'running')`,
+          [ticketId],
+        );
+      }
+      if (effect.type === 'enqueue') {
+        const prior = await client.query<{ n: string }>(
+          `SELECT COUNT(*)::text AS n FROM agent_runs WHERE ticket_id = $1::uuid AND activity = $2`,
+          [ticketId, effect.activity],
+        );
+        const count = Number(prior.rows[0]?.n ?? 0);
+        const agentId = effect.activity === 'develop' || effect.activity === 'fix' ? ticket.assigned_skill_id : await pickAgent(ticket, effect.activity);
+        const idempotencyKey = effect.activity === 'develop' && count === 0
+          ? `ticket:${ticketId}:develop`
+          : `ticket:${ticketId}:${effect.activity}:r${count + 1}`;
+        await enqueueOn(client, {
+          workspaceId: ticket.workspace_id,
+          projectId: ticket.project_id,
+          agentId,
+          ticketId,
+          activity: effect.activity,
+          taskType: taskType(effect.activity),
+          runtime: runtimeFor(effect.activity, codeRuntime),
+          idempotencyKey,
+          input: {
+            returnTo: effect.returnTo ?? null,
+            prUrl: extra.prUrl ?? ticket.pr_url,
+            findings: extra.findings ?? extra.reason ?? null,
+          },
+        });
+      }
+    }
+    await client.query('COMMIT');
+    await appendTicketEvent({
+      workspaceId: ticket.workspace_id,
+      projectId: ticket.project_id,
+      ticketId,
+      eventType: 'status_change',
+      actorKind: extra.actorKind ?? 'system',
+      agentId: extra.agentId,
+      runId: extra.runId,
+      summary: `${ticket.status} -> ${next.status} (${event})`,
+      prUrl: extra.prUrl ?? ticket.pr_url,
+      commitSha: extra.commitSha ?? null,
+      detail: {
+        from: ticket.status,
+        to: next.status,
+        event,
+        reason: extra.reason ?? next.reason ?? null,
+        userId: extra.actorUserId ?? null,
+      },
+    });
+    emitProject(ticket.project_id, 'ticket:updated', { id: ticketId, status: next.status });
+    return { status: next.status };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    throw err;
+  } finally {
+    client.release();
   }
-  return { status: next.status };
 }
 
 function taskType(activity: RunActivity): string {
@@ -173,6 +212,7 @@ function taskType(activity: RunActivity): string {
     case 'qa': return 'tests';
     case 'knowledge_map': return 'knowledge_map';
     case 'company_generation': return 'company_generation';
+    case 'story_points': return 'story_points';
     default: {
       const neverActivity: never = activity;
       throw new Error(`Unknown activity ${String(neverActivity)}`);
@@ -195,7 +235,7 @@ async function pickAgent(ticket: TicketRow, activity: RunActivity): Promise<stri
       ORDER BY created_at LIMIT 1`,
     [ticket.project_id, role, ticket.assigned_skill_id],
   );
-  return found.rows[0]?.id ?? ticket.assigned_skill_id;
+  return found.rows[0]?.id ?? null;
 }
 
 export async function approveTicket(ticketId: string, workspaceId: string): Promise<void> {

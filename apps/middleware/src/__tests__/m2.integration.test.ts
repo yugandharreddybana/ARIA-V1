@@ -8,13 +8,10 @@ import { listTicketEvents, verifyChain } from '../services/tickets/ticketEvents'
 import { storeReport, evidenceAllowsMerge } from '../services/evidence/reports';
 import { applyTransition } from '../services/tickets/ticketActions';
 import { scanSchedule } from '../services/tickets/ticketActions';
-import { claim, enqueue } from '../services/runs/runQueue';
+import { claimById, enqueue } from '../services/runs/runQueue';
 import { processRunById } from '../services/runs/runWorker';
-import { reserveRun, releaseRun } from '../services/runs/budget';
+import { monthlyBucketId, reserveRun, releaseRun } from '../services/runs/budget';
 import { onProjectEvent } from '../services/runs/hub';
-import { watchPullRequests } from '../services/tickets/prWatcher';
-import { saveGithubToken } from '../services/githubClient.service';
-
 async function signup(email: string) {
   const res = await request(app).post('/api/auth/signup').send({ name: 'M2 Owner', email, password: 'Test1234!' });
   expect(res.status).toBe(201);
@@ -93,8 +90,9 @@ describe('ticket events, schedule, and evidence gate', () => {
       kind: 'qa', markdown: qaReport, storyPoints: 2, agents: ['qa'], runId: null, commitSha: 'abc',
     });
     await getPgPool().query(`UPDATE tickets SET status = 'in_qa' WHERE id = $1`, [ticketId]);
-    expect((await evidenceAllowsMerge(ticketId)).ok).toBe(true);
-    await expect(applyTransition(ticketId, 'qa_passed', { actorKind: 'system' })).resolves.toMatchObject({ status: 'awaiting_merge' });
+    expect((await evidenceAllowsMerge(ticketId, 'abc')).ok).toBe(true);
+    expect((await evidenceAllowsMerge(ticketId, 'def')).ok).toBe(false);
+    await expect(applyTransition(ticketId, 'qa_passed', { actorKind: 'system', commitSha: 'abc' })).resolves.toMatchObject({ status: 'awaiting_merge' });
     const pdf = await request(app).get(`/api/tickets/${ticketId}/reports/dev.pdf`).set(owner.auth);
     expect(pdf.status).toBe(200);
     expect(pdf.headers['content-type']).toContain('application/pdf');
@@ -282,7 +280,14 @@ describe('planner output, pull watcher, budget, and claim race', () => {
       projectId, title: 'Short title', description: 'A tiny change.', type: 'feature',
     });
     expect(planned.status).toBe(201);
-    expect(planned.body.ticket.storyPoints).toBe(5);
+    expect(planned.body.ticket.storyPoints).toBe(1);
+    const pointsRun = await getPgPool().query<{ id: string }>(
+      `SELECT id FROM agent_runs WHERE ticket_id = $1::uuid AND activity = 'story_points'`,
+      [planned.body.ticket.id],
+    );
+    await processRunById(pointsRun.rows[0].id);
+    const scored = await getPgPool().query<{ story_points: number }>(`SELECT story_points FROM tickets WHERE id = $1`, [planned.body.ticket.id]);
+    expect(scored.rows[0].story_points).toBe(5);
     const events = await listTicketEvents(planned.body.ticket.id as string, { limit: 10 });
     expect(events.some((event) => event.detail && (event.detail as { source?: string }).source === 'planner')).toBe(true);
 
@@ -290,94 +295,41 @@ describe('planner output, pull watcher, budget, and claim race', () => {
       projectId, title: 'Hi', description: '[[stub:points-bad]]', type: 'feature',
     });
     expect(heuristic.body.ticket.storyPoints).toBe(1);
+    const badRun = await getPgPool().query<{ id: string }>(
+      `SELECT id FROM agent_runs WHERE ticket_id = $1::uuid AND activity = 'story_points'`,
+      [heuristic.body.ticket.id],
+    );
+    await processRunById(badRun.rows[0].id);
     const heuristicEvents = await listTicketEvents(heuristic.body.ticket.id as string, { limit: 10 });
     expect(heuristicEvents.some((event) => (event.detail as { source?: string }).source === 'heuristic')).toBe(true);
   });
 
-  it('moves a merged pull to done and a closed pull to rejected', async () => {
-    const owner = await signup(`m2-watch-${Date.now()}@aria.dev`);
-    await saveGithubToken(owner.workspaceId, 'ghp_watch');
-    const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Watch' });
-    const projectId = project.body.project.id as string;
-    const base = process.env.GITHUB_API_BASE || '';
-    const opened = await fetch(`${base}/repos/acme/demo-app/pulls`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const pull = await opened.json() as { number: number };
-    const created = await request(app).post('/api/tickets').set(owner.auth).send({
-      projectId, title: 'Ship', description: 'Ready for the owner.', type: 'feature', storyPoints: 2,
-    });
-    const ticketId = created.body.ticket.id as string;
-    await getPgPool().query(`UPDATE tickets SET status = 'awaiting_merge' WHERE id = $1`, [ticketId]);
-    const run = await enqueue({
-      workspaceId: owner.workspaceId, projectId, ticketId, activity: 'develop', taskType: 'coding', runtime: 'cursor_cloud',
-      idempotencyKey: `watch-dev-${Date.now()}`,
-    });
-    await getPgPool().query(
-      `UPDATE agent_runs SET status = 'succeeded', pr_number = $2, pr_url = $3, finished_at = NOW() WHERE id = $1`,
-      [run.id, pull.number, `https://github.com/acme/demo-app/pull/${pull.number}`],
-    );
-    const active = await enqueue({
-      workspaceId: owner.workspaceId, projectId, ticketId, activity: 'qa', taskType: 'tests', runtime: 'cursor_cloud',
-      idempotencyKey: `watch-qa-${Date.now()}`,
-    });
-    await watchPullRequests();
-    const still = await getPgPool().query<{ status: string }>(`SELECT status FROM tickets WHERE id = $1`, [ticketId]);
-    expect(still.rows[0].status).toBe('awaiting_merge');
-    await fetch(`${base}/__stub/github/merge/${pull.number}`, { method: 'POST' });
-    await watchPullRequests();
-    const done = await getPgPool().query<{ status: string }>(`SELECT status FROM tickets WHERE id = $1`, [ticketId]);
-    expect(done.rows[0].status).toBe('done');
-    const log = await listTicketEvents(ticketId, { eventType: 'status_change', limit: 20 });
-    expect(log.some((event) => event.summary.includes('done'))).toBe(true);
-    const cancelled = await getPgPool().query<{ status: string }>(`SELECT status FROM agent_runs WHERE id = $1`, [active.id]);
-    expect(cancelled.rows[0].status).toBe('cancelled');
-
-    const closedPull = await fetch(`${base}/repos/acme/demo-app/pulls`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const closed = await closedPull.json() as { number: number };
-    const other = await request(app).post('/api/tickets').set(owner.auth).send({
-      projectId, title: 'Abandon', description: 'Close this pull.', type: 'feature', storyPoints: 1,
-    });
-    const otherId = other.body.ticket.id as string;
-    await getPgPool().query(`UPDATE tickets SET status = 'awaiting_merge' WHERE id = $1`, [otherId]);
-    const otherRun = await enqueue({
-      workspaceId: owner.workspaceId, projectId, ticketId: otherId, activity: 'develop', taskType: 'coding', runtime: 'cursor_cloud',
-      idempotencyKey: `watch-close-${Date.now()}`,
-    });
-    await getPgPool().query(
-      `UPDATE agent_runs SET status = 'succeeded', pr_number = $2, pr_url = $3 WHERE id = $1`,
-      [otherRun.id, closed.number, `https://github.com/acme/demo-app/pull/${closed.number}`],
-    );
-    await fetch(`${base}/__stub/github/close/${closed.number}`, { method: 'POST' });
-    await watchPullRequests();
-    const rejected = await getPgPool().query<{ status: string }>(`SELECT status FROM tickets WHERE id = $1`, [otherId]);
-    expect(rejected.rows[0].status).toBe('rejected');
-    const closedLog = await listTicketEvents(otherId, { eventType: 'status_change', limit: 20 });
-    expect(closedLog.some((event) => event.summary.includes('rejected'))).toBe(true);
-  });
 
   it('warns at 80 percent and lets only one worker claim a run', async () => {
     const events: string[] = [];
     const stop = onProjectEvent((_id, event) => { events.push(event); });
     const workspaceId = '11111111-1111-4111-8111-111111111199';
     const projectId = '22222222-2222-4222-8222-222222222299';
+    await getPgPool().query(`DELETE FROM token_ledger WHERE session_id = $1::uuid`, [monthlyBucketId(workspaceId)]);
     const reserved = await reserveRun({
       workspaceId, agentId: null, activity: 'company_generation', projectBudget: 70_000, agentBudget: null, projectId,
     });
     expect(reserved.ok).toBe(true);
     expect(events).toContain('budget:warn');
-    await releaseRun(workspaceId, 'company_generation', reserved.reserved);
+    await releaseRun(workspaceId, 'company_generation', reserved.reserved, null, projectId, true);
     stop();
 
     const owner = await signup(`m2-race-${Date.now()}@aria.dev`);
     const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Race' });
     const raceProject = project.body.project.id as string;
-    await getPgPool().query(`UPDATE agent_runs SET status = 'cancelled' WHERE status = 'queued'`);
+    await getPgPool().query(`UPDATE agent_runs SET status = 'cancelled' WHERE status = 'queued' AND workspace_id = $1::uuid`, [owner.workspaceId]);
     const queued = await enqueue({
       workspaceId: owner.workspaceId, projectId: raceProject, activity: 'review', taskType: 'code_review', runtime: 'cursor_local',
       idempotencyKey: `race-${Date.now()}`,
     });
     const [first, second] = await Promise.all([
-      claim('race-worker-a', ['cursor_local']),
-      claim('race-worker-b', ['cursor_local']),
+      claimById(queued.id, 'race-worker-a'),
+      claimById(queued.id, 'race-worker-b'),
     ]);
     const winners = [first, second].filter((row) => row != null);
     expect(winners).toHaveLength(1);

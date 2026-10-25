@@ -48,5 +48,8 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT',  () => void shutdown('SIGINT'));
+process.on('unhandledRejection', (err) => {
+  logger.error('unhandledRejection', err);
+});
 
 export default app;

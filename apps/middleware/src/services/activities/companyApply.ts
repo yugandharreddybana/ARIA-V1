@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { businessFlows, db, projects, skills, teamMembers, teams } from '@aria/db';
+import { AppError } from '../../middleware/error.middleware';
 import type { CompanyMix, FlowAssignment, GeneratedAgent } from '../companyGenerator';
+import { assertOwnerInvariant, type FlowLayer, type FlowRole } from '../flows/flowOwners';
 
 export async function applyCompanyRoster(input: {
   projectId: string;
@@ -12,9 +14,28 @@ export async function applyCompanyRoster(input: {
   planningModel: string;
   source: 'ai' | 'template';
   runId?: string | null;
+  force?: boolean;
 }): Promise<void> {
   const { projectId, agents, assignments } = input;
+  const byFlow = new Map<string, Array<{ agentId: string; layer: FlowLayer; role: FlowRole }>>();
+  for (const assignment of assignments) {
+    const layer = assignment.layer as FlowLayer;
+    const role = assignment.role as FlowRole;
+    const list = byFlow.get(assignment.flowId) ?? [];
+    list.push({ agentId: assignment.agentTempId, layer, role });
+    byFlow.set(assignment.flowId, list);
+  }
+  for (const owners of byFlow.values()) assertOwnerInvariant(owners);
   await db.transaction(async (tx) => {
+    const usage = await tx.execute<{ sessions: string; tickets: string }>(sql`
+      SELECT
+        (SELECT COUNT(*) FROM sessions WHERE project_id = ${projectId}::uuid) AS sessions,
+        (SELECT COUNT(*) FROM tickets WHERE project_id = ${projectId}::uuid) AS tickets
+    `);
+    const counts = (usage as { rows?: Array<{ sessions: string; tickets: string }> }).rows?.[0];
+    if (counts && (Number(counts.sessions) > 0 || Number(counts.tickets) > 0) && !input.force) {
+      throw new AppError('Regeneration would remove sessions or tickets. Send force: true to continue.', 409, 'COMPANY_IN_USE');
+    }
     await tx.execute(sql`DELETE FROM flow_owners WHERE flow_id IN (SELECT id FROM business_flows WHERE project_id = ${projectId}::uuid)`);
     await tx.execute(sql`UPDATE skills SET reporting_manager_id = NULL, backup_agent_id = NULL WHERE project_id = ${projectId}::uuid`);
     await tx.execute(sql`DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE project_id = ${projectId}::uuid)`);

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { getPgPool } from '../db.client';
 import { applyCompanyRoster } from './companyApply';
 import { acceptCompanyPlan, type PlannedAgent } from './companyRoster';
-import { generateCompany, type CompanyMix } from '../companyGenerator';
+import { generateCompany, ROLE_KEYS, type CompanyMix } from '../companyGenerator';
 import { reasoningFor } from '../models/reasoning';
 import { RunError } from '../runs/errors';
 import type { AgentRunRow } from '../runs/runQueue';
@@ -30,7 +30,7 @@ const companySchema = z.object({
 
 const EMPTY_MIX: CompanyMix = { business: 0, qa: 0, frontend: 0, backend: 0, fullstack: 0, junior: 0, aiml: 0, devops: 0, security: 0 };
 
-export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 'ai' | 'template'; text: string }> {
+export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 'ai' | 'template'; text: string; tokensTotal?: number }> {
   const size = Number(run.input.size ?? 8);
   const mix = (run.input.mix as CompanyMix | undefined) ?? { ...EMPTY_MIX, business: 1, qa: 1, frontend: 1, backend: 1, fullstack: 1 };
   const safeSize = Number.isInteger(size) ? size : 8;
@@ -40,6 +40,10 @@ export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 
   );
   const flowRefs = flows.rows.map((flow) => ({ id: flow.id, flowKey: flow.flow_key, name: flow.name, kind: flow.kind }));
   const template = generateCompany({ size: safeSize, mix, seed: run.project_id, flows: flowRefs });
+  const map = await getPgPool().query<{ summary: string }>(
+    `SELECT summary FROM knowledge_maps WHERE project_id = $1::uuid ORDER BY updated_at DESC LIMIT 1`,
+    [run.project_id],
+  );
   const model = await reasoningFor(run.workspace_id);
   const marker = typeof run.input.fixture === 'string' ? `\n${run.input.fixture}` : '';
   let accepted: Awaited<ReturnType<typeof acceptCompanyPlan>> = null;
@@ -53,6 +57,9 @@ export async function executeCompany(run: AgentRunRow): Promise<{ outputSource: 
         instructions: [
           'Return a company roster as JSON with an agents array.',
           `Seat count must be ${safeSize}. Mix ${JSON.stringify(mix)}.`,
+          `roleKey must be one of: ${ROLE_KEYS.join(', ')}.`,
+          `Known flows: ${flowRefs.map((flow) => flow.flowKey).join(', ') || 'none'}.`,
+          `Knowledge map: ${(map.rows[0]?.summary || 'none').slice(0, 1500)}`,
           'One CEO with a null managerIndex. Names unique. Manager graph acyclic.',
           'Each agent: roleKey, realName, roleTitle, department, managerIndex, backupIndex, description, instructions, skills, flows.',
           marker,

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS ticket_events (
   event_type     TEXT NOT NULL CHECK (event_type IN (
                    'status_change','agent_action','progress','communication',
                    'run_ref','owner_decision','schedule','evidence')),
-  actor_kind     TEXT NOT NULL CHECK (actor_kind IN ('agent','owner','system')),
+  actor_kind     TEXT NOT NULL CHECK (actor_kind IN ('agent','owner','system','human')),
   agent_id       UUID,
   run_id         UUID,
   summary        TEXT NOT NULL,
@@ -85,10 +85,24 @@ CREATE TRIGGER ticket_events_no_delete
   BEFORE DELETE ON ticket_events
   FOR EACH ROW EXECUTE FUNCTION ticket_events_immutable();
 
+CREATE OR REPLACE FUNCTION aria_purge_ticket_events(target uuid) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  PERFORM set_config('aria.purge_ticket_events', '1', true);
+  DELETE FROM ticket_events WHERE ticket_id = target;
+  PERFORM set_config('aria.purge_ticket_events', '0', true);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION aria_purge_ticket_events(uuid) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION ticket_events_allow_parent_delete() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM set_config('aria.purge_ticket_events', '1', true);
+  PERFORM aria_purge_ticket_events(OLD.id);
   RETURN OLD;
 END;
 $$;
@@ -98,13 +112,4 @@ CREATE TRIGGER tickets_allow_event_purge
   BEFORE DELETE ON tickets
   FOR EACH ROW EXECUTE FUNCTION ticket_events_allow_parent_delete();
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aria_app') THEN
-    CREATE ROLE aria_app NOLOGIN;
-  END IF;
-END $$;
-
-GRANT SELECT, INSERT ON ticket_events TO aria_app;
-REVOKE UPDATE, DELETE, TRUNCATE ON ticket_events FROM aria_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON ticket_events FROM PUBLIC;

@@ -27,7 +27,7 @@ function sectionBody(markdown: string, heading: string): string | null {
   return (next === -1 ? rest : rest.slice(0, next)).trim();
 }
 
-export function validateReport(kind: ReportKind, markdown: string): ReportValidation {
+export function validateReport(kind: ReportKind, markdown: string, options?: { uiFromDiff?: boolean }): ReportValidation {
   const errors: string[] = [];
   const sections = kind === 'dev' ? DEV_SECTIONS : QA_SECTIONS;
   for (const heading of sections) {
@@ -39,7 +39,7 @@ export function validateReport(kind: ReportKind, markdown: string): ReportValida
   const after = sectionBody(markdown, kind === 'dev' ? 'After' : 'Current behaviour');
   if (before != null && !before.trim()) errors.push('before section is empty');
   if (after != null && !after.trim()) errors.push('after section is empty');
-  const uiAffected = /ui_affected:\s*yes/i.test(markdown);
+  const uiAffected = Boolean(options?.uiFromDiff) || /ui_affected:\s*yes/i.test(markdown);
   const shots = sectionBody(markdown, 'Screenshots');
   if (uiAffected && shots != null && !/!\[[^\]]*\]\([^)]+\)/.test(shots)) {
     errors.push('ui changes require before/after screenshot markdown');

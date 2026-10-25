@@ -92,22 +92,31 @@ function nextWorkStart(parts: ZonedParts, cal: WorkCalendar): Date {
 }
 
 /**
- * End of the Nth working day. The start day counts when it is a workday and
- * `startedAt` is still before the workday end. Otherwise the next workday is day 1.
+ * 1 point is one working day of working time (open through close).
+ * Minutes are consumed from the effective start: before open counts from open,
+ * after close or a weekend counts from the next open.
  */
 export function dueAt(startedAt: Date, points: number, cal: WorkCalendar): Date {
   if (!Number.isInteger(points) || points < 1) throw new Error('story points must be a positive integer');
-  let remaining = points;
+  const dayLength = cal.endMinutes - cal.startMinutes;
+  if (dayLength <= 0) throw new Error('workday end must be after the start');
+  let remaining = points * dayLength;
   let cursor = startedAt;
-  for (let guard = 0; guard < 400 && remaining > 0; guard++) {
+  for (let guard = 0; guard < 4000 && remaining > 0; guard++) {
     const parts = zonedParts(cursor, cal.timeZone);
+    const open = atMinutes(parts, cal.startMinutes, cal.timeZone);
     const close = atMinutes(parts, cal.endMinutes, cal.timeZone);
-    const counts = cal.workdays.includes(parts.isoWeekday) && cursor.getTime() < close.getTime();
-    if (counts) {
-      remaining -= 1;
-      if (remaining === 0) return close;
+    const workday = cal.workdays.includes(parts.isoWeekday);
+    if (!workday || cursor.getTime() >= close.getTime()) {
+      cursor = nextWorkStart(parts, cal);
+      continue;
     }
+    const start = cursor.getTime() < open.getTime() ? open : cursor;
+    const available = Math.max(0, Math.round((close.getTime() - start.getTime()) / 60_000));
+    if (available > remaining) return new Date(start.getTime() + remaining * 60_000);
+    remaining -= available;
     cursor = nextWorkStart(parts, cal);
+    if (remaining === 0) return cursor;
   }
   throw new Error('could not place a due date');
 }

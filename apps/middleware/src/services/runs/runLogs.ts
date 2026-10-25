@@ -1,7 +1,7 @@
 import { getPgPool } from '../db.client';
 import { emitProject } from './hub';
 
-const SECRET = /(?:cursor_[A-Za-z0-9]{12,}|ghp_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9]{12,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----)/g;
+const SECRET = /(?:cursor_[A-Za-z0-9]{12,}|ghp_[A-Za-z0-9]{12,}|gho_[A-Za-z0-9]{12,}|ghs_[A-Za-z0-9]{12,}|ghu_[A-Za-z0-9]{12,}|ghr_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9]{12,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----)/g;
 
 export function redact(text: string): string {
   return text.replace(SECRET, '[redacted]').replace(/(token|api[_-]?key|authorization)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 4000);
@@ -42,15 +42,33 @@ export async function flush(runId: string): Promise<void> {
 
 async function write(runId: string, kind: string, message: string): Promise<void> {
   const pool = getPgPool();
-  const count = await pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM agent_run_logs WHERE run_id = $1::uuid`, [runId]);
-  if (Number(count.rows[0]?.n ?? 0) >= 2000 && kind !== 'status' && kind !== 'error') return;
-  const inserted = await pool.query<{ seq: number; created_at: Date }>(
-    `INSERT INTO agent_run_logs (run_id, seq, kind, message)
-     SELECT $1::uuid, COALESCE(MAX(seq), 0) + 1, $2, $3 FROM agent_run_logs WHERE run_id = $1::uuid
-     RETURNING seq, created_at`,
-    [runId, kind, message],
-  );
-  const line = inserted.rows[0];
+  const client = await pool.connect();
+  let line: { seq: number; created_at: Date } | undefined;
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`logs:${runId}`]);
+        const inserted = await client.query<{ seq: number; created_at: Date }>(
+          `INSERT INTO agent_run_logs (run_id, seq, kind, message)
+           SELECT $1::uuid, COALESCE(MAX(seq), 0) + 1, $2, $3
+             FROM agent_run_logs WHERE run_id = $1::uuid
+            HAVING COUNT(*) < 2000 OR $2 IN ('status', 'error')
+           RETURNING seq, created_at`,
+          [runId, kind, message],
+        );
+        line = inserted.rows[0];
+        await client.query('COMMIT');
+        break;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+        if (code !== '23505') throw err;
+      }
+    }
+  } finally {
+    client.release();
+  }
   const run = await pool.query<{ project_id: string }>(`SELECT project_id FROM agent_runs WHERE id = $1::uuid`, [runId]);
   const projectId = run.rows[0]?.project_id;
   if (projectId && line) {

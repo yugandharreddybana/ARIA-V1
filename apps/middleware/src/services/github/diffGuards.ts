@@ -19,7 +19,18 @@ const SECRET = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /xox[baprs]-[A-Za-z0-9-]{10,}/,
   /cursor_[A-Za-z0-9]{16,}/,
+  /gho_[A-Za-z0-9]{16,}/,
+  /ghs_[A-Za-z0-9]{16,}/,
+  /ghu_[A-Za-z0-9]{16,}/,
+  /ghr_[A-Za-z0-9]{16,}/,
 ];
+
+export function diffTouchesUi(files: string[]): boolean {
+  return files.some((file) => {
+    const path = file.replace(/\\/g, '/');
+    return path.startsWith('apps/web/') || path.endsWith('.tsx') || path.endsWith('.css');
+  });
+}
 
 export function sensitivePaths(files: string[]): string[] {
   return files.filter((file) => SENSITIVE.some((pattern) => pattern.test(file.replace(/\\/g, '/'))));

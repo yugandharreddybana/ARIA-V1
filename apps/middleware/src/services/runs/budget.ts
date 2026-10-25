@@ -20,6 +20,7 @@ export const DEFAULT_RESERVE: Record<string, { reserve: number; cap: number }> =
   develop: { reserve: 2_000_000, cap: 8_000_000 },
   fix: { reserve: 1_000_000, cap: 4_000_000 },
   qa: { reserve: 1_500_000, cap: 6_000_000 },
+  story_points: { reserve: 20_000, cap: 80_000 },
 };
 
 export function backoffMs(attempt: number, rand = Math.random()): number {
@@ -35,15 +36,16 @@ export function p90(values: number[]): number {
   return sorted[Math.max(0, index)];
 }
 
-export async function estimateFor(activity: string): Promise<{ reserve: number; cap: number }> {
+export async function estimateFor(activity: string, workspaceId?: string): Promise<{ reserve: number; cap: number }> {
   const defaults = DEFAULT_RESERVE[activity] ?? { reserve: 100_000, cap: 400_000 };
   const rows = await getPgPool().query<{ tokens_total: string }>(
     `SELECT tokens_total::text
        FROM agent_runs
       WHERE activity = $1 AND status = 'succeeded' AND tokens_total IS NOT NULL
+        AND ($2::uuid IS NULL OR workspace_id = $2::uuid)
       ORDER BY finished_at DESC NULLS LAST
       LIMIT 20`,
-    [activity],
+    [activity, workspaceId ?? null],
   );
   if (rows.rows.length < 20) return defaults;
   const reserve = Math.max(1, Math.round(p90(rows.rows.map((row) => Number(row.tokens_total)))));
@@ -56,6 +58,22 @@ export interface BudgetDecision {
   code?: RunErrorCode;
 }
 
+function scopeBackend(activity: string, projectId: string | null | undefined, projectScoped: boolean): string {
+  const runtime = runtimeBackend(activity);
+  if (projectScoped && projectId) return `${runtime}:${projectId}`;
+  return runtime;
+}
+
+async function projected(sessionId: string, backendId?: string): Promise<number> {
+  const result = await getPgPool().query<{ projected: string }>(
+    `SELECT COALESCE(SUM(tokens_used + tokens_reserved), 0)::text AS projected
+       FROM token_ledger
+      WHERE session_id = $1::uuid AND ($2::text IS NULL OR backend_id = $2)`,
+    [sessionId, backendId ?? null],
+  );
+  return Number(result.rows[0]?.projected ?? 0);
+}
+
 export async function reserveRun(input: {
   workspaceId: string;
   agentId: string | null;
@@ -65,38 +83,59 @@ export async function reserveRun(input: {
   projectId?: string | null;
 }): Promise<BudgetDecision> {
   const env = validateEnv();
-  const estimate = await estimateFor(input.activity);
-  const workspaceMax = input.projectBudget ?? env.ARIA_MONTHLY_TOKEN_BUDGET;
+  const estimate = await estimateFor(input.activity, input.workspaceId);
+  const projectScoped = input.projectBudget != null;
+  const limit = projectScoped ? input.projectBudget! : env.ARIA_MONTHLY_TOKEN_BUDGET;
   const hard = env.TOKEN_BUDGET_HARD_RATIO;
-  const workspaceId = monthlyBucketId(input.workspaceId);
-  const pool = getPgPool();
-  const used = async (sessionId: string) => {
-    const result = await pool.query<{ projected: string }>(
-      `SELECT COALESCE(SUM(tokens_used + tokens_reserved), 0)::text AS projected
-         FROM token_ledger WHERE session_id = $1::uuid`,
-      [sessionId],
-    );
-    return Number(result.rows[0]?.projected ?? 0);
-  };
-  if ((await used(workspaceId)) + estimate.reserve > Math.floor(workspaceMax * hard)) {
-    return { ok: false, reserved: 0, code: 'BUDGET_EXCEEDED' };
-  }
-  if (input.agentId && input.agentBudget != null) {
-    const agentSession = monthlyBucketId(input.agentId);
-    if ((await used(agentSession)) + estimate.reserve > Math.floor(input.agentBudget * hard)) {
+  const workspaceSession = monthlyBucketId(input.workspaceId);
+  const backend = scopeBackend(input.activity, input.projectId, projectScoped);
+  const client = await getPgPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`budget:${input.workspaceId}`]);
+    const workspaceUsed = await projected(workspaceSession, projectScoped ? backend : undefined);
+    if (workspaceUsed + estimate.reserve > Math.floor(limit * hard)) {
+      await client.query('ROLLBACK');
       return { ok: false, reserved: 0, code: 'BUDGET_EXCEEDED' };
     }
+    if (input.agentId && input.agentBudget != null) {
+      const agentUsed = await projected(monthlyBucketId(input.agentId));
+      if (agentUsed + estimate.reserve > Math.floor(input.agentBudget * hard)) {
+        await client.query('ROLLBACK');
+        return { ok: false, reserved: 0, code: 'BUDGET_EXCEEDED' };
+      }
+    }
+    await client.query(
+      `INSERT INTO token_ledger (session_id, backend_id, tokens_used, tokens_reserved, last_updated_at)
+       VALUES ($1::uuid, $2, 0, $3, NOW())
+       ON CONFLICT (session_id, backend_id) DO UPDATE
+         SET tokens_reserved = token_ledger.tokens_reserved + EXCLUDED.tokens_reserved,
+             last_updated_at = NOW()`,
+      [workspaceSession, backend, estimate.reserve],
+    );
+    if (input.agentId) {
+      await client.query(
+        `INSERT INTO token_ledger (session_id, backend_id, tokens_used, tokens_reserved, last_updated_at)
+         VALUES ($1::uuid, $2, 0, $3, NOW())
+         ON CONFLICT (session_id, backend_id) DO UPDATE
+           SET tokens_reserved = token_ledger.tokens_reserved + EXCLUDED.tokens_reserved,
+               last_updated_at = NOW()`,
+        [monthlyBucketId(input.agentId), runtimeBackend(input.activity), estimate.reserve],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+    throw err;
+  } finally {
+    client.release();
   }
-  await pool.query(
-    `INSERT INTO token_ledger (session_id, backend_id, tokens_used, tokens_reserved, last_updated_at)
-     VALUES ($1::uuid, $2, 0, $3, NOW())
-     ON CONFLICT (session_id, backend_id) DO UPDATE
-       SET tokens_reserved = token_ledger.tokens_reserved + EXCLUDED.tokens_reserved,
-           last_updated_at = NOW()`,
-    [workspaceId, runtimeBackend(input.activity), estimate.reserve],
-  );
-  await noteBudget(input.workspaceId, input.projectId ?? null, workspaceMax);
+  await noteBudget(input.workspaceId, input.projectId ?? null, limit);
   return { ok: true, reserved: estimate.reserve };
+}
+
+export async function checkMidRun(spent: number, cap: number): Promise<void> {
+  if (spent > cap) throw new RunError('BUDGET_EXCEEDED', 'Per-run token cap exceeded', false);
 }
 
 export async function noteBudget(workspaceId: string, projectId: string | null, limit: number): Promise<void> {
@@ -117,7 +156,7 @@ async function usageOf(sessionId: string): Promise<number> {
 
 function runtimeBackend(activity: string): string {
   if (activity === 'develop' || activity === 'fix' || activity === 'qa') return 'cursor-cloud';
-  if (activity === 'knowledge_map' || activity === 'company_generation' || activity === 'review') return 'cursor-local';
+  if (activity === 'knowledge_map' || activity === 'company_generation' || activity === 'review' || activity === 'story_points') return 'cursor-local';
   return 'workspace-llm';
 }
 
@@ -128,20 +167,33 @@ export async function settleRun(input: {
   actual: number;
   projectId?: string | null;
   limit?: number | null;
+  agentId?: string | null;
+  projectScoped?: boolean;
 }): Promise<void> {
+  const scoped = input.projectScoped ?? false;
   await getPgPool().query(
     `UPDATE token_ledger
         SET tokens_used = tokens_used + $3,
             tokens_reserved = GREATEST(0, tokens_reserved - $4),
             last_updated_at = NOW()
       WHERE session_id = $1::uuid AND backend_id = $2`,
-    [monthlyBucketId(input.workspaceId), runtimeBackend(input.activity), input.actual, input.reserved],
+    [monthlyBucketId(input.workspaceId), scopeBackend(input.activity, input.projectId, scoped), input.actual, input.reserved],
   );
+  if (input.agentId) {
+    await getPgPool().query(
+      `UPDATE token_ledger
+          SET tokens_used = tokens_used + $3,
+              tokens_reserved = GREATEST(0, tokens_reserved - $4),
+              last_updated_at = NOW()
+        WHERE session_id = $1::uuid AND backend_id = $2`,
+      [monthlyBucketId(input.agentId), runtimeBackend(input.activity), input.actual, input.reserved],
+    );
+  }
   if (input.projectId && input.limit) await noteBudget(input.workspaceId, input.projectId, input.limit);
 }
 
-export async function releaseRun(workspaceId: string, activity: string, reserved: number): Promise<void> {
-  await settleRun({ workspaceId, activity, reserved, actual: 0 });
+export async function releaseRun(workspaceId: string, activity: string, reserved: number, agentId?: string | null, projectId?: string | null, projectScoped = false): Promise<void> {
+  await settleRun({ workspaceId, activity, reserved, actual: 0, agentId, projectId, projectScoped });
 }
 
 export function usageTotal(usage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number } | null): number {

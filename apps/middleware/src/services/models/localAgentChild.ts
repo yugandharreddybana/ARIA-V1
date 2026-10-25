@@ -43,6 +43,9 @@ function stubText(prompt: string): string {
       dataModel: [],
     });
   }
+  if (prompt.includes('[[stub:review-changes]]') || prompt.includes('[[stub:review-always]]')) {
+    return '{"verdict":"changes","summary":"Need a fix.","comments":[{"path":"apps/middleware/src/services/tickets/ticketPipeline.ts","line":1,"severity":"blocker","body":"fix this"}]}';
+  }
   if (prompt.includes('"verdict"') || prompt.includes('verdict:')) {
     return '{"verdict":"pass","summary":"No blockers.","comments":[]}';
   }
@@ -57,17 +60,24 @@ async function handle(message: StartMessage): Promise<void> {
       reply({ type: 'result', text: stubText(message.prompt), envKeys });
       return;
     }
-    const specifier = './cursorSdkPlanner.ts';
-    const loaded = await import(specifier) as { planWithCursorSdk: typeof import('./cursorSdkPlanner').planWithCursorSdk };
-    const { planWithCursorSdk } = loaded;
-    const text = await planWithCursorSdk({
+    const jsSpecifier = './cursorSdkPlanner.js';
+    const tsSpecifier = './cursorSdkPlanner.ts';
+    let loaded: { planWithCursorSdk: typeof import('./cursorSdkPlanner').planWithCursorSdk };
+    try {
+      loaded = await import(jsSpecifier) as typeof loaded;
+    } catch {
+      loaded = await import(tsSpecifier) as typeof loaded;
+    }
+    const planned = await loaded.planWithCursorSdk({
       prompt: message.prompt,
       apiKey: process.env.CURSOR_API_KEY || '',
       modelId: message.modelId || 'auto',
       tools: message.tools === 'none' ? 'none' : 'read_only',
       cwd: message.cwd || process.cwd(),
     });
-    reply({ type: 'result', text, envKeys });
+    const total = planned.usage?.totalTokens
+      ?? ((planned.usage?.inputTokens ?? 0) + (planned.usage?.outputTokens ?? 0) + (planned.usage?.cacheReadTokens ?? 0) + (planned.usage?.cacheWriteTokens ?? 0));
+    reply({ type: 'result', text: planned.text, envKeys, usage: planned.usage ? { total } : undefined });
   } catch (err) {
     reply({ type: 'error', error: err instanceof Error ? err.message : 'child error', envKeys });
   }

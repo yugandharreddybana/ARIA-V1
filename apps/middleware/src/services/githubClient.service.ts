@@ -182,7 +182,8 @@ export async function getBranch(token: string, fullName: string): Promise<{ name
   if (isMockToken(token)) return { name: 'main', protected: true };
   const repoRes = await githubRequest(token, 'GET', `/repos/${owner}/${repo}`);
   const meta = repoRes.json as { default_branch?: string } | null;
-  const name = meta?.default_branch || 'main';
+  if (!meta?.default_branch) throw new AppError('Repository has no default branch', 502, 'GITHUB_ERROR');
+  const name = meta.default_branch;
   const branch = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/branches/${encodeURIComponent(name)}`);
   const body = branch.json as { protected?: boolean } | null;
   return { name, protected: Boolean(body?.protected) };
@@ -190,7 +191,7 @@ export async function getBranch(token: string, fullName: string): Promise<{ name
 
 export async function getPull(token: string, fullName: string, number: number, etag?: string | null): Promise<{ status: number; etag: string | null; pull: { merged_at: string | null; state: string; headSha: string | null } | null }> {
   const { owner, repo } = parseRepoFullName(fullName);
-  const res = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/pulls/` + number, undefined, etag ? { 'If-None-Match': etag } : undefined);
+  const res = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/pulls/${number}`, undefined, etag ? { 'If-None-Match': etag } : undefined);
   if (res.status === 304) return { status: 304, etag: res.etag, pull: null };
   const body = res.json as { merged_at?: string | null; state?: string; head?: { sha?: string } } | null;
   return {
@@ -215,11 +216,46 @@ export async function createReview(
   token: string,
   fullName: string,
   number: number,
-  review: { event: 'COMMENT'; body: string },
+  review: { event: 'COMMENT'; body: string; comments?: Array<{ path: string; line?: number; body: string }> },
 ): Promise<void> {
   const { owner, repo } = parseRepoFullName(fullName);
   if (isMockToken(token)) return;
-  await githubRequest(token, 'POST', `/repos/${owner}/${repo}/pulls/` + number + '/reviews', review);
+  await githubRequest(token, 'POST', `/repos/${owner}/${repo}/pulls/${number}/reviews`, review);
+}
+
+export async function getPullFiles(token: string, fullName: string, number: number): Promise<string[]> {
+  const { owner, repo } = parseRepoFullName(fullName);
+  if (isMockToken(token)) return ['apps/middleware/src/services/tickets/ticketPipeline.ts'];
+  const res = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/pulls/${number}/files`);
+  const body = res.json as Array<{ filename?: string }> | null;
+  return Array.isArray(body) ? body.map((file) => file.filename || '').filter(Boolean) : [];
+}
+
+export async function getPullDiff(token: string, fullName: string, number: number): Promise<string> {
+  const { owner, repo } = parseRepoFullName(fullName);
+  if (isMockToken(token)) return 'diff --git a/apps/middleware/src/services/tickets/ticketPipeline.ts b/apps/middleware/src/services/tickets/ticketPipeline.ts\n';
+  const res = await fetch(`${githubApiBase()}/repos/${owner}/${repo}/pulls/${number}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.diff',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'aria-v1',
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new AppError(`GitHub diff failed (HTTP ${res.status})`, 502, 'GITHUB_ERROR');
+  return (await res.text()).slice(0, 200_000);
+}
+
+export async function getFileAtRef(token: string, fullName: string, filePath: string, ref: string): Promise<string | null> {
+  const { owner, repo } = parseRepoFullName(fullName);
+  if (isMockToken(token)) return null;
+  const encoded = filePath.split('/').map(encodeURIComponent).join('/');
+  const res = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`);
+  if (res.status === 404) return null;
+  const body = res.json as { content?: string; encoding?: string } | null;
+  if (!body?.content || body.encoding !== 'base64') return null;
+  return Buffer.from(body.content, 'base64').toString('utf8');
 }
 
 export async function createIssueComment(token: string, fullName: string, number: number, body: string): Promise<void> {
@@ -239,7 +275,3 @@ export async function listCheckRuns(token: string, fullName: string, sha: string
     conclusion: run.conclusion ?? null,
   }));
 }
-
-// @ts-expect-error agents may only post COMMENT reviews
-const reviewEventIsCommentOnly: 'COMMENT' = 'APPROVE';
-void reviewEventIsCommentOnly;

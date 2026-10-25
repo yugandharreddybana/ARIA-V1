@@ -28,6 +28,13 @@ export class RunError extends Error {
   }
 }
 
+export class LeaseLost extends Error {
+  constructor() {
+    super('The worker lost the run lease');
+    this.name = 'LeaseLost';
+  }
+}
+
 export function asRunError(err: unknown): RunError {
   if (err instanceof RunError) return err;
   const message = err instanceof Error ? err.message : 'Run failed';

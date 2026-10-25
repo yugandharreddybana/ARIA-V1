@@ -16,9 +16,11 @@ export async function storeReport(input: {
   agents: string[];
   runId: string | null;
   commitSha: string | null;
+  uiFromDiff?: boolean;
 }): Promise<{ valid: boolean; errors: string[]; contentHash: string; pdfSha256: string }> {
-  const check = validateReport(input.kind, input.markdown);
-  const images = embeddedImages(input.markdown);
+  const markdown = input.markdown.slice(0, 200_000);
+  const check = validateReport(input.kind, markdown, { uiFromDiff: input.uiFromDiff });
+  const images = embeddedImages(markdown).slice(0, 8);
   const pdf = await renderReportPdf(input.markdown, {
     ticketKey: input.ticketKey,
     kind: input.kind,
@@ -28,7 +30,7 @@ export async function storeReport(input: {
     commitSha: input.commitSha,
     generatedAt: new Date().toISOString(),
   }, images);
-  const contentHash = sha256(input.markdown);
+  const contentHash = sha256(markdown);
   const pdfSha = sha256(pdf);
   await getPgPool().query(
     `INSERT INTO ticket_reports (
@@ -37,7 +39,7 @@ export async function storeReport(input: {
        $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::uuid, $13
      )`,
     [
-      input.workspaceId, input.projectId, input.ticketId, input.kind, input.ticketKey, input.markdown,
+      input.workspaceId, input.projectId, input.ticketId, input.kind, input.ticketKey, markdown,
       contentHash, pdfSha, pdf, check.valid, JSON.stringify(check.errors), input.runId, input.commitSha,
     ],
   );
@@ -67,14 +69,29 @@ export async function latestReports(ticketId: string): Promise<{ dev: { valid: b
   return { dev, qa };
 }
 
-export async function evidenceAllowsMerge(ticketId: string): Promise<{ ok: boolean; reason: string }> {
-  const reports = await latestReports(ticketId);
-  if (!reports.dev?.valid) return { ok: false, reason: 'developer evidence is missing or invalid' };
-  if (!reports.qa?.valid) return { ok: false, reason: 'qa evidence is missing or invalid' };
-  const verdict = reports.qa.markdown.match(/## Verdict\s*([\s\S]*?)(?:\n## |\s*$)/i)?.[1] ?? '';
-  if (!/\bpass\b/i.test(verdict) || (/\bfail\b/i.test(verdict) && verdict.toLowerCase().indexOf('fail') < verdict.toLowerCase().indexOf('pass'))) {
-    return { ok: false, reason: 'qa verdict is not pass' };
+export async function evidenceAllowsMerge(ticketId: string, headSha?: string | null): Promise<{ ok: boolean; reason: string }> {
+  let sha = headSha ?? null;
+  if (!sha) {
+    const head = await getPgPool().query<{ head_sha: string | null }>(
+      `SELECT head_sha FROM agent_runs WHERE ticket_id = $1::uuid AND head_sha IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+      [ticketId],
+    );
+    sha = head.rows[0]?.head_sha ?? null;
   }
+  if (!sha) return { ok: false, reason: 'pull request head is unknown' };
+  const result = await getPgPool().query<{ kind: ReportKind; valid: boolean; markdown: string }>(
+    `SELECT DISTINCT ON (kind) kind, valid, markdown
+       FROM ticket_reports
+      WHERE ticket_id = $1::uuid AND commit_sha = $2
+      ORDER BY kind, created_at DESC`,
+    [ticketId, sha],
+  );
+  const dev = result.rows.find((row) => row.kind === 'dev') ?? null;
+  const qa = result.rows.find((row) => row.kind === 'qa') ?? null;
+  if (!dev?.valid) return { ok: false, reason: 'developer evidence is missing or invalid for this pull request head' };
+  if (!qa?.valid) return { ok: false, reason: 'qa evidence is missing or invalid for this pull request head' };
+  const parsed = validateReport('qa', qa.markdown);
+  if (parsed.verdict !== 'pass') return { ok: false, reason: 'qa verdict is not pass' };
   return { ok: true, reason: 'evidence accepted' };
 }
 
