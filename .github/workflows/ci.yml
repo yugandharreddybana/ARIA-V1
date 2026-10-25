@@ -217,7 +217,7 @@ jobs:
           export WORKSPACE_ENCRYPTION_KEY="ci-workspace-encryption-key-32chars"
           export POSTGRES_USER=aria POSTGRES_PASSWORD=aria POSTGRES_DB=aria_dev
           compose() { docker compose -f docker-compose.yml -f docker-compose.ci.yml "$@"; }
-          cleanup() { compose down -v || true; }
+          cleanup() { compose logs --tail 80 || true; compose down -v || true; }
           trap cleanup EXIT
           compose up -d --no-build --wait --wait-timeout 300 postgres redis backend middleware web
           mw=""
@@ -235,4 +235,3 @@ jobs:
             sleep 2
           done
           [ "$web" = "200" ]
-          compose logs --tail 80 || true
