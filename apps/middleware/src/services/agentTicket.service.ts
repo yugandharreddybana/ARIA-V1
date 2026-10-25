@@ -29,11 +29,12 @@ export interface AgentCreateTicketParams {
 export async function agentCreateTicket(params: AgentCreateTicketParams) {
   const { sessionId, skillId, workspaceId, projectId } = params;
 
-  // Verify skill belongs to this workspace
   const skill = await db.query.skills.findFirst({
-    where: and(eq(skills.id, skillId), eq(skills.workspaceId, workspaceId)),
+    where: eq(skills.id, skillId),
   });
-  if (!skill) throw new AppError('Skill not found or access denied', 403, 'FORBIDDEN');
+  if (!skill || skill.projectId !== projectId) {
+    throw new AppError('Skill not found or access denied', 403, 'FORBIDDEN');
+  }
 
   // Verify project belongs to this workspace
   const project = await db.query.projects.findFirst({

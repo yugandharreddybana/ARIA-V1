@@ -42,6 +42,8 @@ export async function signup(
   await page.fill('[name="name"]',     name);
   await page.fill('[name="email"]',    email);
   await page.fill('[name="password"]', password);
+  const confirm = page.locator('[name="confirm"]');
+  if (await confirm.count()) await confirm.fill(password);
   await page.click('button[type="submit"]');
   await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
   return { email, password };

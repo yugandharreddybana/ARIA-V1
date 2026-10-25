@@ -20,6 +20,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import * as Onboarding from '../services/onboarding.service';
 import { AppError } from '../middleware/error.middleware';
+import { listGithubRepos } from '../services/githubClient.service';
 
 const router = Router();
 
@@ -56,33 +57,8 @@ router.post('/repos', async (req: Request, res: Response, next: NextFunction) =>
 // ─── Step 3 utility: list GitHub repos the user can access ───────────────────
 router.get('/github/repos', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = (req as Request & { user: { workspaceId: string } }).user;
-    // Fetch from GitHub API using the stored access token
-    const { db } = await import('@aria/db');
-    const { workspaces } = await import('@aria/db');
-    const { eq } = await import('drizzle-orm');
-    const { decryptApiKey } = await import('../services/workspace.service');
-
-    const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, user.workspaceId) });
-    if (!ws?.githubAccessTokenEncrypted) {
-      throw new AppError('GitHub not connected. Please complete GitHub OAuth first.', 400, 'GITHUB_NOT_CONNECTED');
-    }
-    const token = decryptApiKey(ws.githubAccessTokenEncrypted);
-
-    // Paginate GitHub /user/repos (up to 100 per page, max 3 pages = 300 repos)
-    const allRepos: unknown[] = [];
-    for (let page = 1; page <= 3; page++) {
-      const ghRes = await fetch(
-        `https://api.github.com/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator`,
-        { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } },
-      );
-      if (!ghRes.ok) break;
-      const batch = await ghRes.json() as unknown[];
-      allRepos.push(...batch);
-      if (batch.length < 100) break;
-    }
-
-    ok(res, allRepos);
+    const repos = await listGithubRepos(wid(req));
+    ok(res, repos);
   } catch (e) { next(e); }
 });
 

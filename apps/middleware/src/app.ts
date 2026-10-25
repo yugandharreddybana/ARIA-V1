@@ -29,6 +29,7 @@ import metricsRoutes from './routes/metrics.routes';
 import fleetRoutes from './routes/fleet.routes';
 import workspaceRoutes from './routes/workspace.routes';
 import onboardingRoutes from './routes/onboarding.routes';
+import setupRoutes, { githubConnectRouter, projectInsightRouter } from './routes/setup.routes';
 
 export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   const app = express();
@@ -50,6 +51,9 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/health',           healthRoutes);
   app.use('/api/auth',             authRouter);
   app.use('/api/onboarding',       onboardingRoutes);     // 6-step onboarding wizard
+  app.use('/api/setup',            setupRoutes);
+  app.use('/api/github',           githubConnectRouter);
+  app.use('/api/projects',         projectInsightRouter);
   app.use('/api/projects',         projectsRoutes);
   app.use('/api/projects',         skillsRoutes);         // /:projectId/skills and /:projectId/teams
   app.use('/api/analysis/jobs',    analysisRoutes);

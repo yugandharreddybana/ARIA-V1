@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { GITHUB_TOKEN_URL, GITHUB_USER_URL, GITHUB_EMAILS_URL, getGithubOAuthConfig } from '../config/github';
 import { signAccessToken, signRefreshToken } from '../config/jwt';
+import { encryptSecret } from './crypto.service';
 import { AppError } from '../middleware/error.middleware';
 
 interface GithubUser { id: number; login: string; name: string | null; email: string | null; avatarUrl?: string | null; }
@@ -89,6 +90,11 @@ export async function handleGithubCallback(code: string) {
     jti,
     expiresAt,
   });
+
+  await db.update(workspaces).set({
+    githubAccessTokenEncrypted: encryptSecret(ghToken),
+    updatedAt: new Date(),
+  }).where(eq(workspaces.id, existing.workspaceId));
 
   return { user: existing, accessToken, refreshToken };
 }

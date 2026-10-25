@@ -19,6 +19,6 @@ router.get('/llm-config', getLlmConfigHandler);
 router.patch('/llm-config', validate(llmConfigSchema), saveLlmConfigHandler);
 
 /** POST /api/workspace/llm-config/test — test connectivity without saving */
-router.post('/llm-config/test', testLlmConfigHandler);
+router.post('/llm-config/test', validate(llmConfigSchema), testLlmConfigHandler);
 
 export default router;

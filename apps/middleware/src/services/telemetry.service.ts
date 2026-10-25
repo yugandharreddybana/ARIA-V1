@@ -24,13 +24,15 @@ class Histogram {
     for (const b of this.buckets) if (valueMs <= b.le) b.count += 1;
   }
   render(name: string, labels: string): string {
+    const wrap = (body: string): string => (body ? `{${body}}` : '');
     const lines: string[] = [];
     for (const b of this.buckets) {
-      lines.push(`${name}_bucket{${labels}le="${b.le}"} ${b.count}`);
+      lines.push(`${name}_bucket${wrap(`${labels}le="${b.le}"`)} ${b.count}`);
     }
-    lines.push(`${name}_bucket{${labels}le="+Inf"} ${this.count}`);
-    lines.push(`${name}_sum{${labels.replace(/,$/, '')}} ${this.sum}`);
-    lines.push(`${name}_count{${labels.replace(/,$/, '')}} ${this.count}`);
+    lines.push(`${name}_bucket${wrap(`${labels}le="+Inf"`)} ${this.count}`);
+    const bare = labels.replace(/,$/, '');
+    lines.push(`${name}_sum${wrap(bare)} ${this.sum}`);
+    lines.push(`${name}_count${wrap(bare)} ${this.count}`);
     return lines.join('\n');
   }
 }

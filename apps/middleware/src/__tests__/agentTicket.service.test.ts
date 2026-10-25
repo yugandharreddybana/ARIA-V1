@@ -1,17 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockInsertReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'backlog', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-const mockUpdateReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'in_progress', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-
-const mockDb = {
-  query: {
-    skills:   { findFirst: vi.fn() },
-    projects: { findFirst: vi.fn() },
-    tickets:  { findFirst: vi.fn() },
-  },
-  insert: vi.fn(() => ({ values: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockInsertReturn) })) })),
-  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockUpdateReturn) })) })) })),
-};
+const { mockDb } = vi.hoisted(() => {
+  const mockInsertReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'backlog', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+  const mockUpdateReturn = [{ id: 'ticket-1', projectId: 'p1', status: 'in_progress', type: 'feature', title: 'Fix bug', description: 'Something broken', riskClass: 'B', affectedDomains: [], humanApproved: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+  const mockDb = {
+    query: {
+      skills:   { findFirst: vi.fn() },
+      projects: { findFirst: vi.fn() },
+      tickets:  { findFirst: vi.fn() },
+    },
+    insert: vi.fn(() => ({ values: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockInsertReturn) })) })),
+    update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(mockUpdateReturn) })) })) })),
+  };
+  return { mockDb };
+});
 
 vi.mock('@aria/db', () => ({
   db: mockDb,
@@ -23,7 +25,7 @@ vi.mock('@aria/db', () => ({
 import { agentCreateTicket, agentUpdateTicketStatus } from '../services/agentTicket.service';
 
 describe('agentCreateTicket', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('throws 403 when skill not found in workspace', async () => {
     mockDb.query.skills.findFirst.mockResolvedValue(null);
@@ -39,7 +41,7 @@ describe('agentCreateTicket', () => {
   });
 
   it('throws 404 when project not found in workspace', async () => {
-    mockDb.query.skills.findFirst.mockResolvedValue({ id: 'sk1' });
+    mockDb.query.skills.findFirst.mockResolvedValue({ id: 'sk1', projectId: '00000000-0000-0000-0000-000000000003' });
     mockDb.query.projects.findFirst.mockResolvedValue(null);
     await expect(
       agentCreateTicket({
@@ -53,7 +55,7 @@ describe('agentCreateTicket', () => {
   });
 
   it('creates ticket and returns it with correct defaults', async () => {
-    mockDb.query.skills.findFirst.mockResolvedValue({ id: 'sk1' });
+    mockDb.query.skills.findFirst.mockResolvedValue({ id: 'sk1', projectId: 'p1' });
     mockDb.query.projects.findFirst.mockResolvedValue({ id: 'p1' });
     const ticket = await agentCreateTicket({
       sessionId: '00000000-0000-0000-0000-000000000001',
@@ -68,7 +70,7 @@ describe('agentCreateTicket', () => {
   });
 
   it('truncates title to 500 chars and description to 5000 chars', async () => {
-    mockDb.query.skills.findFirst.mockResolvedValue({ id: 'sk1' });
+    mockDb.query.skills.findFirst.mockResolvedValue({ id: 'sk1', projectId: 'p1' });
     mockDb.query.projects.findFirst.mockResolvedValue({ id: 'p1' });
     const longTitle = 'A'.repeat(600);
     const longDesc  = 'B'.repeat(6000);
@@ -85,7 +87,7 @@ describe('agentCreateTicket', () => {
 });
 
 describe('agentUpdateTicketStatus', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('throws 404 for unknown ticket', async () => {
     mockDb.query.tickets.findFirst.mockResolvedValue(null);

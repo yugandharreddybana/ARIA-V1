@@ -14,6 +14,7 @@
 import { Server as IOServer, type Socket } from 'socket.io';
 import type { Server as HttpServer } from 'node:http';
 import jwt from 'jsonwebtoken';
+import { getJwtPublicKeyPem } from '../config/jwt';
 import { validateEnv } from '../config/env';
 import { getTokenGateway } from '../services/tokenGateway.factory';
 
@@ -61,8 +62,7 @@ export function createWsServer(httpServer: HttpServer): IOServer {
            : undefined) ??
         parseCookie(socket.handshake.headers.cookie ?? '')?.aria_access_token;
       if (!raw) return next(new Error('WS_UNAUTHORIZED'));
-      const publicKey = env.JWT_PUBLIC_KEY.replace(/\\n/g, '\n');
-      const payload = jwt.verify(raw, publicKey, { algorithms: ['RS256'] }) as AriaJwtPayload;
+      const payload = jwt.verify(raw, getJwtPublicKeyPem(), { algorithms: ['RS256'] }) as AriaJwtPayload;
       if (payload.type !== 'access') return next(new Error('WS_BAD_TOKEN_TYPE'));
       (socket.data as { user: AriaSocketUser }).user = {
         userId: payload.sub,

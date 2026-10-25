@@ -1,12 +1,12 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/auth.context';
 import {
   BrainCircuit, LayoutDashboard, FolderKanban,
   Users, Ticket, Lightbulb, PlayCircle,
-  Bot, Settings, LogOut, Loader2
+  Bot, Settings, LogOut, Loader2, Menu
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SessionStatus } from '@/components/SessionStatus';
@@ -27,12 +27,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { isAuthenticated, isLoading, user, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace('/login');
     }
   }, [isLoading, isAuthenticated, router]);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
 
   if (isLoading) {
     return (
@@ -46,7 +51,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-background flex">
-      <aside className="w-60 border-r border-border/50 flex flex-col bg-card/30 fixed inset-y-0 left-0 z-40">
+      {navOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-30 bg-background/70 md:hidden"
+          aria-label="Close navigation"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+      <aside className={cn(
+        'w-60 border-r border-border/50 flex-col bg-card/30 fixed inset-y-0 left-0 z-40',
+        navOpen ? 'flex' : 'hidden',
+        'md:flex',
+      )}>
         <div className="flex items-center gap-2.5 h-16 px-5 border-b border-border/50">
           <BrainCircuit className="h-5 w-5 text-aria-500" />
           <span className="font-bold tracking-tight">ARIA</span>
@@ -92,7 +109,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      <main className="flex-1 ml-60 min-h-screen">
+      <main className="flex-1 md:ml-60 min-h-screen">
+        <div className="md:hidden flex items-center h-12 px-3 border-b border-border">
+          <Button type="button" variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setNavOpen(true)}>
+            <Menu className="h-4 w-4" />
+          </Button>
+          <span className="font-semibold ml-2">ARIA</span>
+        </div>
         {children}
       </main>
     </div>

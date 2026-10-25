@@ -11,7 +11,7 @@ export const tickets = pgTable('tickets', {
   id: uuid('id').primaryKey().defaultRandom(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   sessionId: uuid('session_id').references(() => sessions.id),
-  type: ticketTypeEnum('type').notNull(),
+  type: ticketTypeEnum('ticket_type').notNull(),
   status: ticketStatusEnum('status').notNull().default('backlog'),
   title: varchar('title', { length: 500 }).notNull(),
   description: text('description').notNull(),

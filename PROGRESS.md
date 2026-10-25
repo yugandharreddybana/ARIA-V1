@@ -2,12 +2,49 @@
 
 > This is the session handoff file. READ at session start, UPDATE at session end.
 > Pair with `MEMORY.md` (file index + decisions + anti-patterns) and `IMPLEMENTATION.md` (full 17-phase build plan).
+> Where this file or `v27_9.md` / `IMPLEMENTATION.md` disagree with `docs/PRODUCT_SPEC.md`, the product spec wins.
 
 ---
 
-## 🔄 Active Sprint
+## Milestone 1 — foundation (this branch)
 
-**Sprint 11 — Phase 6: IDE / LSP Integration**  *(queued)*
+Branch: `cursor/milestone-1-foundation-db70`. Product spec: `docs/PRODUCT_SPEC.md`.
+
+Shipped:
+- Email signup works without GitHub OAuth. Repo access is a personal access token, encrypted at rest.
+- Setup UI: project → LLM provider (Cursor default, plus Gemini, Groq, Ollama, OpenAI, Anthropic, OpenAI-compatible) → Test Connection must pass before save → GitHub repos → knowledge map → company.
+- Secrets use scrypt + AES-256-GCM (`WORKSPACE_ENCRYPTION_KEY`). Responses and logs do not return API keys or GitHub tokens.
+- Analysis worker claims `queued` jobs, reads the repo through the GitHub API, and stores a knowledge map (stack, modules, flows, data model, APIs).
+- One company generator (`companyGenerator.ts`). `teamGenesis.service.ts` is removed. `skillFactory` only adapts the same generator.
+- Org chart (xyflow): view, edit role / responsibilities / instructions, add, delete, ON/OFF. OFF never enters the token queue.
+- Model tiers: planning defaults to `top`, development to `auto`. Overridable per project and per agent. Every completion goes through the sanitizer and the token queue with the resolved model id. See decisions below.
+- Flyway V11–V13. Drizzle matches those columns. Hibernate `ddl-auto: validate` boots.
+
+Verified locally on 2026-10-25 (this VM has Postgres 16 + pgvector and Redis, not Docker):
+- `node scripts/apply-migrations.cjs` applied V13 (V1–V12 were already recorded). Flyway then reported schema version 13 and validated 13 migrations.
+- `pnpm -F @aria/middleware exec tsc --noEmit` and `pnpm -F @aria/web exec tsc --noEmit` passed.
+- `pnpm -F @aria/middleware exec vitest run` — 20 files, 83 tests passed.
+- `pnpm -F @aria/middleware exec eslint src --ext .ts` passed.
+- `mvn -B -ntp -f apps/backend/pom.xml test` — 44 run, 0 failures, 1 skipped (`AriaBackendApplicationTests`).
+- `mvn -B -ntp -f apps/backend/pom.xml -DskipTests spring-boot:run` logged `Started AriaBackendApplication`. `GET /actuator/health` returned `{"status":"UP"}`. Process then stopped.
+- `pnpm -F @aria/web lint` passed with one existing warning in `src/components/ui/select.tsx` (combobox aria props).
+- `pnpm -F @aria/web build` passed after login and auth callback were wrapped in `Suspense` (`useSearchParams`).
+- Playwright `tests/milestone1-setup.spec.ts` and `tests/auth/landing.spec.ts` on desktop, tablet, and mobile — 18 passed, workers 1, `ARIA_LLM_MODE=mock`, `ARIA_GITHUB_MODE=mock`.
+
+Decisions the owner needs:
+- Cursor Cloud Agents API (`GET /v1/me`, `POST /v1/agents`) is not a chat API. Test Connection checks the key. Completions throw `CURSOR_NO_CHAT_API` after the queue has selected the model. Knowledge maps and the org chart are built from the GitHub tree and role templates. Details: `docs/CURSOR_PROVIDER.md`.
+- Cursor development tier stores model id `auto`. A later cloud-agent launch must send `auto-smart` with `optimize_for=cost`. Planning default id is `claude-4.6-opus-thinking`. Override it per project if `GET /v1/models` lists a different top model.
+- Other providers: premium vs standard defaults (OpenAI `gpt-4.1` / `gpt-4.1-mini`, Anthropic `claude-opus-4-7` / `claude-sonnet-4-6`, and the pairs in `modelTiers.ts`). Ollama and OpenAI-compatible servers use the tested model for both tiers until two ids are set.
+- Company size is total headcount including leadership. CEO is always seated; other leads appear as size grows. The mix scales the remaining seats. A size-10 company is not also "1 business + 4 QA + 5 developers" on top of a full leadership bench.
+- Company generation dispatches one `company_generation` call through the queue on the planning model. Cursor refuses it and releases the reservation. A chat provider's reply is not written onto agents; the template org is what you edit.
+- CI e2e runs only `milestone1-setup.spec.ts` and `auth/landing.spec.ts`. Older sprint specs stay in the tree and are not the gate.
+- Local run path is Docker Compose for Postgres and Redis. This session verified against a host Postgres because Docker is not installed here.
+
+Out of scope, schema already has the hooks (`enabled`, `backupAgentId`, `ownedFlowIds`, `roleKey`): agents writing code or PRs, merge order, ceremonies, idea proposals, docs agent, red/blue execution, learning.
+
+## 🔄 Later
+
+**Sprint 11 — Phase 6: IDE / LSP Integration**  *(not this milestone)*
 - Spec anchors: §18M (Deep Native IDE/LSP Integration).
 - DoD checklist: see IMPLEMENTATION.md §8.
 

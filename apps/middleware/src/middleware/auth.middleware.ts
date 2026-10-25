@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { validateEnv } from '../config/env';
+import { verifyAccessToken } from '../config/jwt';
 
 /**
  * AriaRequest — extends Express Request with the authenticated user payload.
@@ -57,13 +57,7 @@ export function requireAuth(
   }
 
   try {
-    const env = validateEnv();
-    // PEM keys stored in .env files often have literal \n instead of real newlines
-    const publicKey = env.JWT_PUBLIC_KEY.replace(/\\n/g, '\n');
-
-    const payload = jwt.verify(token, publicKey, {
-      algorithms: ['RS256'],
-    }) as JwtPayload;
+    const payload = verifyAccessToken(token) as unknown as JwtPayload;
 
     if (payload.type !== 'access') {
       res.status(401).json({

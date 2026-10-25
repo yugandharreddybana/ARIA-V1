@@ -146,7 +146,7 @@ public class DistillationEngine {
 
     // ── helpers ────────────────────────────────────────────────────────────
 
-    static Set<String> extractIntentKeywords(String taskDescription) {
+    public static Set<String> extractIntentKeywords(String taskDescription) {
         if (taskDescription == null) return Set.of();
         Set<String> out = new LinkedHashSet<>();
         for (String token : taskDescription.toLowerCase().split("[^a-zA-Z0-9_]+")) {
@@ -155,7 +155,7 @@ public class DistillationEngine {
         return out;
     }
 
-    private static double scoreChunk(SemanticChunk c, Set<String> kws) {
+    public static double scoreChunk(SemanticChunk c, Set<String> kws) {
         if (c == null || kws.isEmpty()) return 0;
         double score = 0;
         String name = c.getSymbolName() != null ? c.getSymbolName().toLowerCase() : "";
@@ -174,13 +174,14 @@ public class DistillationEngine {
         return score;
     }
 
-    private static int approxTokens(String s) {
+    public static int approxTokens(String s) {
         if (s == null || s.isEmpty()) return 0;
         return s.length() / 4 + 1;
     }
     private static int approxTokensList(List<String> xs) { return xs.stream().mapToInt(DistillationEngine::approxTokens).sum(); }
 
-    private static String moduleOf(String filePath) {
+    public static String moduleOf(String filePath) {
+        if (filePath == null) return "";
         int idx = filePath.lastIndexOf('/');
         return idx >= 0 ? filePath.substring(0, idx) : filePath;
     }

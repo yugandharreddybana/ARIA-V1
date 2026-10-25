@@ -1,46 +1,62 @@
 import { z } from 'zod';
 
+const model = z.string().trim().min(1).max(200);
+const key = z.string().trim().min(8).max(500);
+
 export const llmConfigSchema = z.discriminatedUnion('provider', [
-  // Ollama — local, no API key required
+  z.object({
+    provider: z.literal('cursor'),
+    baseUrl: z.string().url().optional(),
+    model: model.default('cursor-agent'),
+    apiKey: key,
+  }),
+  z.object({
+    provider: z.literal('gemini'),
+    baseUrl: z.string().url().optional(),
+    model: model.default('gemini-2.0-flash'),
+    apiKey: key,
+  }),
+  z.object({
+    provider: z.literal('groq'),
+    baseUrl: z.string().url().optional(),
+    model: model.default('llama-3.3-70b-versatile'),
+    apiKey: key,
+  }),
   z.object({
     provider: z.literal('ollama'),
-    baseUrl:  z.string().url({ message: 'baseUrl must be a valid URL (e.g. http://localhost:11434)' }),
-    model:    z.string().min(1, 'model name is required').max(200),
-    apiKey:   z.undefined().optional(),
+    baseUrl: z.string().url(),
+    model,
+    apiKey: z.string().trim().min(8).max(500).optional(),
   }),
-  // Anthropic — API key required
-  z.object({
-    provider: z.literal('anthropic'),
-    baseUrl:  z.string().url().optional(),
-    model:    z.string().min(1, 'model name is required').max(200),
-    apiKey:   z.string().min(20, 'Anthropic API key is required and must be at least 20 characters'),
-  }),
-  // OpenAI-compatible
   z.object({
     provider: z.literal('openai'),
-    baseUrl:  z.string().url().optional(),
-    model:    z.string().min(1, 'model name is required').max(200),
-    apiKey:   z.string().min(10, 'OpenAI API key is required'),
+    baseUrl: z.string().url().optional(),
+    model,
+    apiKey: key,
   }),
-  // NVIDIA NIM — nvapi-... key, OpenAI-compatible endpoint
+  z.object({
+    provider: z.literal('anthropic'),
+    baseUrl: z.string().url().optional(),
+    model,
+    apiKey: key,
+  }),
   z.object({
     provider: z.literal('nvidia'),
-    baseUrl:  z.string().url().optional(), // defaults to https://integrate.api.nvidia.com/v1
-    model:    z.string().min(1, 'model name is required').max(200),
-    apiKey:   z
-      .string()
-      .min(10, 'NVIDIA API key is required')
-      .refine(
-        (k) => k.startsWith('nvapi-'),
-        { message: 'NVIDIA API keys start with "nvapi-". Get yours at build.nvidia.com.' },
-      ),
+    baseUrl: z.string().url().optional(),
+    model,
+    apiKey: z.string().trim().min(10).refine((value) => value.startsWith('nvapi-'), 'NVIDIA API keys start with nvapi-'),
   }),
-  // Custom OpenAI-compatible endpoint
   z.object({
     provider: z.literal('custom'),
-    baseUrl:  z.string().url({ message: 'A valid base URL is required for custom providers' }),
-    model:    z.string().min(1, 'model name is required').max(200),
-    apiKey:   z.string().optional(),
+    baseUrl: z.string().url(),
+    model,
+    apiKey: z.string().trim().min(8).max(500).optional(),
+  }),
+  z.object({
+    provider: z.literal('openai_compatible'),
+    baseUrl: z.string().url(),
+    model,
+    apiKey: key,
   }),
 ]);
 

@@ -3,14 +3,17 @@ import { v4 as uuidv4 } from 'uuid';
 import type { AuthTokenPayload } from '@aria/shared';
 import { validateEnv } from './env';
 
-function getPrivateKey(): string {
-  const env = validateEnv();
-  return Buffer.from(env.JWT_PRIVATE_KEY, 'base64').toString('utf-8');
+function decodePem(value: string): string {
+  if (value.includes('BEGIN')) return value.replace(/\\n/g, '\n');
+  return Buffer.from(value, 'base64').toString('utf-8');
 }
 
-function getPublicKey(): string {
-  const env = validateEnv();
-  return Buffer.from(env.JWT_PUBLIC_KEY, 'base64').toString('utf-8');
+function getPrivateKey(): string {
+  return decodePem(validateEnv().JWT_PRIVATE_KEY);
+}
+
+export function getJwtPublicKeyPem(): string {
+  return decodePem(validateEnv().JWT_PUBLIC_KEY);
 }
 
 export interface TokenPair {
@@ -23,7 +26,7 @@ export function signAccessToken(payload: Omit<AuthTokenPayload, 'iat' | 'exp' | 
   const env = validateEnv();
   const jti = uuidv4();
   return jwt.sign(
-    { ...payload, jti },
+    { ...payload, jti, type: 'access' },
     getPrivateKey(),
     {
       algorithm: 'RS256',
@@ -47,11 +50,11 @@ export function signRefreshToken(userId: string): { token: string; jti: string }
 }
 
 export function verifyAccessToken(token: string): AuthTokenPayload {
-  return jwt.verify(token, getPublicKey(), { algorithms: ['RS256'] }) as AuthTokenPayload;
+  return jwt.verify(token, getJwtPublicKeyPem(), { algorithms: ['RS256'] }) as AuthTokenPayload;
 }
 
 export function verifyRefreshToken(token: string): { sub: string; jti: string } {
-  return jwt.verify(token, getPublicKey(), { algorithms: ['RS256'] }) as { sub: string; jti: string };
+  return jwt.verify(token, getJwtPublicKeyPem(), { algorithms: ['RS256'] }) as { sub: string; jti: string };
 }
 
 export function decodeToken(token: string): AuthTokenPayload | null {
