@@ -3,14 +3,19 @@ import { v4 as uuidv4 } from 'uuid';
 import type { AuthTokenPayload } from '@aria/shared';
 import { validateEnv } from './env';
 
-function getPrivateKey(): string {
-  const env = validateEnv();
-  return Buffer.from(env.JWT_PRIVATE_KEY, 'base64').toString('utf-8');
+/** Accept either a PEM (dev-up.sh) or the base64 PEM from scripts/generate-keys.sh. */
+export function pemFromEnv(value: string): string {
+  const normalized = value.replace(/\\n/g, '\n');
+  if (normalized.includes('BEGIN ')) return normalized;
+  return Buffer.from(normalized, 'base64').toString('utf-8');
 }
 
-function getPublicKey(): string {
-  const env = validateEnv();
-  return Buffer.from(env.JWT_PUBLIC_KEY, 'base64').toString('utf-8');
+function getPrivateKey(): string {
+  return pemFromEnv(validateEnv().JWT_PRIVATE_KEY);
+}
+
+export function getPublicKey(): string {
+  return pemFromEnv(validateEnv().JWT_PUBLIC_KEY);
 }
 
 export interface TokenPair {
@@ -23,7 +28,7 @@ export function signAccessToken(payload: Omit<AuthTokenPayload, 'iat' | 'exp' | 
   const env = validateEnv();
   const jti = uuidv4();
   return jwt.sign(
-    { ...payload, jti },
+    { ...payload, jti, type: 'access' },
     getPrivateKey(),
     {
       algorithm: 'RS256',
