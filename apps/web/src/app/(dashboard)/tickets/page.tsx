@@ -3,10 +3,14 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/auth.context';
 import { useAriaSocket } from '@/hooks/useAriaSocket';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/ui/page-header';
+import { Badge } from '@/components/ui/badge';
+import { ErrorNote, LoadingState } from '@/components/ui/empty-state';
 import {
   Select,
   SelectContent,
@@ -15,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { Ticket, TicketType, TicketStatus } from '@aria/shared';
-import { Plus, Loader2, AlertCircle, Ticket as TicketIcon, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 // All 8 statuses from DB schema ticketStatusEnum — must be exhaustive
 const COLUMNS: { key: TicketStatus; label: string; color: string }[] = [
@@ -85,15 +89,8 @@ function CreateTicketModal({ projectId, onCreated, onClose }: CreateTicketModalP
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Create ticket"
-    >
-      <Card className="w-full max-w-md">
-        <CardHeader><CardTitle>New Ticket</CardTitle></CardHeader>
-        <CardContent>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent title="Create ticket" description="Add a story to the backlog.">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <p role="alert" className="text-sm text-destructive">
@@ -133,18 +130,17 @@ function CreateTicketModal({ projectId, onCreated, onClose }: CreateTicketModalP
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex gap-2 justify-end pt-1">
+            <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
                 Cancel
               </Button>
-              <Button type="submit" variant="aria" disabled={loading}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Creating…' : 'Create'}
               </Button>
             </div>
           </form>
-        </CardContent>
-      </Card>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -160,22 +156,20 @@ function TicketCard({ ticket, onStatusChange }: TicketCardProps) {
 
   return (
     <div
-      className="rounded-lg border border-border bg-card p-3 space-y-2 hover:border-aria-500/40 transition-colors"
+      className="rounded-lg border border-border bg-card p-3 space-y-2 hover:border-primary/40 transition-colors"
       data-testid="ticket-card"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {isAgentCreated && (
             <Zap
-              className="h-3 w-3 text-aria-400 shrink-0"
+              className="h-3 w-3 text-primary shrink-0"
               aria-label="Created by agent"
             />
           )}
           <p className="text-sm font-medium leading-snug truncate">{ticket.title}</p>
         </div>
-        <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${typeColor}`}>
-          {ticket.type.replace(/_/g, ' ')}
-        </span>
+        <Badge className={typeColor}>{ticket.type.replace(/_/g, ' ')}</Badge>
       </div>
       {ticket.description && (
         <p className="text-xs text-muted-foreground line-clamp-2">{ticket.description}</p>
@@ -218,7 +212,7 @@ export default function TicketsPage() {
   const joinedProjectRef = useRef<string>('');
 
   // WebSocket for real-time agent updates
-  const { connected, subscribe, unsubscribe } = useAriaSocket();
+  const { connected, lastEvent, subscribe, unsubscribe } = useAriaSocket();
 
   // Load project list on mount
   useEffect(() => {
@@ -270,7 +264,6 @@ export default function TicketsPage() {
   }, [connected, projectId, subscribe, unsubscribe]);
 
   // ── Ticket event listeners (separate effect so they always use fresh state) ──
-  const { lastEvent } = useAriaSocket();
   useEffect(() => {
     if (!lastEvent) return;
 
@@ -311,56 +304,38 @@ export default function TicketsPage() {
   void user; // consumed via auth context — referenced to satisfy lint
 
   return (
-    <div className="p-6 flex flex-col gap-5 h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <TicketIcon className="h-5 w-5 text-aria-400" />
-          <h1 className="text-2xl font-bold">Tickets</h1>
-          {connected && (
-            <span
-              className="flex items-center gap-1 text-xs text-emerald-400"
-              title="Live updates active"
+    <div className="flex h-full flex-col gap-5 p-4 md:p-6">
+      <PageHeader
+        title="Board"
+        description={connected ? 'Stories move from backlog to done. Live updates are on.' : 'Stories move from backlog to done.'}
+        action={(
+          <>
+            <Link href="/planning" className="self-center text-sm text-primary">Ideas</Link>
+            <Select value={projectId} onValueChange={setProjectId}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={() => setShowCreate(true)}
+              disabled={!projectId}
+              data-testid="new-ticket-btn"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Live
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <Select value={projectId} onValueChange={setProjectId}>
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Select project" />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map(p => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="aria"
-            onClick={() => setShowCreate(true)}
-            disabled={!projectId}
-            data-testid="new-ticket-btn"
-          >
-            <Plus className="h-4 w-4 mr-2" />New Ticket
-          </Button>
-        </div>
-      </div>
+              New Ticket
+            </Button>
+          </>
+        )}
+      />
 
-      {/* Error banner */}
-      {error && (
-        <div role="alert" className="flex items-center gap-2 text-destructive text-sm">
-          <AlertCircle className="h-4 w-4" />{error}
-        </div>
-      )}
+      {error && <ErrorNote>{error}</ErrorNote>}
 
-      {/* Kanban board */}
       {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
+        <LoadingState label="Loading the board…" />
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-4 flex-1">
           {COLUMNS.map(col => {

@@ -11,7 +11,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { login } from './helpers/auth';
+import { login, revealNav } from './helpers/auth';
 
 const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_MIDDLEWARE_URL ?? 'http://localhost:3001';
 
@@ -58,9 +58,10 @@ test('S5-03 /api/llm/invoke rejects empty body (Zod 400)', async ({ request }) =
   expect([400, 422]).toContain(res.status());
 });
 
-test('S5-04 sidebar SessionStatus indicator renders on the dashboard', async ({ page }) => {
+test('S5-04 sidebar SessionStatus indicator renders on the projects home', async ({ page }) => {
   await login(page);
-  await page.goto('/dashboard');
+  await page.goto('/projects');
+  await revealNav(page);
   const status = page.getByTestId('session-status');
   await expect(status).toBeVisible();
   // dot is rendered regardless of connection state

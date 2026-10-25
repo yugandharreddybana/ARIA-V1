@@ -53,10 +53,15 @@ export async function getAnalysisJob(jobId: string): Promise<AnalysisJobResponse
 
 // ── Concept Graph ─────────────────────────────────────────────────────────────
 
-export async function getConceptGraph(projectId: string): Promise<ConceptGraphResponse> {
-  return backendFetch<ConceptGraphResponse>(`/api/concept-graph/projects/${projectId}`);
+export async function getConceptGraph(projectId: string, authorization?: string): Promise<ConceptGraphResponse> {
+  return backendFetch<ConceptGraphResponse>(`/api/concept-graph/projects/${projectId}`, {
+    headers: authorization ? { Authorization: authorization } : {},
+  });
 }
 
-export async function clearConceptGraph(projectId: string): Promise<void> {
-  return backendFetch<void>(`/api/concept-graph/projects/${projectId}`, { method: 'DELETE' });
+export async function clearConceptGraph(projectId: string, authorization?: string): Promise<void> {
+  return backendFetch<void>(`/api/concept-graph/projects/${projectId}`, {
+    method: 'DELETE',
+    headers: authorization ? { Authorization: authorization } : {},
+  });
 }

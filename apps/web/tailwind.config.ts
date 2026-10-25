@@ -66,20 +66,16 @@ const config: Config = {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['var(--font-geist-sans)', ...fontFamily.sans],
-        mono: ['var(--font-geist-mono)', ...fontFamily.mono],
+        sans: ['ui-sans-serif', 'system-ui', ...fontFamily.sans],
+        mono: ['ui-monospace', ...fontFamily.mono],
       },
       keyframes: {
         'accordion-down': { from: { height: '0' }, to: { height: 'var(--radix-accordion-content-height)' } },
         'accordion-up': { from: { height: 'var(--radix-accordion-content-height)' }, to: { height: '0' } },
-        'fade-in': { from: { opacity: '0', transform: 'translateY(8px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
-        'pulse-glow': { '0%, 100%': { boxShadow: '0 0 0 0 rgba(42, 168, 255, 0)' }, '50%': { boxShadow: '0 0 20px 4px rgba(42, 168, 255, 0.15)' } },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
-        'fade-in': 'fade-in 0.4s ease-out',
-        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
       },
     },
   },

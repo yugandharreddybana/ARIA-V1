@@ -69,7 +69,7 @@ export default function AIStrategyPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-3">
-          <Zap className="h-5 w-5 text-aria-400" />
+          <Zap className="h-5 w-5 text-primary" />
           <div>
             <h1 className="text-lg font-bold">AI Strategy</h1>
             <p className="text-xs text-muted-foreground">Chat with ARIA — your AI engineering advisor</p>
@@ -102,7 +102,7 @@ export default function AIStrategyPage() {
             <div className="flex flex-col gap-2 items-center">
               {['Help me plan the next sprint', 'What are the riskiest parts of the codebase?', 'Suggest features based on current tickets'].map(s => (
                 <button key={s} data-testid="suggestion-chip" onClick={() => { setInput(s); inputRef.current?.focus(); }}
-                  className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-aria-500/40 rounded-lg px-4 py-2 transition-colors">
+                  className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/40 rounded-lg px-4 py-2 transition-colors">
                   {s}
                 </button>
               ))}
@@ -110,12 +110,12 @@ export default function AIStrategyPage() {
           </div>
         ) : (
           messages.map((m, i) => (
-            <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              {m.role === 'assistant' && <Bot className="h-5 w-5 text-aria-400 shrink-0 mt-0.5" />}
-              <div className={`max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+            <div key={i} data-testid="chat-message" className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {m.role === 'assistant' && <Bot className="h-5 w-5 shrink-0 mt-0.5 text-primary" />}
+              <div className={`max-w-[80%] rounded-lg border px-4 py-3 text-sm leading-relaxed ${
                 m.role === 'user'
-                  ? 'bg-aria-600/20 border border-aria-500/30 text-foreground'
-                  : 'bg-muted text-foreground'
+                  ? 'border-primary/30 bg-secondary text-foreground'
+                  : 'border-border bg-muted text-foreground'
               }`}>
                 <pre className="whitespace-pre-wrap font-sans">{m.content}</pre>
               </div>
@@ -125,7 +125,7 @@ export default function AIStrategyPage() {
         )}
         {loading && (
           <div className="flex gap-3">
-            <Bot className="h-5 w-5 text-aria-400 shrink-0 mt-0.5" />
+            <Bot className="h-5 w-5 text-primary shrink-0 mt-0.5" />
             <div className="bg-muted rounded-xl px-4 py-3">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>

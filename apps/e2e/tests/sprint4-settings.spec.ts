@@ -25,7 +25,7 @@ test.describe('Sprint 4 — Settings', () => {
   });
 
   test('S4-SET03: settings nav link in sidebar is reachable', async ({ page }) => {
-    await page.goto('/dashboard');
+    await page.goto('/projects');
     await revealNav(page);
     await page.getByRole('link', { name: /^settings$/i }).click();
     await expect(page).toHaveURL(/\/settings/);

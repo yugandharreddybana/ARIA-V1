@@ -25,23 +25,10 @@ import {
   RefreshCw, Zap,
 } from 'lucide-react';
 
-const NODE_STYLES: Record<string, { bg: string; border: string; text: string }> = {
-  file:       { bg: '#1e293b', border: '#3b82f6', text: '#93c5fd' },
-  module:     { bg: '#1a2e1a', border: '#22c55e', text: '#86efac' },
-  service:    { bg: '#1e1a2e', border: '#a855f7', text: '#d8b4fe' },
-  endpoint:   { bg: '#2e1a1a', border: '#ef4444', text: '#fca5a5' },
-  db_table:   { bg: '#1a2a2e', border: '#06b6d4', text: '#67e8f9' },
-  function:   { bg: '#2e2a1a', border: '#f59e0b', text: '#fcd34d' },
-  class:      { bg: '#1a1e2e', border: '#6366f1', text: '#a5b4fc' },
-  interface:  { bg: '#2e1e1a', border: '#f97316', text: '#fdba74' },
-};
-
 const NODE_ICONS: Record<string, React.ElementType> = {
   file: FileCode2, module: Box, service: Server, endpoint: Globe,
   db_table: Database, function: Code2, class: LayoutTemplate, interface: Braces,
 };
-
-const DEFAULT_STYLE = { bg: '#1e1e2e', border: '#6b7280', text: '#9ca3af' };
 
 function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
   const cols  = Math.max(1, Math.ceil(Math.sqrt(graph.nodes.length)));
@@ -49,22 +36,20 @@ function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
   const GAP_Y = 120;
 
   const nodes: Node[] = graph.nodes.map((n, i) => {
-    const style = NODE_STYLES[n.nodeType] ?? DEFAULT_STYLE;
     return {
       id: n.id,
       position: { x: (i % cols) * GAP_X, y: Math.floor(i / cols) * GAP_Y },
       data: { label: n.name, raw: n },
       style: {
-        background:   style.bg,
-        border:       `1.5px solid ${style.border}`,
-        color:        style.text,
+        background: 'hsl(var(--card))',
+        border: '1px solid hsl(var(--border))',
+        color: 'hsl(var(--foreground))',
         borderRadius: 8,
-        padding:      '6px 12px',
-        fontSize:     11,
-        fontFamily:   'monospace',
-        minWidth:     120,
-        maxWidth:     180,
-        cursor:       'pointer',
+        padding: '6px 12px',
+        fontSize: 12,
+        minWidth: 120,
+        maxWidth: 180,
+        cursor: 'pointer',
       },
     };
   });
@@ -75,25 +60,22 @@ function buildFlow(graph: ConceptGraph): { nodes: Node[]; edges: Edge[] } {
     target:   e.targetNodeId,
     label:    e.label ?? e.edgeType,
     animated: e.edgeType === 'calls' || e.edgeType === 'triggers',
-    style:    { stroke: '#475569', strokeWidth: 1.2 },
-    labelStyle: { fill: '#64748b', fontSize: 9 },
+    style:    { stroke: 'hsl(var(--muted-foreground))' },
+    labelStyle: { fill: 'hsl(var(--muted-foreground))', fontSize: 11 },
   }));
 
   return { nodes, edges };
 }
 
 function NodePanel({ node, onClose }: { node: ConceptNode; onClose: () => void }) {
-  const style = NODE_STYLES[node.nodeType] ?? DEFAULT_STYLE;
   const Icon  = NODE_ICONS[node.nodeType]  ?? BrainCircuit;
   return (
-    <div className="absolute top-4 right-4 z-10 w-72 animate-in slide-in-from-right-4 duration-200">
-      <Card className="border shadow-xl bg-card">
+    <div className="absolute right-4 top-4 z-10 w-72">
+      <Card className="border bg-card">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-md" style={{ background: style.bg, border: `1px solid ${style.border}` }}>
-                <Icon className="h-3.5 w-3.5" style={{ color: style.text }} />
-              </div>
+              <Icon className="h-4 w-4 text-primary" />
               <CardTitle className="text-sm">{node.name}</CardTitle>
             </div>
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -191,8 +173,8 @@ export default function GraphPage() {
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <BrainCircuit className="h-4 w-4 text-aria-400" />
-          <h1 className="text-sm font-semibold">Concept Graph</h1>
+          <BrainCircuit className="h-4 w-4 text-primary" />
+          <h1 className="text-lg font-semibold">Concept graph</h1>
           {graph && (
             <span className="text-xs text-muted-foreground">
               {graph.meta.nodeCount} nodes · {graph.meta.edgeCount} edges
@@ -215,7 +197,7 @@ export default function GraphPage() {
                 className={
                   'rounded-md border px-2 py-1 transition-colors ' +
                   (activeLevel === lvl
-                    ? 'border-aria-500 text-aria-300 bg-aria-900/40'
+                    ? 'border-primary bg-secondary text-foreground'
                     : 'border-border/60 text-muted-foreground hover:text-foreground')
                 }
               >
@@ -239,7 +221,7 @@ export default function GraphPage() {
       <div className="flex-1 relative min-h-0">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/60">
-            <Loader2 className="h-6 w-6 animate-spin text-aria-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         )}
 
@@ -273,15 +255,9 @@ export default function GraphPage() {
             fitViewOptions={{ padding: 0.2 }}
             className="bg-background"
           >
-            <Background variant={BackgroundVariant.Dots} color="#1e293b" gap={20} />
+            <Background variant={BackgroundVariant.Dots} gap={20} />
             <Controls className="!border-border !bg-card !text-foreground" />
-            <MiniMap
-              nodeColor={n => {
-                const raw = (n.data as { raw?: ConceptNode })?.raw;
-                return (NODE_STYLES[raw?.nodeType ?? ''] ?? DEFAULT_STYLE).border;
-              }}
-              className="!bg-card !border-border"
-            />
+            <MiniMap className="!bg-card !border-border" />
           </ReactFlow>
         )}
 

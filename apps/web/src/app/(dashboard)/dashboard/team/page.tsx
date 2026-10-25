@@ -40,7 +40,7 @@ function AddSkillModal({ projectId, onCreated, onClose }: { projectId: string; o
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40">
       <Card className="w-full max-w-sm">
         <CardHeader><CardTitle>Add Skill</CardTitle></CardHeader>
         <CardContent>
@@ -105,7 +105,7 @@ export default function TeamPage() {
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Users className="h-5 w-5 text-aria-400" />
+          <Users className="h-5 w-5 text-primary" />
           <div>
             <h1 className="text-2xl font-bold">Team &amp; Skills</h1>
             <p className="text-sm text-muted-foreground">AI skills assigned to this project</p>
@@ -140,7 +140,7 @@ export default function TeamPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {skills.map(s => (
-            <Card key={s.id} data-testid="skill-card" className="hover:border-aria-500/40 transition-colors">
+            <Card key={s.id} data-testid="skill-card" className="hover:border-primary/40 transition-colors">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between">
                   <CardTitle className="text-base">{s.realName}</CardTitle>

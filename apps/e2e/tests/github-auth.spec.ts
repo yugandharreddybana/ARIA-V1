@@ -10,7 +10,12 @@ test.describe('GitHub OAuth flow', () => {
   test('github start endpoint redirects to github.com', async ({ request }) => {
     const MIDDLEWARE = process.env.MIDDLEWARE_URL ?? 'http://localhost:3001';
     const res = await request.get(`${MIDDLEWARE}/api/auth/github/start`, { maxRedirects: 0 });
-    // Expect a redirect (302/301) to GitHub
+    if (!process.env.GITHUB_CLIENT_ID) {
+      expect(res.status()).toBe(400);
+      const body = await res.json();
+      expect(body.code).toBe('GITHUB_OAUTH_DISABLED');
+      return;
+    }
     expect([301, 302]).toContain(res.status());
     const location = res.headers()['location'] ?? '';
     expect(location).toContain('github.com/login/oauth/authorize');
