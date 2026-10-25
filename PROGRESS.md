@@ -6,7 +6,32 @@
 
 ---
 
-## Milestone 2 — agent runs backend (this branch)
+## Milestone 2 — frontend (this branch)
+
+Branch: `cursor/m2-frontend-e5e7`. Plan §13 matches the simplified UI on main: primitives are Button, Input, Card, Badge, Dialog, EmptyState, PageHeader, and Table; Runs is `/runs` with the Queue slot in `components/runs/agent-runs.tsx`; the board is `/board`. No Sheet or Tabs. `LogView` is the only added primitive. Run status uses Badge.
+
+Shipped on this branch:
+
+- **F1.** `/runs` queue: live socket updates, model, tokens, PR link, cancel, retry, log view in the existing Dialog.
+- **F2.** Budget line on `/runs` and a monthly budget field in Settings, including the warning copy.
+- **F3.** Company page edits owner and backup per layer (fullstack, frontend, backend).
+- **F4.** Settings shows branch protection, the blocking message, acknowledgement, push-token status, and code runtime.
+- **F5.** Model catalog and planning/development tiers on the company page and in Settings. Setup shows whether knowledge enrichment is still running.
+- **Ticket.** `/tickets/[id]` timeline from `ticket_events` (type and agent filters, load more, Markdown/JSON export, hash-chain badge), story points with due date and split suggestion, dev and QA report downloads, gate status, PR link, and stage.
+- **Board.** Points, due date, at-risk/overdue, stage, agent, PR, and a blocked-run message. `ready_for_qa` stays so the sprint 4 specs keep their eight columns. `awaiting_merge` and `blocked` are added.
+- **Projects.** Rename and archive on the projects page. `PATCH /api/projects/:id` is workspace-scoped and strict. GitHub calls use `owner/name` even when setup stored only the repo label.
+
+### Verified locally on 2026-10-25
+
+- `pnpm -F @aria/middleware exec tsc --noEmit` passed. `pnpm -F @aria/web exec tsc --noEmit` passed.
+- `pnpm -F @aria/middleware exec eslint src --ext .ts --max-warnings 0` passed. `pnpm -F @aria/web exec eslint src --ext .ts,.tsx --max-warnings 0` passed.
+- `pnpm -F @aria/middleware test` — 26 files, 137 tests passed (includes `projects.patch.test.ts` and `githubFullName.test.ts`).
+- `mvn -B -ntp -f apps/backend/pom.xml test` — 44 tests, 0 failures, 1 skipped. BUILD SUCCESS.
+- Playwright, three viewports, against the provider stub: 216 passed (5.0m), including `tests/milestone2-agents.spec.ts` (develop → review → QA → awaiting merge, timeline, story points, report downloads, cancel).
+- Anti-slop on the changed UI files scored 10/10. Anti-test-dodging passed on the new spec and the PATCH test.
+- Docker is not installed here. The `docker-images` CI job is the image check. Java sources were not changed.
+
+## Milestone 2 — agent runs backend (merged, PR #9)
 
 Branch: `cursor/m2-backend-1c0c`. Plan: `docs/milestones/M2_PLAN.md` (§17 is the ticket log, story points, and evidence). Product spec wins on conflict. Frontend tasks F1–F5 are not in this PR. Agents never merge.
 
