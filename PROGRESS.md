@@ -31,6 +31,17 @@ Shipped on this branch:
 - Anti-slop on the changed UI files scored 10/10. Anti-test-dodging passed on the new spec and the PATCH test.
 - Docker is not installed here. The `docker-images` CI job is the image check. Java sources were not changed.
 
+### Review fixes verified locally on 2026-10-27
+
+- Board accepts both `{id,status,projectId}` and `{ticket}` socket payloads, and a page error boundary stays up if a handler throws.
+- `GET /projects/:id/budget` and `noteBudget` count usage for that project when a project limit is set. A 1,000,000 limit with 5,000,000 workspace usage still reports 0 used.
+- Malformed ids return 400. `GET /api/tickets/:id` loads an archived ticket in the caller's workspace.
+- Run logs load the newest page and page backward. Report downloads share the 401 refresh path. `catalogModelIds` keeps `{id,aliases}`.
+- `pnpm -F @aria/middleware typecheck`, `pnpm -F @aria/web exec tsc --noEmit`, middleware eslint, and `next lint` passed.
+- `pnpm -F @aria/middleware test` — 28 files, 146 tests passed.
+- `tests/milestone2-agents.spec.ts` passed 3 consecutive times, `--retries=0`, desktop, tablet, and mobile, workers 1 (9 passed each run).
+- PR #10 was still open, so main was not merged. Java sources were not changed.
+
 ## Milestone 2 — agent runs backend (merged, PR #9)
 
 Branch: `cursor/m2-backend-1c0c`. Plan: `docs/milestones/M2_PLAN.md` (§17 is the ticket log, story points, and evidence). Product spec wins on conflict. Frontend tasks F1–F5 are not in this PR. Agents never merge.
