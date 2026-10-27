@@ -492,16 +492,20 @@ function TicketsPage() {
       </div>
 
       {view === 'sprint' && (
-        <form onSubmit={createSprint} className="flex flex-wrap items-end gap-2 rounded-md border p-3" data-testid="create-sprint-form">
+        <form
+          onSubmit={createSprint}
+          className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:flex-wrap sm:items-end"
+          data-testid="create-sprint-form"
+        >
           <label className="space-y-1 text-sm">
             <span>Sprint name</span>
-            <input className="field" value={sprintName} onChange={(event) => setSprintName(event.target.value)} data-testid="sprint-name" />
+            <input className="field w-full" value={sprintName} onChange={(event) => setSprintName(event.target.value)} data-testid="sprint-name" />
           </label>
           <label className="space-y-1 text-sm">
             <span>Starts on</span>
-            <input className="field" type="date" value={sprintStart} onChange={(event) => setSprintStart(event.target.value)} data-testid="sprint-start" />
+            <input className="field w-full" type="date" value={sprintStart} onChange={(event) => setSprintStart(event.target.value)} data-testid="sprint-start" />
           </label>
-          <Button type="submit" variant="outline">Create 10-day sprint</Button>
+          <Button type="submit" variant="outline" className="shrink-0 self-start">Create 10-day sprint</Button>
         </form>
       )}
 

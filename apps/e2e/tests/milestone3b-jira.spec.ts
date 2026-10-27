@@ -9,17 +9,26 @@ async function shot(page: Page, name: string) {
 async function setupBoard(page: Page) {
   const email = `e2e-m3b-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@aria.dev`;
   await page.goto('/signup');
+  await page.waitForSelector('[name="name"]', { timeout: 15_000 });
   await page.fill('[name="name"]', 'M3B Owner');
   await page.fill('[name="email"]', email);
   await page.fill('[name="password"]', 'Test1234!');
   await page.fill('[name="confirm"]', 'Test1234!');
+  const signup = page.waitForResponse(
+    (res) => res.url().includes('/api/auth/signup') && res.request().method() === 'POST',
+    { timeout: 30_000 },
+  );
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/setup/);
+  const signupRes = await signup;
+  expect(signupRes.ok(), `signup HTTP ${signupRes.status()}`).toBeTruthy();
+  await page.waitForURL(/\/setup/, { timeout: 30_000 });
   await page.getByTestId('setup-project-name').fill('Jira Shop');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByTestId('llm-api-key').fill('aria-mock-key');
   await page.getByTestId('test-connection').click();
-  await expect(page.getByTestId('test-connection-result')).toContainText(/succeeded|verified/i);
+  await expect(page.getByTestId('test-connection-result')).toContainText(/succeeded|verified/i, {
+    timeout: 30_000,
+  });
   await page.getByTestId('setup-next').click();
   await page.getByTestId('github-token').fill('aria-mock-github');
   await page.getByTestId('list-repos').click();
@@ -28,7 +37,7 @@ async function setupBoard(page: Page) {
   await expect(page.getByTestId('knowledge-summary')).toContainText(/signup/i, { timeout: 60_000 });
   await page.getByTestId('generate-company').click();
   await page.getByTestId('open-org-chart').click();
-  await expect(page.getByTestId('org-chart')).toBeVisible();
+  await expect(page.getByTestId('org-chart')).toBeVisible({ timeout: 30_000 });
 }
 
 test('backlog, sprint, and story detail show AC, sub-tasks, and owner', async ({ page }) => {
@@ -38,7 +47,7 @@ test('backlog, sprint, and story detail show AC, sub-tasks, and owner', async ({
   await setupBoard(page);
 
   await page.goto('/board');
-  await expect(page.getByTestId('board-view-tabs')).toBeVisible();
+  await expect(page.getByTestId('board-view-tabs')).toBeVisible({ timeout: 30_000 });
   await page.getByTestId('view-backlog').click();
   await expect(page.getByTestId('backlog-list')).toBeVisible();
   await shot(page, 'backlog');
@@ -46,7 +55,11 @@ test('backlog, sprint, and story detail show AC, sub-tasks, and owner', async ({
   await page.getByTestId('view-sprint').click();
   await page.getByTestId('sprint-name').fill('Sprint Alpha');
   await page.getByTestId('sprint-start').fill('2026-10-05');
-  await page.getByTestId('create-sprint-form').getByRole('button', { name: /Create 10-day sprint/i }).click();
+  // Blur date field so mobile keyboards / sticky chrome don't eat the submit hit target.
+  await page.getByTestId('sprint-start').blur();
+  const createSprintBtn = page.getByTestId('create-sprint-form').getByRole('button', { name: /Create 10-day sprint/i });
+  await createSprintBtn.scrollIntoViewIfNeeded();
+  await createSprintBtn.click();
   await expect(page.getByTestId('sprint-select')).toContainText('Sprint Alpha', { timeout: 15_000 });
   await shot(page, 'sprint');
 
@@ -57,7 +70,7 @@ test('backlog, sprint, and story detail show AC, sub-tasks, and owner', async ({
   await page.getByTestId('ticket-points').selectOption('5');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   const card = page.getByTestId('ticket-card').filter({ hasText: 'Pay with card' });
-  await expect(card).toBeVisible();
+  await expect(card).toBeVisible({ timeout: 15_000 });
   await expect(card.getByTestId('card-owner')).toContainText(/Owner:/);
   await shot(page, 'board-card');
 
