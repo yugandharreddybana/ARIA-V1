@@ -7,6 +7,7 @@ import { enqueueOn, cancelForTicket, releaseHeldRuns, type HeldRun, type RunActi
 import type { TicketStatusPatch } from '@aria/shared';
 import { emitProject } from '../runs/hub';
 import { routeTicket } from '../flows/flowOwners';
+import { resolveTicketOwner, upsertPathOwnersFromMerge } from '../ownership/pathOwners';
 import { appendTicketEvent } from './ticketEvents';
 import { dueAt, parseMinutes, parseWorkdays, scheduleState, type WorkCalendar } from './schedule';
 import { humanMaySetStatus, transition, type PipelineEvent, type PipelineStatus } from './ticketPipeline';
@@ -22,12 +23,15 @@ interface TicketRow {
   schedule_state: string;
   ticket_key: string;
   assigned_skill_id: string | null;
+  assignee_agent_id?: string | null;
   flow_id: string | null;
   layer: string | null;
   human_approved: boolean;
   title: string;
   description: string;
   pr_url: string | null;
+  predicted_paths?: unknown;
+  pr_number?: number | null;
 }
 
 export function workCalendar(): WorkCalendar {
@@ -43,9 +47,10 @@ export function workCalendar(): WorkCalendar {
 async function loadTicket(ticketId: string): Promise<TicketRow> {
   const result = await getPgPool().query<TicketRow>(
     `SELECT t.id, t.project_id, p.workspace_id, t.status, t.story_points, t.work_started_at, t.due_at,
-            t.schedule_state, t.ticket_key, t.assigned_skill_id, t.flow_id, t.layer, t.human_approved,
-            t.title, t.description,
-            (SELECT pr_url FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_url IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_url
+            t.schedule_state, t.ticket_key, t.assigned_skill_id, t.assignee_agent_id, t.flow_id, t.layer,
+            t.human_approved, t.title, t.description, t.predicted_paths,
+            (SELECT pr_url FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_url IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_url,
+            (SELECT pr_number FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_number IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_number
        FROM tickets t JOIN projects p ON p.id = t.project_id
       WHERE t.id = $1::uuid`,
     [ticketId],
@@ -93,9 +98,10 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
     await client.query('BEGIN');
     const locked = await client.query<TicketRow>(
       `SELECT t.id, t.project_id, p.workspace_id, t.status, t.story_points, t.work_started_at, t.due_at,
-              t.schedule_state, t.ticket_key, t.assigned_skill_id, t.flow_id, t.layer, t.human_approved,
-              t.title, t.description,
-              (SELECT pr_url FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_url IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_url
+              t.schedule_state, t.ticket_key, t.assigned_skill_id, t.assignee_agent_id, t.flow_id, t.layer,
+              t.human_approved, t.title, t.description, t.predicted_paths,
+              (SELECT pr_url FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_url IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_url,
+              (SELECT pr_number FROM agent_runs r WHERE r.ticket_id = t.id AND r.pr_number IS NOT NULL ORDER BY r.created_at DESC LIMIT 1) AS pr_number
          FROM tickets t JOIN projects p ON p.id = t.project_id
         WHERE t.id = $1::uuid
         FOR UPDATE OF t`,
@@ -193,6 +199,21 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
       },
     }, client);
     await client.query('COMMIT');
+    if (event === 'pr_merged') {
+      const agentId = ticket.assignee_agent_id ?? ticket.assigned_skill_id;
+      const paths = Array.isArray(ticket.predicted_paths)
+        ? ticket.predicted_paths.filter((item): item is string => typeof item === 'string')
+        : [];
+      if (agentId && paths.length) {
+        await upsertPathOwnersFromMerge({
+          projectId: ticket.project_id,
+          agentId,
+          ticketId: ticket.id,
+          prNumber: ticket.pr_number ?? null,
+          paths,
+        });
+      }
+    }
     await releaseHeldRuns(held);
     const cloud = held.filter((run) => run.external_agent_id && run.external_run_id);
     if (cloud.length) {
@@ -253,19 +274,30 @@ async function pickAgent(ticket: TicketRow, activity: RunActivity): Promise<stri
 export async function approveTicket(ticketId: string, workspaceId: string): Promise<void> {
   const ticket = await loadTicket(ticketId);
   if (ticket.workspace_id !== workspaceId) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
-  if (!ticket.assigned_skill_id && ticket.flow_id) {
+  const paths = Array.isArray(ticket.predicted_paths)
+    ? ticket.predicted_paths.filter((item): item is string => typeof item === 'string')
+    : [];
+  const resolved = await resolveTicketOwner({
+    workspaceId: ticket.workspace_id,
+    projectId: ticket.project_id,
+    ticketId: ticket.id,
+    assigneeAgentId: ticket.assignee_agent_id ?? ticket.assigned_skill_id,
+    flowId: ticket.flow_id,
+    layer: ticket.layer,
+    predictedPaths: paths,
+    allowBackupOnWip: true,
+  });
+  let agentId = resolved.agentId;
+  if (!agentId) {
     const layer = ticket.layer === 'frontend' || ticket.layer === 'backend' || ticket.layer === 'fullstack' ? ticket.layer : null;
-    const agentId = await routeTicket(ticket.flow_id, layer, ticket.project_id);
-    if (!agentId) throw new AppError('No agent can take this ticket', 422, 'UNROUTABLE');
-    await getPgPool().query(`UPDATE tickets SET assigned_skill_id = $2::uuid WHERE id = $1::uuid`, [ticketId, agentId]);
+    agentId = await routeTicket(ticket.flow_id, layer, ticket.project_id);
   }
-  if (!ticket.assigned_skill_id && !ticket.flow_id) {
-    const agentId = await routeTicket(null, null, ticket.project_id);
-    if (agentId) await getPgPool().query(`UPDATE tickets SET assigned_skill_id = $2::uuid WHERE id = $1::uuid`, [ticketId, agentId]);
-  }
-  const again = await loadTicket(ticketId);
-  if (!again.assigned_skill_id) throw new AppError('No agent can take this ticket', 422, 'UNROUTABLE');
-  await applyTransition(ticketId, 'approve', { actorKind: 'owner' });
+  if (!agentId) throw new AppError('No agent can take this ticket', 422, 'UNROUTABLE');
+  await getPgPool().query(
+    `UPDATE tickets SET assigned_skill_id = $2::uuid, assignee_agent_id = $2::uuid WHERE id = $1::uuid`,
+    [ticketId, agentId],
+  );
+  await applyTransition(ticketId, 'approve', { actorKind: 'owner', agentId });
 }
 
 export function assertHumanStatus(to: string): void {

@@ -278,10 +278,14 @@ for (const file of fs.readdirSync(path.join(root, 'packages/db/src/schema')).fil
   const source = fs.readFileSync(path.join(root, 'packages/db/src/schema', file), 'utf8');
   const props = new Map();
   for (const match of source.matchAll(/(\w+):\s*[A-Za-z0-9_$.]+\('([a-z0-9_]+)'/g)) props.set(match[1], match[2]);
-  for (const match of source.matchAll(/pgTable\('([a-z0-9_]+)'[\s\S]*?uniqueIndex\([^)]*\)\.on\(([^)]+)\)/g)) {
-    const cols = [...match[2].matchAll(/t\.(\w+)/g)].map((hit) => props.get(hit[1]) || hit[1].toLowerCase()).sort().join(',');
-    const have = new Set(flywayUnique.get(match[1]) || []);
-    if (!have.has(cols)) fail(`${match[1]} is missing unique index (${cols}) in Flyway`);
+  // Limit the scan to each table's own index callback so later uniqueIndex
+  // declarations are not attributed to an earlier pgTable in the same file.
+  for (const match of source.matchAll(/pgTable\('([a-z0-9_]+)',\s*\{[\s\S]*?\},\s*\(t\)\s*=>\s*\(\{([\s\S]*?)\}\)\s*\)/g)) {
+    for (const uidx of match[2].matchAll(/uniqueIndex\([^)]*\)\.on\(([^)]+)\)/g)) {
+      const cols = [...uidx[1].matchAll(/t\.(\w+)/g)].map((hit) => props.get(hit[1]) || hit[1].toLowerCase()).sort().join(',');
+      const have = new Set(flywayUnique.get(match[1]) || []);
+      if (!have.has(cols)) fail(`${match[1]} is missing unique index (${cols}) in Flyway`);
+    }
   }
 }
 

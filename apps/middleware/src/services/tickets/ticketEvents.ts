@@ -11,6 +11,14 @@ export const EVENT_TYPES = [
   'owner_decision',
   'schedule',
   'evidence',
+  'mock_review',
+  'dep_verify',
+  'ceremony_ref',
+  'security_finding',
+  'agent_message',
+  'ownership_handoff',
+  'learning_proposal',
+  'readiness',
 ] as const;
 
 export type TicketEventType = typeof EVENT_TYPES[number];

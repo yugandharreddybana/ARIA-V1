@@ -48,6 +48,9 @@ test.describe('Sprint 4 — Tickets Kanban', () => {
       await btn.click();
       await page.fill('#ticket-title', `E2E Ticket ${Date.now()}`);
       await page.fill('#ticket-desc', 'Created by Playwright E2E test suite');
+      await page.getByTestId('create-ac-given').fill('the board is open');
+      await page.getByTestId('create-ac-when').fill('a feature ticket is created');
+      await page.getByTestId('create-ac-then').fill('it appears on the board');
       await page.click('button[type="submit"]');
       await expect(
         page.locator('[data-testid="ticket-card"]').first(),

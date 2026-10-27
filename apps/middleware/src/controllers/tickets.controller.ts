@@ -10,7 +10,16 @@ export async function listTickets(req: AriaRequest, res: Response, next: NextFun
   try {
     const projectId = req.query.projectId as string;
     if (!projectId) { res.status(400).json({ success: false, error: 'projectId query param required', code: 'VALIDATION_ERROR' }); return; }
-    res.json({ tickets: await svc.listTickets(projectId, req.user!.workspaceId) });
+    const sprintId = typeof req.query.sprintId === 'string' ? req.query.sprintId : undefined;
+    const backlog = req.query.backlog === '1' || req.query.backlog === 'true';
+    const issueType = typeof req.query.issueType === 'string' ? req.query.issueType : undefined;
+    res.json({
+      tickets: await svc.listTickets(projectId, req.user!.workspaceId, {
+        sprintId: sprintId ?? null,
+        backlog: backlog || undefined,
+        issueType,
+      }),
+    });
   } catch (e) { next(e); }
 }
 

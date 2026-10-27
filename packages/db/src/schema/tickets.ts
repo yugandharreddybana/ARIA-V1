@@ -1,8 +1,9 @@
-import { pgTable, uuid, varchar, text, boolean, integer, timestamp, pgEnum, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, boolean, integer, timestamp, pgEnum, jsonb, index, uniqueIndex, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { projects } from './projects';
 import { sessions } from './sessions';
 import { skills } from './skills';
 import { businessFlows } from './knowledge';
+import { sprints } from './sprints';
 
 export const ticketTypeEnum = pgEnum('ticket_type', ['bug','feature','tech_debt','incident','process']);
 export const ticketStatusEnum = pgEnum('ticket_status', ['backlog','ready_for_dev','in_progress','ready_for_qa','in_qa','ready_for_review','awaiting_merge','blocked','done','rejected']);
@@ -34,12 +35,34 @@ export const tickets = pgTable('tickets', {
   scheduleState: text('schedule_state').notNull().default('not_started'),
   ticketKey: text('ticket_key').notNull().default(''),
   splitSuggested: boolean('split_suggested').notNull().default(false),
+  issueType: text('issue_type').notNull().default('story'),
+  parentId: uuid('parent_id').references((): AnyPgColumn => tickets.id, { onDelete: 'cascade' }),
+  epicId: uuid('epic_id').references((): AnyPgColumn => tickets.id, { onDelete: 'set null' }),
+  acceptanceCriteria: jsonb('acceptance_criteria').notNull().default([]),
+  behaviourNotes: text('behaviour_notes'),
+  uiAffected: boolean('ui_affected').notNull().default(false),
+  uiMockStatus: text('ui_mock_status').notNull().default('not_required'),
+  apiContract: jsonb('api_contract'),
+  dorChecklist: jsonb('dor_checklist').notNull().default([]),
+  dodChecklist: jsonb('dod_checklist').notNull().default([]),
+  readinessStatus: text('readiness_status').notNull().default('not_ready'),
+  rollbackPlan: text('rollback_plan'),
+  sprintId: uuid('sprint_id').references(() => sprints.id, { onDelete: 'set null' }),
+  assigneeAgentId: uuid('assignee_agent_id').references(() => skills.id, { onDelete: 'set null' }),
+  predictedPaths: jsonb('predicted_paths').notNull().default([]),
+  // FK to idea_cards added in V23 (M3C); column is nullable here.
+  ideaCardId: uuid('idea_card_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   projectIdx: index('tickets_project_idx').on(t.projectId),
   statusIdx: index('tickets_status_idx').on(t.status),
   ticketKeyUidx: uniqueIndex('tickets_ticket_key_uidx').on(t.ticketKey),
+  parentIdx: index('tickets_parent_idx').on(t.parentId),
+  epicIdx: index('tickets_epic_idx').on(t.epicId),
+  sprintIdx: index('tickets_sprint_idx').on(t.sprintId),
+  assigneeAgentIdx: index('tickets_assignee_agent_idx').on(t.assigneeAgentId),
+  issueTypeIdx: index('tickets_issue_type_idx').on(t.issueType),
 }));
 
 export const ticketEvidence = pgTable('ticket_evidence', {

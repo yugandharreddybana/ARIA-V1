@@ -58,6 +58,9 @@ test('a ticket moves through review and QA with a timeline and evidence', async 
   await page.fill('#ticket-title', 'Checkout button');
   await page.fill('#ticket-desc', 'Add a checkout button to the shop.');
   await page.getByTestId('ticket-points').selectOption('5');
+  await page.getByTestId('create-ac-given').fill('a shopper is viewing a cart');
+  await page.getByTestId('create-ac-when').fill('they click checkout');
+  await page.getByTestId('create-ac-then').fill('the order is submitted');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   const card = page.getByTestId('ticket-card').filter({ hasText: 'Checkout button' });
   await expect(card).toBeVisible();
@@ -137,6 +140,9 @@ test('a ticket moves through review and QA with a timeline and evidence', async 
   await page.fill('#ticket-title', 'Slow receipt');
   await page.fill('#ticket-desc', 'Hold the run. [[stub:slow=20000]]');
   await page.getByTestId('ticket-points').selectOption('2');
+  await page.getByTestId('create-ac-given').fill('a receipt job is queued');
+  await page.getByTestId('create-ac-when').fill('the worker starts');
+  await page.getByTestId('create-ac-then').fill('the run can be cancelled');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   const approved = page.waitForResponse((res) => res.url().includes('/api/tickets/') && res.request().method() === 'PATCH' && res.ok());
   await page.getByTestId('ticket-card').filter({ hasText: 'Slow receipt' }).getByTestId('approve-ticket').click();

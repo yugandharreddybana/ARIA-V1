@@ -12,9 +12,12 @@ import { EmptyState, ErrorNote, LoadingState } from '@/components/ui/empty-state
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { scheduleTone, stageLabel } from '@/lib/ticket-stage';
-import type { Ticket, TicketStatus } from '@aria/shared';
+import type { AcceptanceCriterion, Ticket, TicketStatus } from '@aria/shared';
 
-const EVENT_TYPES = ['status_change', 'agent_action', 'progress', 'communication', 'run_ref', 'owner_decision', 'schedule', 'evidence'] as const;
+const EVENT_TYPES = [
+  'status_change', 'agent_action', 'progress', 'communication', 'run_ref', 'owner_decision', 'schedule', 'evidence',
+  'mock_review', 'dep_verify', 'ceremony_ref', 'security_finding', 'agent_message', 'ownership_handoff', 'learning_proposal', 'readiness',
+] as const;
 const POINTS = [1, 2, 3, 5, 8, 13] as const;
 const PAGE = 25;
 
@@ -49,6 +52,8 @@ export default function TicketDetailPage() {
   const [type, setType] = useState('');
   const [agentId, setAgentId] = useState('');
   const [points, setPoints] = useState('1');
+  const [acDraft, setAcDraft] = useState<AcceptanceCriterion[]>([{ given: '', when: '', then: '' }]);
+  const [subTitle, setSubTitle] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -80,6 +85,8 @@ export default function TicketDetailPage() {
       const data = await api<{ ticket: Ticket }>(`/tickets/${params.id}`);
       setTicket(data.ticket);
       if (!pointsDirty.current) setPoints(String(data.ticket.storyPoints ?? 1));
+      const criteria = data.ticket.acceptanceCriteria ?? [];
+      setAcDraft(criteria.length ? criteria : [{ given: '', when: '', then: '' }]);
       const [company, signals, report] = await Promise.all([
         api<{ agents: Agent[] }>(`/projects/${data.ticket.projectId}/company`).catch(() => ({ agents: [] as Agent[] })),
         api<{ signals: Array<{ ticketId: string; prUrl: string | null; prNumber: number | null }> }>(`/projects/${data.ticket.projectId}/run-signals`).catch(() => ({ signals: [] })),
@@ -157,14 +164,60 @@ export default function TicketDetailPage() {
     }
   }
 
-  const agentName = agents.find((agent) => agent.id === ticket?.assignedSkillId)?.realName ?? 'Unassigned';
+  const agentName = ticket?.ownerName
+    ?? agents.find((agent) => agent.id === (ticket?.assigneeAgentId ?? ticket?.assignedSkillId))?.realName
+    ?? 'Unassigned';
   const names = new Map(agents.map((agent) => [agent.id, agent.realName]));
+
+  async function saveAcceptance(event: React.FormEvent) {
+    event.preventDefault();
+    setNotice('');
+    try {
+      const cleaned = acDraft.filter((row) => row.given.trim() && row.when.trim() && row.then.trim());
+      const data = await api<{ ticket: Ticket }>(`/tickets/${params.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ acceptanceCriteria: cleaned }),
+      });
+      setTicket(data.ticket);
+      setAcDraft(cleaned.length ? cleaned : [{ given: '', when: '', then: '' }]);
+      setNotice('Acceptance criteria saved.');
+      await loadEvents(0, true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Acceptance criteria were not saved.');
+    }
+  }
+
+  async function createSubTask(event: React.FormEvent) {
+    event.preventDefault();
+    if (!ticket || !subTitle.trim()) return;
+    setNotice('');
+    try {
+      await api<{ ticket: Ticket }>('/tickets', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: ticket.projectId,
+          title: subTitle.trim(),
+          description: `Sub-task of ${ticket.ticketKey || ticket.title}`,
+          type: ticket.type,
+          issueType: 'sub_task',
+          parentId: ticket.id,
+          epicId: ticket.epicId ?? null,
+          acceptanceCriteria: [{ given: 'the parent story exists', when: 'this sub-task is done', then: 'the parent can progress' }],
+        }),
+      });
+      setSubTitle('');
+      setNotice('Sub-task created.');
+      await loadTicket();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Sub-task was not created.');
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-8">
       <PageHeader
         title={ticket?.title ?? 'Ticket'}
-        description={ticket ? `${ticket.ticketKey || 'Ticket'} · ${stageLabel(ticket.status as TicketStatus)}` : 'Activity, points, and evidence.'}
+        description={ticket ? `${ticket.ticketKey || 'Ticket'} · ${ticket.issueType || 'story'} · ${stageLabel(ticket.status as TicketStatus)}` : 'Activity, points, and evidence.'}
         action={<Link href="/board" className="text-sm text-primary">Back to the board</Link>}
       />
       {loading && <LoadingState label="Loading the ticket…" />}
@@ -179,7 +232,10 @@ export default function TicketDetailPage() {
             <CardContent className="space-y-2 text-sm">
               <div className="flex flex-wrap gap-2">
                 <Badge tone={scheduleTone(ticket.scheduleState)} data-testid="ticket-stage">{stageLabel(ticket.status as TicketStatus)}</Badge>
-                <Badge>{agentName}</Badge>
+                <Badge data-testid="ticket-issue-type">{ticket.issueType || 'story'}</Badge>
+                <Badge data-testid="ticket-owner">Owner: {agentName}</Badge>
+                {ticket.backupName && <Badge data-testid="ticket-backup">Backup: {ticket.backupName}</Badge>}
+                {ticket.ownershipSource && <Badge>{ticket.ownershipSource}</Badge>}
                 {ticket.scheduleState === 'at_risk' && <Badge tone="warn">At risk</Badge>}
                 {ticket.scheduleState === 'overdue' && <Badge tone="warn">Overdue</Badge>}
               </div>
@@ -191,6 +247,73 @@ export default function TicketDetailPage() {
               ) : <p>No pull request yet.</p>}
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Acceptance criteria</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={saveAcceptance} className="space-y-3" data-testid="acceptance-form">
+                {acDraft.map((row, index) => (
+                  <div key={index} className="grid gap-2 rounded-md border p-3 md:grid-cols-3">
+                    <label className="space-y-1 text-sm">
+                      <span>Given</span>
+                      <input className="field" data-testid={`ac-given-${index}`} value={row.given} onChange={(event) => {
+                        const next = [...acDraft];
+                        next[index] = { ...row, given: event.target.value };
+                        setAcDraft(next);
+                      }} />
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span>When</span>
+                      <input className="field" data-testid={`ac-when-${index}`} value={row.when} onChange={(event) => {
+                        const next = [...acDraft];
+                        next[index] = { ...row, when: event.target.value };
+                        setAcDraft(next);
+                      }} />
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span>Then</span>
+                      <input className="field" data-testid={`ac-then-${index}`} value={row.then} onChange={(event) => {
+                        const next = [...acDraft];
+                        next[index] = { ...row, then: event.target.value };
+                        setAcDraft(next);
+                      }} />
+                    </label>
+                  </div>
+                ))}
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => setAcDraft([...acDraft, { given: '', when: '', then: '' }])}>Add criterion</Button>
+                  <Button type="submit" variant="outline">Save criteria</Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {(ticket.issueType === 'story' || ticket.issueType === 'epic') && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">{ticket.issueType === 'epic' ? 'Stories' : 'Sub-tasks'}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <ul className="space-y-2" data-testid="subtask-list">
+                  {(ticket.subTasks ?? []).map((child) => (
+                    <li key={child.id} className="rounded-md border px-3 py-2 text-sm">
+                      <Link href={`/tickets/${child.id}`} className="font-medium hover:underline">{child.title}</Link>
+                      <span className="ml-2 text-muted-foreground">{child.issueType} · {stageLabel(child.status as TicketStatus)}</span>
+                    </li>
+                  ))}
+                  {(ticket.subTasks ?? []).length === 0 && <EmptyState title="None yet" description="Add a child ticket to break the work down." />}
+                </ul>
+                {ticket.issueType === 'story' && (
+                  <form onSubmit={createSubTask} className="flex flex-wrap gap-2" data-testid="create-subtask-form">
+                    <input className="field flex-1" placeholder="Sub-task title" value={subTitle} onChange={(event) => setSubTitle(event.target.value)} data-testid="subtask-title" />
+                    <Button type="submit" variant="outline">Add sub-task</Button>
+                  </form>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
