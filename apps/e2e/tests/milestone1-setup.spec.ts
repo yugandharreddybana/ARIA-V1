@@ -31,9 +31,11 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await page.getByTestId('open-org-chart').click();
 
   await expect(page.getByTestId('org-chart')).toBeVisible();
-  const ceo = page.locator('[data-testid^="agent-ceo"]');
+  const ceo = page.locator('[data-testid^="agent-ceo"]').first();
   await expect(ceo).toBeVisible();
-  await ceo.click();
+  // D13 always-seeded OFF seats grow the chart; sidebar/viewport can intercept the node.
+  await ceo.scrollIntoViewIfNeeded();
+  await ceo.click({ force: true });
   await page.getByTestId('agent-instructions').fill('Own the company priorities. Stay off when disabled.');
   const save = page.waitForResponse((res) => res.url().includes('/agents/') && res.request().method() === 'PATCH' && res.ok());
   await page.getByTestId('save-agent').click();

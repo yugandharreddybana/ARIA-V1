@@ -482,8 +482,9 @@ async function uiSuite() {
           `docs=${docsText} pr=${prText}`,
         );
 
-        const ceo = page.locator('[data-testid^="agent-ceo"]');
-        await ceo.click();
+        const ceo = page.locator('[data-testid^="agent-ceo"]').first();
+        await ceo.scrollIntoViewIfNeeded();
+        await ceo.click({ force: true });
         await page.getByTestId('agent-instructions').fill('Own the company priorities.');
         await page.getByTestId('save-agent').click();
         await page.getByText('Own the company priorities.').waitFor({ timeout: 10000 }).catch(() => undefined);

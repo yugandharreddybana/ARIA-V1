@@ -1,22 +1,23 @@
 # Agent skills lean rewrite — verification
 
-Measured: 2026-10-27T10:32:52.891Z
+Measured: 2026-10-27T11:03:43.010Z
 Method: ceil(utf8Bytes/4)
+Commit target: PR #18 (catalogue.cjs loader + mapped imperatives).
 
 ## Inventory
 
 | Kind | Path |
 |---|---|
-| Base + roles | `docs/agents/skills/*.json` (21 roles + `_base`) |
-| Runtime mirror | `apps/middleware/src/services/agentSkills/data/` |
-| Embedded catalogue | `catalogue.generated.ts` (via `skills:sync`) |
-| Domain skills | `.entiresystem/skills/*/SKILL.md` (extend `_base`) |
-| Activity prompts | `apps/middleware/src/services/activities/prompts.ts` |
+| Source | `docs/agents/skills/*.json` |
+| Runtime | `catalogue.generated.cjs` (CJS; strip-types ESM child OK) |
+| Loader | `loadSkills.ts` re-exports catalogue |
+| Sync gate | `node scripts/sync-agent-skills.mjs --check` (CI) |
+| Domain skills | `.entiresystem/skills/*/SKILL.md` extend `_base` |
 | Index | `docs/agents/SKILLS.md` |
 
-## Role list
+## Role list (21)
 
-ceo, cfo, cto, business, product_owner, scrum_master, **ui_ux_designer** (new), frontend, backend, fullstack, junior, aiml, qa, devops, cybersecurity, red_team, blue_team, research, coach, documentation, pr_coordinator
+ceo, cfo, cto, business, product_owner, scrum_master, ui_ux_designer, frontend, backend, fullstack, junior, aiml, qa, devops, cybersecurity, red_team, blue_team, research, coach, documentation, pr_coordinator
 
 ## Token before/after (rewritten existing files)
 
@@ -40,27 +41,21 @@ ceo, cfo, cto, business, product_owner, scrum_master, **ui_ux_designer** (new), 
 
 ## Runtime composed prompt
 
-Mean 226 tokens/role (max 249). Includes hard-rule ids that the old short template omitted.
+| Metric | Value |
+|---|---:|
+| Mean tokens/role | 331 |
+| Max tokens/role | 423 |
+| Sum (all roles) | 6946 |
+| Old template × roles | 3360 |
 
-## Tests run
+Composed prompts include mapped hard-rule **imperatives** (not ids only) and `ContextCaps`.
 
-- `vitest` agentSkills + companyGenerator + m2 (prompts) — pass
-- `vitest` m2.integration AI company roster — pass
-- `tsc --noEmit` middleware — pass
+## Tests
 
-## Hard rules (in `_base`)
+- Local middleware vitest: **153 passed**
+- `skills:sync --check` OK
+- CI unit-tests + typecheck green on 4b4dd86; e2e org-chart click hardened for denser D13 seats
 
-WIP=1; user approves merge/ideas; dev/QA md+pdf evidence; hash-chained ticket_events; G/W/T AC; Fib ceil (4d→5); 10-day sprint; ownership/backup/handoff; dep gate A tests B; UI mock gate; api_contract; idea lifecycle; red/blue→tickets; context load limits; no secrets.
+## Hard rules
 
-## Conflicts / deviations
-
-1. Did not edit PR #13/#15 migrations or their services. Prompt touch: `prompts.ts` (not in those PRs). `companyGenerator.ts` not in #13/#15.
-2. Added `ui_ux_designer` + expanded ALWAYS_PRESENT per M3 D13.
-3. Local DB missing `cursor` in `llm_provider` enum — pre-existing env drift; CI fresh DB unaffected. Skill tests do not depend on it.
-4. Runtime composed prompts are slightly larger than the old incomplete template because hard rules are now present (by id).
-5. Spec uses `learning_coach`; code roleKey stays `coach` (alias in skill title).
-
-## Missing / contradictory notes
-
-- PRODUCT_SPEC role list omitted UI/UX designer; M3 D13 requires it — added.
-- M3 `learning_coach` vs existing `coach` roleKey — kept `coach` to avoid schema churn.
+WIP=1; never merge / user approves ideas; dev/QA md+pdf evidence; hash-chained ticket_events; G/W/T AC; Fib ceil (4d→5); 10-day sprint; ownership/backup/handoff; dep gate; UI mock gate; api_contract; idea lifecycle; red/blue findings→tickets with egress deny-by-default + explicit local allowlist; context load limits; no secrets. Mapped per role.
