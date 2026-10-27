@@ -19,7 +19,20 @@ Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 
 
 ---
 
-## Milestone 3 — plan (this branch)
+## Milestone 3B — Jira hierarchy + path ownership (this branch)
+
+Branch: `cursor/m3b-jira-ownership-49c8`. M3_PLAN.md rev 4 slice **M3B / V22** only (parallel with M3A V21 — providers untouched). Base: `main`.
+
+Shipped: Flyway V22 (epic/story/sub_task, G/W/T AC, sprints, path_owners, ownership_handoffs, extended ticket_events, nullable idea_card_id); shared Zod AC + `ceilFib`; WIP=1; 10-working-day sprints; sprint/backlog/path-owner APIs; Board/Backlog/Sprint UI + story detail (AC, sub-tasks, owner); unit/integration/Playwright ×3; `docs/verification/m3b-jira-ownership.{md,pdf}`.
+
+### Verified locally on 2026-10-27
+
+- M3B vitest: **13 passed** (`m3b.test.ts` + `m3b.integration.test.ts`).
+- Full middleware vitest: **30 files / 159 tests passed**.
+- Schema drift: passed (V22 tip).
+- Playwright `milestone3b-jira.spec.ts`: **3 passed** (desktop / tablet / mobile).
+
+## Milestone 3 — plan (merged, PR #12)
 
 Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 4** (no feature code). Base: main (#9+#11). Rev 4 re-review: DAG **A∥B → C → D∥E∥F** (E/F depend on C); reserved V21–V28; **`activity_kinds` / `runtime_kinds` FK** seeded in C/A so D/E/F never rewrite activity CHECK. Prior rev 3: idea_cards, red/blue lockdown, ownership, learning M3I, traceability.
 
