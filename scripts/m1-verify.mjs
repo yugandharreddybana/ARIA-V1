@@ -390,10 +390,12 @@ async function uiSuite() {
 
         await page.goto(`${WEB}/projects`);
         await page.getByTestId('start-setup').click();
+        await page.waitForURL(/\/setup/, { timeout: 15000 });
+        await page.getByTestId('setup-project-name').waitFor({ timeout: 15000 });
         record(
           'Setup',
           `projects page offers setup (${tag})`,
-          page.url().includes('/setup') || await page.getByTestId('setup-project-name').isVisible() ? 'pass' : 'fail',
+          page.url().includes('/setup') && await page.getByTestId('setup-project-name').isVisible() ? 'pass' : 'fail',
           await shot(page, `dashboard-empty-${tag}`),
         );
         await page.getByTestId('setup-project-name').fill(`Setup ${tag}`);
@@ -459,15 +461,19 @@ async function uiSuite() {
         );
         await page.getByTestId('open-org-chart').click();
         await page.getByTestId('org-chart').waitFor({ timeout: 15000 });
-        const docsOff = page.locator('[data-testid^="agent-documentation"]');
-        const prOff = page.locator('[data-testid^="agent-pr_coordinator"]');
+        const docsOff = page.locator('[data-testid^="agent-documentation"]').first();
+        const prOff = page.locator('[data-testid^="agent-pr_coordinator"]').first();
         await docsOff.waitFor();
+        await expectText(docsOff, 'OFF');
+        await expectText(prOff, 'OFF');
+        const docsText = await docsOff.innerText();
+        const prText = await prOff.innerText();
         record(
           'Org chart',
           `chart, documentation, and PR coordinator are visible (${tag})`,
-          (await docsOff.innerText()).includes('OFF') && (await prOff.innerText()).includes('OFF') ? 'pass' : 'fail',
+          docsText.includes('OFF') && prText.includes('OFF') ? 'pass' : 'fail',
           await shot(page, `org-chart-${tag}`),
-          `docs=${await docsOff.innerText()} pr=${await prOff.innerText()}`,
+          `docs=${docsText} pr=${prText}`,
         );
 
         const ceo = page.locator('[data-testid^="agent-ceo"]');
@@ -540,15 +546,17 @@ async function uiSuite() {
 
         await page.goto(`${WEB}/projects`);
         await page.getByRole('button', { name: 'New Project' }).click();
-        await page.locator('#pname').fill(`UI Shop ${tag}`);
+        await page.locator('#pname').waitFor({ timeout: 10000 });
+        const shopName = `UI Shop ${tag}`;
+        await page.locator('#pname').fill(shopName);
         await page.locator('#pdesc').fill('Created from the projects page');
         await page.getByRole('button', { name: 'Create', exact: true }).click();
-        await page.getByTestId('project-card').first().waitFor({ timeout: 10000 });
-        const createdCard = page.getByTestId('project-card').filter({ hasText: `UI Shop ${tag}` }).first();
+        const createdCard = page.getByTestId('project-card').filter({ hasText: shopName });
+        await createdCard.first().waitFor({ timeout: 15000 });
         record(
           'Projects',
           `create from the projects page (${tag})`,
-          await createdCard.count() > 0 && (await createdCard.innerText()).includes(`UI Shop ${tag}`) ? 'pass' : 'fail',
+          await createdCard.count() > 0 && (await createdCard.first().innerText()).includes(shopName) ? 'pass' : 'fail',
           await shot(page, `projects-created-${tag}`),
         );
         const renameControl = page.getByTestId('rename-project');
