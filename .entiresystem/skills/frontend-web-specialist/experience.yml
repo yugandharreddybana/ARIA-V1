@@ -18,3 +18,6 @@ anti_patterns:
     captured_at: "2026-05-16T00:00:00Z"
 
 failure_stories: []
+  - text: "feat(agents): lean role skills with shared _base hard rules (#18) (sha 5ca6bb5)"
+    veracity: ai-only
+    captured_at: "2026-10-27T12:33:36.324Z"
