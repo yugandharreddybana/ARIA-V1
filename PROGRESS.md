@@ -8,7 +8,7 @@
 
 ## Milestone 3 — plan (this branch)
 
-Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 3** (no feature code). Base: main with M2 backend (#9) and M2 frontend (#11). Owner decisions locked (§0). PR #12 review must-fixes applied: contiguous Flyway DAG, lifecycle on **`idea_cards`** (not baseline `ideas`) with status backfill, red/blue egress+secrets lockdown. WEAKs strengthened (multi-key UX, seeded designer/learning/PR-coord, WIP=1, G/W/T schema, visual regression). Learning-agent M3I slice. Persistent **path+flow ownership** with handoff. Ranked gaps → M3J or Later. Traceability table §15. PR split **M3A→B→C then D∥E∥F, I∥J, G, H**.
+Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 4** (no feature code). Base: main (#9+#11). Rev 4 re-review: DAG **A∥B → C → D∥E∥F** (E/F depend on C); reserved V21–V28; **`activity_kinds` / `runtime_kinds` FK** seeded in C/A so D/E/F never rewrite activity CHECK. Prior rev 3: idea_cards, red/blue lockdown, ownership, learning M3I, traceability.
 
 ## Milestone 2 — frontend (merged, PR #11)
 

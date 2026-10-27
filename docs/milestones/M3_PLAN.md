@@ -1,6 +1,6 @@
 # Milestone 3 — Multi-provider coding company + real Jira workflow
 
-Status: plan only (this PR). No feature code. Author: lead architect, 2026-10-27 (**rev 3** — owner decisions + PR #12 review must-fixes + persistent code ownership).
+Status: plan only (this PR). No feature code. Author: lead architect, 2026-10-27 (**rev 4** — re-review: DAG A∥B→C→D∥E∥F + `activity_kinds` FK).
 Inputs: `docs/PRODUCT_SPEC.md` (wins on conflict), `docs/milestones/M2_PLAN.md`, `docs/CURSOR_PROVIDER.md`, `PROGRESS.md`.
 Base: `main` with M2 backend (#9) and M2 frontend (#11). PR #6 closed (JWT on main). Open #10 independent.
 
@@ -60,7 +60,8 @@ Config keys:
 | D12 | Extend `evidenceAllowsMerge` (do not fork) for DoD + security_review + dep verify. |
 | D13 | Seed company roles must include **UI/UX designer**, **learning/coach**, **PR/merge coordinator**, red/blue, docs, research (ON/OFF by seat count as M1). |
 | D14 | Simple UI; notifications for pending owner approvals. |
-| D15 | Flyway: **strict contiguous versions per PR merge order** — no pre-claimed holes (§4, §14). |
+| D15 | Flyway: **reserved contiguous Vnn per slice** (§4, §13). Merge DAG **A∥B → C → D∥E∥F** (E/F never before C). |
+| D16 | **`activity_kinds` lookup + FK** on `agent_runs.activity` (created in M3C). Later slices **INSERT** kinds only — never DROP/re-ADD a CHECK that can omit sibling values. Same rule for `runtime_kinds` (M3A). |
 
 Non-goals (runtime): multi-tenant SaaS, agents merging, GitHub webhooks, subscription OAuth for Claude/Codex, auto-install CLIs, silent learning self-rewrite.
 
@@ -126,9 +127,24 @@ flowchart LR
 
 ## 4. Data model — Flyway (strict order)
 
-**Rule (must-fix #1):** Each implementation PR claims the **next free** `Vnn` at merge time. Planned numbers below assume merge order **A → B → C → D → E → F → …**. No PR “owns a later V while another owns an earlier.” Activity/runtime CHECKs are altered (DROP/ADD like V19) in the **first** PR that needs new values (M3A for provider runtimes; later PRs extend again when adding activities).
+**Version reservation (fixed for M3 — do not renumber at merge time):**
 
-### V21 — M3A — providers + credentials
+| Slice | Flyway | Merges after |
+|---|---|---|
+| M3A | **V21** | main |
+| M3B | **V22** | main (∥ A) |
+| M3C | **V23** | **M3B** (also after A if both land; C may merge once B is on the target branch) |
+| M3D | **V24** | M3A + M3C |
+| M3E | **V25** | M3A + M3C |
+| M3F | **V26** | M3A + M3C |
+| M3I | **V27** | M3C + M3E |
+| M3J | **V28** | M3A + M3D |
+
+Merge graph for schema: **A ∥ B → C → D ∥ E ∥ F**. M3E and M3F **must not** merge before M3C (they need V23’s `activity_kinds` FK and contiguous V25/V26 after V23/V24).
+
+**Enum / kind rule (D16):** Do **not** have D/E/F each `DROP`/`ADD` `agent_runs_activity_check` — that race drops sibling values. M3C creates `activity_kinds` and seeds **every** M3 activity id up front; `agent_runs.activity` becomes an FK. Later slices only `INSERT INTO activity_kinds … ON CONFLICT DO NOTHING`. Never `DELETE` a kind that may have rows. M3A does the same for `runtime_kinds` (all M3 runtimes seeded once).
+
+### V21 — M3A — providers + credentials + `runtime_kinds`
 
 ```sql
 CREATE TABLE provider_credentials (
@@ -163,12 +179,26 @@ ALTER TABLE projects
   ADD COLUMN IF NOT EXISTS standup_time TEXT NOT NULL DEFAULT '08:00',
   ADD COLUMN IF NOT EXISTS sprint_workdays INTEGER NOT NULL DEFAULT 10;
 
--- runtime CHECK extend (V19 pattern)
+CREATE TABLE runtime_kinds (
+  id TEXT PRIMARY KEY,
+  description TEXT NOT NULL DEFAULT '',
+  introduced_in TEXT NOT NULL DEFAULT 'm3'
+);
+INSERT INTO runtime_kinds (id, description, introduced_in) VALUES
+  ('cursor_local', 'Cursor SDK local', 'm2'),
+  ('cursor_cloud', 'Cursor Cloud Agents', 'm2'),
+  ('local_worktree', 'Local worktree worker', 'm2'),
+  ('chat', 'Chat completions provider', 'm2'),
+  ('claude_cli', 'Claude Code CLI', 'm3'),
+  ('codex_cli', 'OpenAI Codex CLI', 'm3'),
+  ('antigravity_cli', 'Google Antigravity CLI', 'm3')
+ON CONFLICT DO NOTHING;
+
 ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_runtime_check;
-ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_runtime_check
-  CHECK (runtime IN (
-    'cursor_local','cursor_cloud','local_worktree','chat',
-    'claude_cli','codex_cli','antigravity_cli'));
+ALTER TABLE agent_runs
+  ADD CONSTRAINT agent_runs_runtime_fk
+  FOREIGN KEY (runtime) REFERENCES runtime_kinds(id);
+-- Later slices: INSERT into runtime_kinds only. Never re-ADD a runtime CHECK.
 ```
 
 ### V22 — M3B — Jira hierarchy, AC schema, ownership paths, event types
@@ -326,21 +356,55 @@ ALTER TABLE tickets
   FOREIGN KEY (idea_card_id) REFERENCES idea_cards(id) ON DELETE SET NULL;
 
 -- feature_specs: prefer idea_card_id (already exists); stop writing baseline ideas.id for new work
+
+-- ALL M3 (+ M2) activities seeded once here. D/E/F/I must NOT rewrite a CHECK.
+CREATE TABLE activity_kinds (
+  id TEXT PRIMARY KEY,
+  description TEXT NOT NULL DEFAULT '',
+  introduced_in TEXT NOT NULL DEFAULT 'm3'
+);
+INSERT INTO activity_kinds (id, description, introduced_in) VALUES
+  ('knowledge_map', 'Knowledge map', 'm2'),
+  ('company_generation', 'Company generation', 'm2'),
+  ('develop', 'Develop', 'm2'),
+  ('review', 'Peer review', 'm2'),
+  ('fix', 'Fix round', 'm2'),
+  ('qa', 'QA', 'm2'),
+  ('story_points', 'Story points estimate', 'm2'),
+  ('docs_write', 'Docs / confluence', 'm3'),
+  ('story_split', 'Epic/story split', 'm3'),
+  ('ui_mock', 'UI mock generation', 'm3'),
+  ('dep_request', 'Dependency request', 'm3'),
+  ('dep_verify', 'Dependency E2E verify', 'm3'),
+  ('implementation_design', 'Implementation design', 'm3'),
+  ('idea_research', 'Idea research', 'm3'),
+  ('idea_revise', 'Idea revise from comments', 'm3'),
+  ('idea_agent_review', 'CEO/CFO idea review', 'm3'),
+  ('readiness_check', 'DoR readiness', 'm3'),
+  ('contract_test', 'API contract tests', 'm3'),
+  ('sub_story_create', 'Agent creates sub-task', 'm3'),
+  ('ceremony', 'Standup/planning/retro', 'm3'),
+  ('merge_order', 'PR merge-order advice', 'm3'),
+  ('release_notes', 'Release notes draft', 'm3'),
+  ('security_review', 'LLM security review stage', 'm3'),
+  ('red_team_attack', 'Red team probe', 'm3'),
+  ('blue_team_fix', 'Blue team fix', 'm3'),
+  ('learning_propose', 'Learning agent proposal', 'm3')
+ON CONFLICT DO NOTHING;
+
+ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_activity_check;
+ALTER TABLE agent_runs
+  ADD CONSTRAINT agent_runs_activity_fk
+  FOREIGN KEY (activity) REFERENCES activity_kinds(id);
 ```
 
 `idea_id` column naming on tickets is **`idea_card_id` only**, added nullable in V22, FK in V23 (M3C depends on M3B).
 
-### V24 — M3D — activities used by orchestration (+ learning)
+**Later-slice rule for activities:** M3D/E/F/I/J ship **handlers only**. If a brand-new activity is invented after V23, that slice runs `INSERT INTO activity_kinds … ON CONFLICT DO NOTHING` — never `DROP CONSTRAINT` / replace CHECK / delete kinds. CI grep fails any migration that touches `agent_runs_activity_check`.
 
-```sql
-ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_activity_check;
-ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_activity_check
-  CHECK (activity IN (
-    'knowledge_map','company_generation','develop','review','fix','qa','story_points',
-    'docs_write','story_split','ui_mock','dep_request','dep_verify','implementation_design',
-    'idea_research','idea_revise','idea_agent_review','readiness_check','contract_test',
-    'learning_propose','sub_story_create'));
-```
+### V24 — M3D — orchestration handlers (no activity enum rewrite)
+
+No Flyway change to `agent_runs.activity`. Code enables: `docs_write`, `story_split`, `ui_mock`, `dep_request`, `dep_verify`, `implementation_design`, `readiness_check`, `contract_test`, `sub_story_create` (kinds already in V23). Optional: Drizzle mirror only.
 
 ### V25 — M3E — ceremonies, merge-order, notifications (full DDL)
 
@@ -395,12 +459,12 @@ CREATE TABLE user_notifications (
 );
 ```
 
-Also extend activity CHECK for `ceremony`,`merge_order`,`release_notes` in this PR.
+Handlers for `ceremony`, `merge_order`, `release_notes` only — kinds already seeded in V23. **No** activity CHECK rewrite.
 
-### V26 — M3F — red/blue + security_review activities + findings
+### V26 — M3F — red/blue + security_review findings
 
 ```sql
--- activity add: security_review, red_team_attack, blue_team_fix
+-- Handlers for security_review, red_team_attack, blue_team_fix (kinds in V23). No CHECK rewrite.
 CREATE TABLE security_findings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -574,52 +638,56 @@ Unchanged spirit §12 rev2 + learning proposals batched; ownership mapper is det
 
 ## 13. PR split — executable DAG (post must-fix)
 
+**Hard rule:** **A ∥ B → C → D ∥ E ∥ F → (I after C+E, J after A+D) → G → H.**  
+M3E and M3F **depend on M3C** (not merely A+B). Flyway versions are **reserved** in the table below (V21–V28); do not leave holes or merge V25 before V23.
+
 ```mermaid
 flowchart LR
   A[M3A V21 providers]
   B[M3B V22 jira+ownership]
-  C[M3C V23 idea_cards]
+  C[M3C V23 idea_cards + activity_kinds]
   D[M3D V24 orchestration]
   E[M3E V25 ceremonies]
   F[M3F V26 red-blue]
   I[M3I V27 learning]
-  J[M3J V28 ops DR kill money]
+  J[M3J V28 ops]
   G[M3G web]
-  H[M3H e2e+visual]
+  H[M3H e2e]
 
-  A --> D
+  A --> C
   B --> C
   C --> D
+  C --> E
+  C --> F
+  A --> D
   A --> E
-  B --> E
   A --> F
-  B --> F
   D --> G
   E --> G
   F --> G
-  I --> G
   C --> I
   E --> I
+  I --> G
   A --> J
   D --> J
-  G --> H
   J --> H
+  G --> H
 ```
 
-| PR | Flyway | Scope | Depends | Parallel |
+| PR | Reserved Flyway | Scope | Depends | Parallel with |
 |---|---|---|---|---|
-| **M3A** | V21 | Credentials multi-key, adapters, stubs, Test Connection, setup gate, runtime CHECK | main | **M3B** only |
-| **M3B** | V22 | Hierarchy, G/W/T, sprints 10d, path_owners, handoffs, ticket_events types, WIP helpers | main | **M3A** |
-| **M3C** | V23 | **idea_cards** lifecycle, versions, comments, events, status backfill, `tickets.idea_card_id` FK | **M3B** | after B; ∥ D’s prep only after C |
-| **M3D** | V24 | docs/split/mock/dep_verify/readiness/sub_story; extend `evidenceAllowsMerge`; ownership routing in dispatcher | M3A+C | **M3E**, **M3F** |
-| **M3E** | V25 | Full ceremony/merge-order/notifications DDL+runners; standup→events | M3A+B | **M3D**, **M3F** |
-| **M3F** | V26 | Red/blue lockdown + security_review + findings | M3A+B | **M3D**, **M3E** |
-| **M3I** | V27 | Learning proposals + owner approve apply | M3C+E | **M3J**, after D preferred |
-| **M3J** | V28 | Kill switch, $ caps, audit export, backup docs script | M3A+D | **M3I** |
-| **M3G** | — | Simple UI for all of the above + ownership + learning | D+E+F+I | after those |
-| **M3H** | — | Playwright + visual regression + PROVIDERS.md + PROGRESS | M3G+J | last |
+| **M3A** | **V21** | Credentials, adapters, stubs, Test Connection, `runtime_kinds` FK | main | **M3B** |
+| **M3B** | **V22** | Hierarchy, G/W/T, sprints, path_owners, handoffs, ticket_events types, WIP | main | **M3A** |
+| **M3C** | **V23** | idea_cards lifecycle + backfill + FK; **`activity_kinds` seed + FK** (all M3 activities) | **M3A + M3B** | — (serial after A∥B) |
+| **M3D** | **V24** | Orchestration handlers; `evidenceAllowsMerge` extend; ownership routing — **no activity CHECK** | **M3A + M3C** | **M3E**, **M3F** |
+| **M3E** | **V25** | Ceremony / merge-order / notifications DDL + runners — **no activity CHECK** | **M3A + M3C** | **M3D**, **M3F** |
+| **M3F** | **V26** | Red/blue lockdown + findings — **no activity CHECK** | **M3A + M3C** | **M3D**, **M3E** |
+| **M3I** | **V27** | Learning proposals + owner apply (`INSERT` kind only if somehow missing) | **M3C + M3E** | **M3J** |
+| **M3J** | **V28** | Kill switch, $ caps, audit export, backup script | **M3A + M3D** | **M3I** |
+| **M3G** | — | Simple UI | D+E+F+I | — |
+| **M3H** | — | Playwright + visual regression + docs | M3G+J | last |
 
-**Not parallel:** M3C with M3B. **Not** “A owns V24 while E owns V23.”
+**Forbidden:** merging M3E or M3F before M3C; any M3D/E/F migration that `DROP`s `agent_runs_activity_check` or replaces it with a partial `IN (...)` list.
 
 ---
 
