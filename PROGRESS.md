@@ -4,6 +4,19 @@
 > Pair with `MEMORY.md` (file index + decisions + anti-patterns) and `IMPLEMENTATION.md` (full 17-phase build plan).
 > Where this file or `v27_9.md` / `IMPLEMENTATION.md` disagree with `docs/PRODUCT_SPEC.md`, the product spec wins.
 
+## Verification of main @ 2f5046a (2026-10-27)
+
+Branch `cursor/m1-verify-assert-rename-24f5` (from `cursor/m1-e2e-verification-24f5`). Report: `docs/verification/M1_VERIFICATION.md` and a compressed `docs/verification/M1_VERIFICATION.pdf` (full-size screenshots are the CI artifact `m1-verification-screenshots`). Base is `main` after the simplified UI (#8), M2 plan (#7), M2 backend (#9), and M2 frontend (#11).
+
+Harness (local re-run after #11): **137 pass, 6 fixed, 0 deferred, 0 fail**. `PATCH /api/projects/:id` asserts 200 + renamed body; projects page asserts `rename-project` / `archive-project` testids (pass/fail, never deferred).
+
+Still applied on top of main:
+- Signup/API callers use `messageFromApiBody` (details first).
+- Refresh-on-401 is logout-safe (`abandonSession` epoch), skips a redundant second refresh when the token already changed, matches `SKIP_REFRESH` on pathname, and is shared by `authorizedFetch` so `downloadApi` gets the same behavior.
+- `catalogModelIds` (single copy in `modelTiers.ts`) reads string and `{ id, aliases }` catalogs.
+
+Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 8 passed; Java 44/0/1 skipped; `tsc` middleware+web passed. Playwright `m1-validation-message` + `m1-session-refresh` × 3 viewports: 6 passed.
+
 ---
 
 ## Milestone 3 — plan (this branch)

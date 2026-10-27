@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { eq } from 'drizzle-orm';
-import { db, tickets } from '@aria/db';
+import { db, tickets, workspaces } from '@aria/db';
 import app from '../app';
 import { getPgPool } from '../services/db.client';
 import { processNextAnalysisJob } from '../services/analysisWorker.service';
@@ -295,5 +295,30 @@ describe('review fixes', () => {
       process.env.CURSOR_API_BASE = previousCursor;
       child.kill();
     }
+  });
+
+  it('rejects a model id missing from an object-shaped catalog', async () => {
+    const owner = await signup(`catalog-shape-${Date.now()}@aria.dev`);
+    // Only the catalog shape matters here. Do not touch llm_provider — older local
+    // databases still store that column as an enum without every provider id.
+    await db.update(workspaces).set({
+      llmModelCatalog: [{ id: 'claude-opus-5' }, { id: 'auto', aliases: ['auto-smart'] }],
+    }).where(eq(workspaces.id, owner.workspaceId));
+    const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Catalog shape' });
+    expect(project.status).toBe(201);
+    const rejected = await request(app).patch(`/api/projects/${project.body.project.id}/model-tiers`).set(owner.auth).send({
+      planning: 'top',
+      development: 'auto',
+      topModel: 'not-a-real-model',
+    });
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.error).toMatch(/not in the provider catalog/);
+    const accepted = await request(app).patch(`/api/projects/${project.body.project.id}/model-tiers`).set(owner.auth).send({
+      planning: 'top',
+      development: 'auto',
+      topModel: 'auto-smart',
+    });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.modelTiers.planningModel).toBe('auto-smart');
   });
 });
