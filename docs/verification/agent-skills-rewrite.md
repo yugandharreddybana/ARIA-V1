@@ -1,17 +1,17 @@
 # Agent skills lean rewrite — verification
 
-Measured: 2026-10-27T11:03:43.010Z
+Measured: 2026-10-27T12:18:56.134Z
 Method: ceil(utf8Bytes/4)
-Commit target: PR #18 (catalogue.cjs loader + mapped imperatives).
+PR #18 @ ea2ff61 — CI green (unit-tests, typecheck, e2e ×3).
 
 ## Inventory
 
 | Kind | Path |
 |---|---|
-| Source | `docs/agents/skills/*.json` |
-| Runtime | `catalogue.generated.cjs` (CJS; strip-types ESM child OK) |
-| Loader | `loadSkills.ts` re-exports catalogue |
-| Sync gate | `node scripts/sync-agent-skills.mjs --check` (CI) |
+| Source of truth | `docs/agents/skills/*.json` |
+| Runtime catalogue | `apps/middleware/src/services/agentSkills/catalogue.generated.cjs` |
+| One loader | `loadSkills.ts` re-exports catalogue |
+| Drift gate | `node scripts/sync-agent-skills.mjs --check` (CI typecheck + unit-tests) |
 | Domain skills | `.entiresystem/skills/*/SKILL.md` extend `_base` |
 | Index | `docs/agents/SKILLS.md` |
 
@@ -39,23 +39,20 @@ ceo, cfo, cto, business, product_owner, scrum_master, ui_ux_designer, frontend, 
 | `.entiresystem/SKILL.md` | 217 | 113 | 104 |
 | **TOTAL** | **5828** | **2821** | **3007 (51.6%)** |
 
-## Runtime composed prompt
+## Runtime composed prompt (with mapped imperatives + context caps)
 
 | Metric | Value |
 |---|---:|
 | Mean tokens/role | 331 |
 | Max tokens/role | 423 |
-| Sum (all roles) | 6946 |
-| Old template × roles | 3360 |
+| Sum (all 21 roles) | 6946 |
+| Old incomplete template × 21 | 3360 |
 
-Composed prompts include mapped hard-rule **imperatives** (not ids only) and `ContextCaps`.
+## Review fixes verified
 
-## Tests
-
-- Local middleware vitest: **153 passed**
-- `skills:sync --check` OK
-- CI unit-tests + typecheck green on 4b4dd86; e2e org-chart click hardened for denser D13 seats
-
-## Hard rules
-
-WIP=1; never merge / user approves ideas; dev/QA md+pdf evidence; hash-chained ticket_events; G/W/T AC; Fib ceil (4d→5); 10-day sprint; ownership/backup/handoff; dep gate; UI mock gate; api_contract; idea lifecycle; red/blue findings→tickets with egress deny-by-default + explicit local allowlist; context load limits; no secrets. Mapped per role.
+1. catalogue.generated.cjs loads in CJS vitest and strip-types ESM child (no fs path).
+2. skills:sync --check + docs↔catalogue test.
+3. Hard-rule imperatives injected per role map (CFO lacks coding evidence rules).
+4. Checklist asserts on composed prompts; applyContextCaps truncates.
+5. red/blue egress deny-by-default + explicit local allowlist.
+6. CI green including e2e desktop/tablet/mobile.

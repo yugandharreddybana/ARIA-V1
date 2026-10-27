@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-10-27T11:03:43.010Z",
+  "measuredAt": "2026-10-27T12:18:56.134Z",
   "method": "ceil(utf8Bytes/4)",
   "rewriteExisting": {
     "before": 5828,
