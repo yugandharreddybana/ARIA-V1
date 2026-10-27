@@ -645,21 +645,38 @@ Backoff is `not_before = NOW() + 30s × 4^(attempt-1)` with ±20 % jitter (30 s,
 
 ---
 
-## 13. Frontend (fits the simplified UI; starts after that PR merges)
+## 13. Frontend (fits the simplified UI on main)
 
-It uses the UI PR's sidebar (Projects, Company, Board, **Runs/Activity**, Settings) and primitive set (page shell, card/panel, table/list, badge, button, select, sheet/drawer, empty state, tabs). It adds only `LogView` (a monospace, plain-text, append-only list with auto-scroll toggle and "load earlier") and `RunStatusBadge` (status, activity, and blocked reason), and only if the UI PR does not already ship equivalents. Pages do not define one-off components.
+The simplified UI (PR #8) is the shell. It ships these primitives, and nothing else is added unless a screen cannot be built from them:
 
-- **Runs/Activity**, under the project route the UI PR defines (for example `/projects/[id]/runs`).
-  - The page has a filter row (status, activity, agent) and a table with status, activity, agent, a ticket link, a PR link, the model, tokens (actual / reserved), started, and duration.
-  - Selecting a row opens a sheet: a right panel at ≥ 768 px, full-screen at 375 px. The sheet has a header with status, a "Open in Cursor" external link, and Cancel and Retry; a linkage strip (Ticket, Run, PR); a usage block; child runs (review, QA, fix); and a `LogView` fed by `GET /logs` plus `run:log`.
-  - The `agentId` filter is the per-agent activity view, linked from Company.
-- **Board.**
-  - Columns come from the UI PR's board config, with `Awaiting merge` and `Blocked` added and `ready_for_qa` hidden.
-  - Each card shows a run dot (live via `run:updated`), a `PR #n` link, review and QA verdict chips, and a sensitive-path warning.
-  - Backlog cards have Approve, and blocked cards have Unblock. Ticket create adds Flow and Layer selects.
-- **Company.** The agent detail shows the current ticket and run plus the last 5 runs (linking to Runs filtered by agent), a `source: AI | template` badge on the org, and a flow owners editor (layer × owner/backup).
-- **Setup stepper.** The analysis step shows "AI enrichment" status with a short `LogView` tail and "continue with template". The company step shows the generation run's progress and lands on the org chart when it completes.
-- **Settings.** GitHub guard status (protected / acknowledged, with the ack button), code runtime (cloud / local fallback, the latter disabled unless a push token is configured), the push token field, and the monthly budget with month-to-date usage.
+`Button`, `Input`, `Card`, `Badge`, `Dialog`, `EmptyState` (plus `LoadingState` and `ErrorNote`), `PageHeader`, `Table`. `Label` and the existing `Select` stay. There is no sheet, drawer, or tabs primitive. Run detail and ticket filters use `Dialog` and native selects. `Dialog` is the focus-trapped panel: near full viewport at 375 px, a wide panel from 768 px up.
+
+Routes the shell already owns:
+
+- Sidebar: Projects, Company, Board, Runs, Settings.
+- `/runs` is the activity page. `components/runs/agent-runs.tsx` is the Queue slot. `/sessions` redirects here.
+- `/board` renders the ticket board (`/tickets` is the same board).
+- `/projects` is the project list. `/projects/[id]/company` is the org chart.
+
+One extra primitive, `LogView` (`components/ui/log-view.tsx`): a monospace plain-text list, auto-scroll toggle, and "load earlier". Run status uses `Badge` (status, activity, blocked reason). No `RunStatusBadge` and no `Sheet`.
+
+- **Runs** (`/runs`, project picker, `?agent=` from Company).
+  - Filter row (status, activity, agent) and a table: status, activity, agent, ticket link, PR link, model, tokens (actual / reserved), started, duration. Live rows come from `run:updated`.
+  - A row opens a `Dialog` with status, "Open in Cursor" when `external_url` is set, Cancel and Retry, a linkage strip (ticket, run, PR), usage, child runs, and `LogView` from `GET /logs` plus `run:log`.
+  - Budget month-to-date and an 80% warning (`budget:warn`) sit above the table.
+- **Board** (`/board`).
+  - Existing columns stay, including `ready_for_qa`, because the sprint 4 specs require them. `Awaiting merge` and `Blocked` are added.
+  - Each card shows story points, due date, at-risk / overdue, the current agent, the stage (develop / review / QA / awaiting merge / done / rejected), a live run dot, and a PR link.
+  - Backlog cards have Approve. Blocked cards have Unblock. Creating a ticket adds Flow and Layer. A move the server rejects is shown as an error, not applied.
+- **Ticket** (`/tickets/[id]`).
+  - Activity timeline from `ticket_events`: filter by type and agent, paginate with the seq cursor, export Markdown and JSON, and a hash-chain verified indicator.
+  - Story points can be edited. Due date, at-risk / overdue, and the split suggestion are shown.
+  - Dev and QA evidence: gate status, download `.md` and `.pdf`.
+  - PR link and stage.
+- **Company.** Agent detail shows the last 5 runs (link to `/runs?agent=`). The org has a `source: AI | template` badge. Flow owners are edited per layer (owner and backup) through `PUT …/owners`. Model tiers list the catalog ids from Test Connection.
+- **Setup.** The knowledge step shows AI enrichment (`pending` / `ai` / `template`). The company step still lands on the org chart; a generation run does not block that link.
+- **Settings.** For the selected project: GitHub guard (protected / acknowledged, ack button, the blocking message when coding is refused), code runtime (local fallback disabled unless a push token is already stored; there is no new token field), and monthly budget with month-to-date usage.
+- **Projects.** Rename (`PATCH /api/projects/:id`, workspace-scoped) and archive (`DELETE`, already archives) on each card.
 - **Sockets.** `useAriaSocket` adds `run:updated`, `run:log`, `knowledge:updated`, `company:updated`, and `budget:warn`.
 
 ---
@@ -695,8 +712,8 @@ Every task ends with typecheck, lint, vitest, and the drift check green, and no 
 | **B19** | Append-only `ticket_events` (V17): hash chain, no app UPDATE/DELETE, timeline and Markdown/JSON export, agent append limited to tickets the agent is working. | Events exist for status changes and agent stages. A direct UPDATE or DELETE raises. The chain verifies. A foreign workspace gets 404. |
 | **B20** | Story points (V18): Fibonacci 1, 2, 3, 5, 8, 13; 1 point = 1 working day. `due_at` from configurable workdays and timezone. At-risk at 80% and overdue past `due_at`, each logged once and surfaced on `GET …/schedule`. Owner edits are logged. Points above 8 suggest a split. | Due-date tests cover a weekend and an after-hours start. At-risk and overdue each append one event. |
 | **B21** | Evidence reports. Coding and QA prompts require the sections in §17. The agent commits `evidence/<ticket-key>/dev-report.md`; ARIA stores Markdown and a server-rendered PDF. QA writes `qa-report`. `awaiting_merge` requires both latest reports to validate. Missing or invalid evidence is a fix round. Metadata and content hash go on `ticket_events`. Report links go on the PR comment. Downloads are workspace-scoped. | Prompt, validation, PDF, gate, and scoping tests pass. UI before/after screenshots are required in the prompt when `ui_affected: yes`. The visual-regression suite stays M3. |
-| **F1** | (after the UI PR) Socket hook events, plus the `LogView` and `RunStatusBadge` primitives if missing. | Primitives in the shared set with no page-local duplicates. They render at 375, 768, and 1920 px. |
-| **F2** | Runs/Activity page: list, filters, detail sheet with live logs, cancel and retry, linkage strip, usage. | Live log lines appear without reload. Cancel reflects within 2 s against the stub. Keyboard accessible, and the sheet traps focus. |
+| **F1** | Socket hook events, plus `LogView` if missing. Status uses `Badge`. Detail uses `Dialog`, not a new sheet. | `LogView` lives in the shared set. It renders at 375, 768, and 1920 px. |
+| **F2** | Runs page (`/runs`): list, filters, detail dialog with live logs, cancel and retry, linkage strip, usage, budget warning. | Live log lines appear without reload. Cancel reflects within 2 s against the stub. Keyboard accessible, and the dialog traps focus. |
 | **F3** | Board: new columns, run and PR badges, verdict chips, approve/unblock, flow and layer on create. | A card moves through the states live during the stub pipeline. Illegal drags are refused with a toast. |
 | **F4** | Company agent activity panel, flow owners editor, AI/template badge. Setup stepper async states for enrichment and generation. Settings: GitHub guard, runtime, push token, budget. | Owner edits persist through `PUT …/owners`. The setup flow completes in stub mode with AI-generated output. |
 | **F5** | `milestone2-agents.spec.ts` on three viewports, added to the CI e2e list. | The spec passes in CI with zero merge violations, and the sprint 1–4 and milestone 1 specs are unchanged and green. |

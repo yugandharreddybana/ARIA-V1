@@ -12,6 +12,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api, ApiError } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorNote, LoadingState } from '@/components/ui/empty-state';
 import { AgentNode, type AgentNodeData } from '@/components/company/agent-node';
 import { rememberProject } from '@/lib/project-selection';
+import { useAriaSocket } from '@/hooks/useAriaSocket';
 
 interface Agent {
   id: string;
@@ -49,17 +51,24 @@ interface ModelTiers {
   autoModel: string | null;
   planningModel: string;
   developmentModel: string;
+  catalog?: string[];
 }
+
+interface FlowOwner { agentId: string; layer: 'frontend' | 'backend' | 'fullstack'; role: 'owner' | 'backup' }
 
 interface FlowRow {
   id: string;
   flowKey: string;
   name: string;
+  layer?: string;
   ownerAgentId: string | null;
   backupAgentId: string | null;
+  owners?: FlowOwner[];
 }
 
-interface CompanyResponse { agents: Agent[]; modelTiers: ModelTiers; flows: FlowRow[] }
+interface CompanyResponse { agents: Agent[]; modelTiers: ModelTiers; flows: FlowRow[]; companySource?: string }
+
+const LAYERS = ['fullstack', 'frontend', 'backend'] as const;
 
 const ROLE_KEYS = [
   'ceo', 'cfo', 'cto', 'business', 'product_owner', 'scrum_master',
@@ -90,11 +99,15 @@ export default function CompanyPage() {
   const [managerId, setManagerId] = useState('');
   const [instructions, setInstructions] = useState('Describe the work this person owns.');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [companySource, setCompanySource] = useState('template');
+  const { connected, subscribe, unsubscribe, onEvent } = useAriaSocket();
+  const [recentRuns, setRecentRuns] = useState<Array<{ id: string; activity: string; status: string }>>([]);
 
   const load = useCallback(async () => {
     const data = await api<CompanyResponse>(`/projects/${params.id}/company`);
     setAgents(data.agents);
     setFlows(data.flows);
+    setCompanySource(data.companySource ?? 'template');
     setTiers(data.modelTiers);
     setTopModel(data.modelTiers.topModel ?? '');
     setAutoModel(data.modelTiers.autoModel ?? '');
@@ -107,6 +120,20 @@ export default function CompanyPage() {
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Could not load the company'))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (!connected || !params.id) return;
+    subscribe(`project:${params.id}`);
+    void load().catch(() => undefined);
+    return () => unsubscribe(`project:${params.id}`);
+  }, [connected, load, params.id, subscribe, unsubscribe]);
+
+  useEffect(() => onEvent((event) => {
+    if (event.type !== 'company:updated' && event.type !== 'knowledge:updated') return;
+    if (event.projectId !== params.id) return;
+    if (event.type === 'company:updated' && event.source) setCompanySource(event.source);
+    void load().catch(() => undefined);
+  }), [load, onEvent, params.id]);
 
   const current = agents.find((agent) => agent.id === selected) ?? null;
 
@@ -233,15 +260,27 @@ export default function CompanyPage() {
     });
   }
 
-  async function assignFlow(flowId: string, patch: { ownerAgentId?: string | null; backupAgentId?: string | null }) {
+  useEffect(() => {
+    if (!current) { setRecentRuns([]); return; }
+    api<{ runs: Array<{ id: string; activity: string; status: string }> }>(`/projects/${params.id}/runs?agentId=${current.id}&limit=5`)
+      .then((data) => setRecentRuns(data.runs))
+      .catch(() => setRecentRuns([]));
+  }, [current, params.id]);
+
+  async function setFlowOwner(flow: FlowRow, layer: FlowOwner['layer'], role: FlowOwner['role'], agentId: string) {
+    const currentOwners = flow.owners ?? [];
+    const next = currentOwners.filter((owner) => !(owner.layer === layer && owner.role === role));
+    if (agentId) next.push({ agentId, layer, role });
+    if (!next.some((owner) => owner.role === 'owner')) {
+      setError('A flow needs at least one owner.');
+      return;
+    }
     await run(async () => {
-      const data = await api<CompanyResponse>(`/projects/${params.id}/flows/${flowId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(patch),
+      await api(`/projects/${params.id}/flows/${flow.id}/owners`, {
+        method: 'PUT',
+        body: JSON.stringify({ owners: next }),
       });
-      setAgents(data.agents);
-      setFlows(data.flows);
-      setTiers(data.modelTiers);
+      await load();
     });
   }
 
@@ -251,9 +290,12 @@ export default function CompanyPage() {
         title="Company"
         description="People, who they report to, and whether they are allowed to work."
         action={(
-          <Link href={`/projects/${params.id}/knowledge`} className="text-sm text-primary">
-            Knowledge map
-          </Link>
+          <span className="flex items-center gap-3">
+            <Badge data-testid="company-source">{companySource === 'ai' ? 'source: AI' : 'source: template'}</Badge>
+            <Link href={`/projects/${params.id}/knowledge`} className="text-sm text-primary">
+              Knowledge map
+            </Link>
+          </span>
         )}
       />
       {error && <ErrorNote>{error}</ErrorNote>}
@@ -268,6 +310,9 @@ export default function CompanyPage() {
             <form onSubmit={saveTiers} className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 Planning uses {tiers.planningModel}. Development uses {tiers.developmentModel}. Leave a model id empty to keep the provider default.
+              </p>
+              <p className="text-sm" data-testid="model-catalog">
+                Catalog: {tiers.catalog && tiers.catalog.length > 0 ? tiers.catalog.join(', ') : 'Test Connection has not stored a catalog yet.'}
               </p>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="space-y-1.5">
@@ -376,6 +421,18 @@ export default function CompanyPage() {
                 <Label htmlFor="model-override">Model override</Label>
                 <Input id="model-override" name="modelOverride" data-testid="agent-model-override" key={`${current.id}-model`} defaultValue={current.modelOverride ?? ''} />
               </div>
+              {recentRuns.length > 0 && (
+                <div className="space-y-1 text-sm">
+                  <p className="font-medium">Recent runs</p>
+                  <ul>
+                    {recentRuns.map((run) => (
+                      <li key={run.id}>
+                        <Link className="text-primary" href={`/runs?project=${params.id}&agent=${current.id}`}>{run.activity} · {run.status}</Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Button type="submit" data-testid="save-agent">Save</Button>
                 <Button type="button" variant="outline" data-testid="agent-toggle" onClick={toggle}>{current.enabled ? 'Turn OFF' : 'Turn ON'}</Button>
@@ -434,16 +491,38 @@ export default function CompanyPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {flows.map((flow) => (
-              <div key={flow.id} className="grid grid-cols-1 items-center gap-2 md:grid-cols-3">
-                <p className="text-sm">{flow.name}</p>
-                <select aria-label={`${flow.name} owner`} data-testid={`flow-owner-${flow.flowKey}`} className="field" value={flow.ownerAgentId ?? ''} onChange={(event) => void assignFlow(flow.id, { ownerAgentId: event.target.value || null })}>
-                  <option value="">Unassigned</option>
-                  {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
-                </select>
-                <select aria-label={`${flow.name} backup`} data-testid={`flow-backup-${flow.flowKey}`} className="field" value={flow.backupAgentId ?? ''} onChange={(event) => void assignFlow(flow.id, { backupAgentId: event.target.value || null })}>
-                  <option value="">No backup</option>
-                  {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
-                </select>
+              <div key={flow.id} className="space-y-2 border-b pb-3 last:border-0">
+                <p className="text-sm font-medium">{flow.name}</p>
+                {LAYERS.map((layer) => {
+                  const owner = flow.owners?.find((item) => item.layer === layer && item.role === 'owner')?.agentId ?? '';
+                  const backup = flow.owners?.find((item) => item.layer === layer && item.role === 'backup')?.agentId ?? '';
+                  const primary = (flow.layer ?? 'fullstack') === layer;
+                  return (
+                    <div key={layer} className="grid grid-cols-1 items-center gap-2 md:grid-cols-3">
+                      <p className="text-sm capitalize text-muted-foreground">{layer}</p>
+                      <select
+                        aria-label={`${flow.name} ${layer} owner`}
+                        data-testid={primary ? `flow-owner-${flow.flowKey}` : undefined}
+                        className="field"
+                        value={owner}
+                        onChange={(event) => void setFlowOwner(flow, layer, 'owner', event.target.value)}
+                      >
+                        <option value="">No owner</option>
+                        {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+                      </select>
+                      <select
+                        aria-label={`${flow.name} ${layer} backup`}
+                        data-testid={primary ? `flow-backup-${flow.flowKey}` : undefined}
+                        className="field"
+                        value={backup}
+                        onChange={(event) => void setFlowOwner(flow, layer, 'backup', event.target.value)}
+                      >
+                        <option value="">No backup</option>
+                        {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.realName}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </CardContent>

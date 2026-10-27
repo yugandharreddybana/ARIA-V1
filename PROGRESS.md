@@ -8,11 +8,17 @@
 
 ## Milestone 3 — plan (this branch)
 
-Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` (no feature code). Builds on main (M2 backend #9) plus open PRs **#10** (M1 verification) and **#11** (M2 frontend). Scope: multi-provider coding adapters + Test Connection gate, model tiers for plan-vs-code, Jira-like epics/stories/sub-tasks with UI-mock hard gate, agent dependency contracts, scrum ceremonies, merge-order coordinator, docs → `confluence/`. PR split M3A–M3F in the plan. **PR #6 JWT:** main already has the fix; close #6 (optional cherry-pick of `jwt-pem.test.ts` only).
+Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` (no feature code). Base: main with M2 backend (#9) and M2 frontend (#11) merged. Owner decisions locked in plan §0. Scope: multi-provider adapters (capability-filtered planning vs coding), Jira workflow, idea lifecycle, UI-mock gates, dependency verify, scrum ceremonies, merge-order, docs → `confluence/`, full red/blue in sandbox, company readiness extras. PR split M3A–M3H. PR #6 closed (JWT already on main).
 
-## Milestone 2 — agent runs backend (merged #9; frontend open as #11)
+## Milestone 2 — frontend (merged, PR #11)
 
-Branch: `cursor/m2-backend-1c0c` (merged). Plan: `docs/milestones/M2_PLAN.md` (§17 is the ticket log, story points, and evidence). Product spec wins on conflict. Frontend tasks F1–F5 are in open PR #11. Agents never merge.
+Branch: `cursor/m2-frontend-e5e7` (merged). Plan §13 matches the simplified UI on main: primitives are Button, Input, Card, Badge, Dialog, EmptyState, PageHeader, and Table; Runs is `/runs`; the board is `/board`. `LogView` is the only added primitive.
+
+Shipped: F1–F5 runs/budget/flow-owners/merge-guard/tiers UI; ticket timeline, story points, evidence downloads; board awaiting_merge/blocked; project rename/archive. Review fixes (socket payload shapes, project-scoped budget, catalog aliases) landed with the merge.
+
+## Milestone 2 — agent runs backend (merged, PR #9)
+
+Branch: `cursor/m2-backend-1c0c` (merged). Plan: `docs/milestones/M2_PLAN.md` (§17 is the ticket log, story points, and evidence). Product spec wins on conflict. Agents never merge.
 
 ### Pending owner confirmation
 

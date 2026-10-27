@@ -9,6 +9,7 @@ import {
   createReview,
   getBranch,
   getFileAtRef,
+  githubFullName,
   getPull,
   getPullDiff,
   getPullFiles,
@@ -65,7 +66,7 @@ async function repoOf(projectId: string): Promise<{ repoUrl: string; fullName: s
   );
   const row = result.rows[0];
   if (!row?.repo_name || !row.repo_url) throw new RunError('REPO_ACCESS', 'Project has no repository', false);
-  return { repoUrl: row.repo_url, fullName: row.repo_name };
+  return { repoUrl: row.repo_url, fullName: githubFullName(row.repo_name, row.repo_url) };
 }
 
 function fixture(run: AgentRunRow): string {

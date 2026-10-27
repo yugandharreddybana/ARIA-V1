@@ -1,4 +1,4 @@
-import { readGithubToken, getPull } from '../githubClient.service';
+import { readGithubToken, getPull, githubFullName } from '../githubClient.service';
 import { getPgPool } from '../db.client';
 import { applyTransition } from './ticketActions';
 
@@ -11,11 +11,12 @@ interface OpenPull {
   pr_number: number;
   pr_url: string | null;
   repo_name: string | null;
+  repo_url: string | null;
 }
 
 export async function watchPullRequests(): Promise<void> {
   const rows = await getPgPool().query<OpenPull>(
-    `SELECT t.id, t.project_id, p.workspace_id, r.pr_number, r.pr_url, repo.repo_name
+    `SELECT t.id, t.project_id, p.workspace_id, r.pr_number, r.pr_url, repo.repo_name, repo.repo_url
        FROM tickets t
        JOIN projects p ON p.id = t.project_id
        JOIN LATERAL (
@@ -24,7 +25,7 @@ export async function watchPullRequests(): Promise<void> {
           ORDER BY created_at DESC LIMIT 1
        ) r ON true
        LEFT JOIN LATERAL (
-         SELECT repo_name FROM project_repos WHERE project_id = t.project_id ORDER BY created_at LIMIT 1
+         SELECT repo_name, repo_url FROM project_repos WHERE project_id = t.project_id ORDER BY created_at LIMIT 1
        ) repo ON true
       WHERE t.status NOT IN ('done', 'rejected')`,
   );
@@ -32,7 +33,8 @@ export async function watchPullRequests(): Promise<void> {
     try {
       const token = await readGithubToken(ticket.workspace_id);
       const fromUrl = ticket.pr_url?.match(/github\.com\/([^/]+\/[^/]+)\/pull\//);
-      const fullName = ticket.repo_name || fromUrl?.[1];
+      const named = ticket.repo_name ? githubFullName(ticket.repo_name, ticket.repo_url) : '';
+      const fullName = named.includes('/') ? named : fromUrl?.[1];
       if (!fullName) continue;
       const pulled = await getPull(token, fullName, ticket.pr_number, etags.get(ticket.id));
       if (pulled.etag) etags.set(ticket.id, pulled.etag);

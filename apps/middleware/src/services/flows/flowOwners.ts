@@ -112,6 +112,7 @@ export async function removeAgent(agentId: string): Promise<void> {
 export interface FlowOwnerView {
   ownerAgentId: string | null;
   backupAgentId: string | null;
+  owners: FlowOwnerInput[];
 }
 
 export async function decorateFlows<T extends { id: string }>(flows: T[]): Promise<Array<T & FlowOwnerView>> {
@@ -133,6 +134,15 @@ export async function decorateFlows<T extends { id: string }>(flows: T[]): Promi
     const backup = primary
       ? rows.find((row) => row.role === 'backup' && row.layer === primary.layer) ?? null
       : null;
-    return { ...flow, ownerAgentId: primary?.agent_id ?? null, backupAgentId: backup?.agent_id ?? null };
+    return {
+      ...flow,
+      ownerAgentId: primary?.agent_id ?? null,
+      backupAgentId: backup?.agent_id ?? null,
+      owners: rows.map((row) => ({
+        agentId: row.agent_id,
+        layer: row.layer as FlowLayer,
+        role: row.role as FlowRole,
+      })),
+    };
   });
 }

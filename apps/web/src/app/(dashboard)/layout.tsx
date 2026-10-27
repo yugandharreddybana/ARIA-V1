@@ -22,7 +22,7 @@ function isActive(href: string, pathname: string) {
     return pathname === '/projects' || (pathname.startsWith('/projects/') && !pathname.includes('/company'));
   }
   if (href === '/company') return pathname === '/company' || pathname.includes('/company');
-  if (href === '/board') return pathname === '/board' || pathname === '/tickets';
+  if (href === '/board') return pathname === '/board' || pathname === '/tickets' || pathname.startsWith('/tickets/');
   if (href === '/runs') return pathname === '/runs' || pathname === '/sessions';
   return pathname === href || pathname.startsWith(`${href}/`);
 }

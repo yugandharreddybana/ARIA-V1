@@ -3,6 +3,7 @@ import { projects, projectRepos } from '@aria/db';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { AppError } from '../middleware/error.middleware';
+import { githubFullName } from './githubClient.service';
 
 export async function listProjects(workspaceId: string) {
   return db.query.projects.findMany({
@@ -26,6 +27,21 @@ export async function createProject(workspaceId: string, name: string, descripti
   return p;
 }
 
+export async function updateProject(
+  id: string,
+  workspaceId: string,
+  patch: { name?: string; description?: string | null },
+) {
+  await getProject(id, workspaceId);
+  const [row] = await db.update(projects).set({
+    ...(patch.name !== undefined ? { name: patch.name } : {}),
+    ...(patch.description !== undefined ? { description: patch.description } : {}),
+    updatedAt: new Date(),
+  }).where(and(eq(projects.id, id), eq(projects.workspaceId, workspaceId))).returning();
+  if (!row) throw new AppError('Project not found', 404);
+  return row;
+}
+
 export async function archiveProject(id: string, workspaceId: string) {
   await getProject(id, workspaceId);
   await db.update(projects).set({ status: 'archived' }).where(eq(projects.id, id));
@@ -38,7 +54,7 @@ export async function connectRepo(projectId: string, workspaceId: string, repoUr
     where: and(eq(projectRepos.projectId, projectId), eq(projectRepos.repoUrl, normalized)),
   });
   if (existing) return existing;
-  const repoName = normalized.split('/').pop()?.replace(/\.git$/, '') ?? normalized;
+  const repoName = githubFullName(normalized, normalized);
   const [repo] = await db.insert(projectRepos).values({ id: randomUUID(), projectId, repoUrl: normalized, repoName, branch }).returning();
   return repo;
 }
