@@ -64,6 +64,7 @@ async function projectWithRepo(label: string, repoName: string) {
 async function openTicket(auth: { Authorization: string }, projectId: string, title: string, description: string) {
   const created = await request(app).post('/api/tickets').set(auth).send({
     projectId, title, description, type: 'feature', storyPoints: 1,
+    acceptanceCriteria: [{ given: 'the story exists', when: 'work starts', then: 'acceptance is met' }],
   });
   expect(created.status).toBe(201);
   const ticketId = created.body.ticket.id as string;

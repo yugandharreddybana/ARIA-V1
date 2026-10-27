@@ -22,6 +22,16 @@ vi.mock('@aria/db', () => ({
   skills:   {},
 }));
 
+vi.mock('../services/tickets/ticketEvents', () => ({
+  appendTicketEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../services/db.client', () => ({
+  getPgPool: vi.fn(() => ({
+    query: vi.fn().mockResolvedValue({ rows: [] }),
+  })),
+}));
+
 import { agentCreateTicket, agentUpdateTicketStatus } from '../services/agentTicket.service';
 
 describe('agentCreateTicket', () => {
