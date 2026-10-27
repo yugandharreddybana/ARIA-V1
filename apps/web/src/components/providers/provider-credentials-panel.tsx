@@ -249,7 +249,12 @@ export function ProviderCredentialsPanel({ mode = 'settings', projectId, onReady
         {(selected?.id === 'ollama' || selected?.id === 'openai_compatible' || selected?.id === 'custom') && (
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="cred-base">Base URL</Label>
-            <Input id="cred-base" data-testid="credential-base-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+            <Input
+              id="cred-base"
+              data-testid={mode === 'setup' ? 'llm-base-url' : 'credential-base-url'}
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
           </div>
         )}
       </div>
