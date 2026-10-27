@@ -1,9 +1,9 @@
 {
   "summary": {
-    "pass": 133,
+    "pass": 137,
     "fail": 0,
     "fixed": 6,
-    "deferred": 4
+    "deferred": 0
   },
   "results": [
     {
@@ -107,9 +107,9 @@
     {
       "feature": "Projects",
       "scenario": "edit project name",
-      "result": "deferred",
+      "result": "pass",
       "evidence": "",
-      "detail": "HTTP 404 Route PATCH /api/projects/3916c6c8-ecaa-459e-a6be-8480b15a9407 not found; left to the frontend PR"
+      "detail": "HTTP 200 name=Renamed Shop"
     },
     {
       "feature": "Authorization",
@@ -508,7 +508,7 @@
       "scenario": "chart, documentation, and PR coordinator are visible (desktop)",
       "result": "pass",
       "evidence": "docs/verification/screenshots/org-chart-desktop.png",
-      "detail": "docs=Callum Reid\nDocumentation Lead\nOFF pr=Nadia Petrov\nPR Merge Coordinator\nOFF"
+      "detail": "docs=Caleb Nguyen\nDocumentation Lead\nOFF pr=Harun Demir\nPR Merge Coordinator\nOFF"
     },
     {
       "feature": "Org chart",
@@ -557,7 +557,7 @@
       "scenario": "owner select changes in the org chart (desktop)",
       "result": "pass",
       "evidence": "docs/verification/screenshots/flow-owner-desktop.png",
-      "detail": "before=a8aee58f-e224-4556-b3c3-3b1106cc6a92"
+      "detail": "before=3da03f14-8ac4-4c43-a209-1c3ea4cde12b"
     },
     {
       "feature": "Model tiers",
@@ -583,9 +583,9 @@
     {
       "feature": "Projects",
       "scenario": "edit and delete controls on the projects page (desktop)",
-      "result": "deferred",
-      "evidence": "docs/verification/screenshots/projects-no-edit-delete-desktop.png",
-      "detail": "edit=0 delete=0; left to the frontend PR"
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-edit-delete-desktop.png",
+      "detail": "rename=2 archive=2"
     },
     {
       "feature": "Logout",
@@ -704,7 +704,7 @@
       "scenario": "chart, documentation, and PR coordinator are visible (tablet)",
       "result": "pass",
       "evidence": "docs/verification/screenshots/org-chart-tablet.png",
-      "detail": "docs=Omar Farouk\nDocumentation Lead\nOFF pr=Amina Diallo\nPR Merge Coordinator\nOFF"
+      "detail": "docs=Sofia Rossi\nDocumentation Lead\nOFF pr=Esme Laurent\nPR Merge Coordinator\nOFF"
     },
     {
       "feature": "Org chart",
@@ -753,7 +753,7 @@
       "scenario": "owner select changes in the org chart (tablet)",
       "result": "pass",
       "evidence": "docs/verification/screenshots/flow-owner-tablet.png",
-      "detail": "before=3d901f42-e75e-46bf-a72c-8893c98a658e"
+      "detail": "before=4413860e-de71-4efc-a993-66487a29644e"
     },
     {
       "feature": "Model tiers",
@@ -779,9 +779,9 @@
     {
       "feature": "Projects",
       "scenario": "edit and delete controls on the projects page (tablet)",
-      "result": "deferred",
-      "evidence": "docs/verification/screenshots/projects-no-edit-delete-tablet.png",
-      "detail": "edit=0 delete=0; left to the frontend PR"
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-edit-delete-tablet.png",
+      "detail": "rename=2 archive=2"
     },
     {
       "feature": "Logout",
@@ -900,7 +900,7 @@
       "scenario": "chart, documentation, and PR coordinator are visible (mobile)",
       "result": "pass",
       "evidence": "docs/verification/screenshots/org-chart-mobile.png",
-      "detail": "docs=Hannah Berg\nDocumentation Lead\nOFF pr=Isaac Cohen\nPR Merge Coordinator\nOFF"
+      "detail": "docs=Nora Lindgren\nDocumentation Lead\nOFF pr=Isaac Cohen\nPR Merge Coordinator\nOFF"
     },
     {
       "feature": "Org chart",
@@ -949,7 +949,7 @@
       "scenario": "owner select changes in the org chart (mobile)",
       "result": "pass",
       "evidence": "docs/verification/screenshots/flow-owner-mobile.png",
-      "detail": "before=64b35a04-05df-4899-a370-497377adb774"
+      "detail": "before=4d161d26-36d3-4efd-bf35-19f7e39b3e43"
     },
     {
       "feature": "Model tiers",
@@ -975,9 +975,9 @@
     {
       "feature": "Projects",
       "scenario": "edit and delete controls on the projects page (mobile)",
-      "result": "deferred",
-      "evidence": "docs/verification/screenshots/projects-no-edit-delete-mobile.png",
-      "detail": "edit=0 delete=0; left to the frontend PR"
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-edit-delete-mobile.png",
+      "detail": "rename=2 archive=2"
     },
     {
       "feature": "Logout",

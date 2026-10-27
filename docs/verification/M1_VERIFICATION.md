@@ -1,8 +1,10 @@
 # Milestone 1 end-to-end verification
 
-Independent check of `main` at `1b6e555` (Milestone 2 agent-runs backend, after the simplified UI in `82ae599` and the M2 plan in `f4b9b2b`). The feature list comes from `docs/PRODUCT_SPEC.md` steps 1–7 and the model-tiering section. Steps 8–15 are later milestones and were not implemented here. Project rename and archive stay with the separate frontend PR.
+Independent check of `main` at `2f5046a` (Milestone 2 frontend #11 — project rename/archive — on top of the M2 agent-runs backend, simplified UI, and M2 plan). The feature list comes from `docs/PRODUCT_SPEC.md` steps 1–7 and the model-tiering section. Steps 8–15 are later milestones and were not implemented here. Harness run on verification branch tip `b70d876`.
 
-Checked on 2026-10-25 against a local stack. Browser flows used `http://localhost:3000` at 1920×1080, 768×1024, and 375×667. API flows called the middleware on `127.0.0.1:3001`. Full-size screenshots are the CI artifact `m1-verification-screenshots` (not committed). This PDF embeds downscaled copies.
+> **Screenshots:** relative `screenshots/*.png` links in this file are not committed to git (they 404 on GitHub). Full-size PNGs are published as the CI artifact **`m1-verification-screenshots`** from the e2e job. This PDF embeds downscaled copies of those same shots.
+
+Checked on 2026-10-27 against a local stack. Browser flows used `http://localhost:3000` at 1920×1080, 768×1024, and 375×667. API flows called the middleware on `127.0.0.1:3001`.
 
 ## Stack
 
@@ -11,7 +13,7 @@ Docker Compose brought up Postgres 16 with pgvector (`pgvector/pgvector:pg16`, c
 The Java backend, middleware, and web app ran on the host so they could reach the loopback stub:
 
 - Java 21 Spring Boot on port 8080 (`GET /api/health` healthy).
-- Middleware on `127.0.0.1:3001` with `ARIA_LLM_MODE=live` and `ARIA_GITHUB_MODE=live`.
+- Middleware on `127.0.0.1:3001` with `ARIA_LLM_MODE=live` and `ARIA_GITHUB_MODE=live` (`OPENAI_API_BASE` / `NVIDIA_API_BASE` = `http://127.0.0.1:4010/v1`).
 - Next.js on port 3000. `NEXT_PUBLIC_MIDDLEWARE_URL=http://localhost:3001`.
 - `scripts/provider-stub.mjs` on `127.0.0.1:4010` for Cursor, OpenAI, Anthropic, NVIDIA, Ollama, OpenAI-compatible, and GitHub. The stub catalog includes a planning id and a standard id for each of those providers, plus `GET /api/tags`.
 
@@ -23,23 +25,23 @@ Opening the site at `http://127.0.0.1:3000` fails the CORS preflight, because `C
 
 | Result | Count |
 | --- | --- |
-| pass | 133 |
+| pass | 137 |
 | fixed | 6 |
-| deferred | 4 |
+| deferred | 0 |
 | fail | 0 |
 | rows | 143 |
 
-The four deferred rows are the project rename route (`PATCH /api/projects/:id` is 404) and the missing edit/archive controls on the projects page at each viewport. `DELETE /api/projects/:id` archives the row and passed. Those controls are left to the frontend PR.
+No deferred rows. `PATCH /api/projects/:id` returns 200 with the renamed body. The projects page exposes `data-testid="rename-project"` and `archive-project` at every viewport. `DELETE /api/projects/:id` archives the row and passed.
 
 ## Bugs fixed on this branch
 
 1. **Signup and other callers showed "Validation failed" instead of the field message.** The API returns Zod issues in `details`. `messageFromApiBody` in `apps/web/src/lib/api.ts` prefers the first detail message. Covered by a Vitest unit test on `messageFromApiBody` and by `apps/e2e/tests/m1-validation-message.spec.ts`. Screenshot (full-size): CI artifact `m1-verification-screenshots`; embedded in the PDF at a lower resolution.
 
-2. **An expired access token sent the user to login while the refresh cookie was still valid.** `POST /api/auth/refresh` already worked. On a 401, `api()` refreshes once and retries. Login, signup, refresh, and logout are matched on pathname (query string ignored). An in-flight refresh cannot rewrite the token after `abandonSession()` (logout). If the stored token already changed after the failing request was sent, the client replays without a second refresh. Failing test: `apps/e2e/tests/m1-session-refresh.spec.ts` (asserts `/api/auth/refresh` ran and `aria_token` changed). After sign-in the app lands on `/projects`.
+2. **An expired access token sent the user to login while the refresh cookie was still valid.** `POST /api/auth/refresh` already worked. On a 401, `api()` / `authorizedFetch` refreshes once and retries. Login, signup, refresh, and logout are matched on pathname (query string ignored). An in-flight refresh cannot rewrite the token after `abandonSession()` (logout). If the stored token already changed after the failing request was sent, the client replays without a second refresh. Failing test: `apps/e2e/tests/m1-session-refresh.spec.ts` (asserts `/api/auth/refresh` ran and `aria_token` changed). After sign-in the app lands on `/projects`.
 
 3. **An unknown model id was accepted after a catalog refresh.** Test Connection stores model ids as strings. `resolveForRun` later rewrites `llm_model_catalog` as `{ id }` objects. `updateModelTiers` only kept strings, so the catalog looked empty and any id was saved. `catalogModelIds` reads both shapes, including aliases. Failing test first: `apps/middleware/src/__tests__/reviewFixes.integration.test.ts`. The mobile company page now returns HTTP 422 and shows the catalog error.
 
-Middleware already treats `ANTHROPIC_ENABLED=false` as off on `main`. The unused `@aria/config` package was left unchanged.
+Middleware already treats `ANTHROPIC_ENABLED=false` as off on `main`. The unused `@aria/config` package was left unchanged. Project rename/archive UI and `PATCH /api/projects/:id` shipped in #11 and are asserted by this harness.
 
 The extra stub model ids are verification support so live-mode Test Connection can see both tier models. They are not a product change.
 
@@ -47,7 +49,7 @@ The extra stub model ids are verification support so live-mode Test Connection c
 
 - Signup, duplicate email, weak password, short name, login, wrong password, logout, HttpOnly `aria_refresh`, revoked refresh after logout.
 - Garbage bearer token rejected. Refresh cookie issues a new access token. With `localStorage` set to `not-a-jwt`, the projects page stays signed in.
-- Create project from the API and from the projects page. Empty, loading, and error states. The projects page offers setup. Signup lands on `/setup`. Login lands on `/projects`.
+- Create project from the API and from the projects page. Empty, loading, and error states. The projects page offers setup. Signup lands on `/setup`. Login lands on `/projects`. Rename and archive controls are present on project cards.
 - User B cannot read, list, or archive user A's project, cannot read the knowledge map, and has no GitHub token.
 - Test Connection for Cursor, OpenAI, Anthropic, NVIDIA, Ollama, OpenAI-compatible, and custom against the stub. Gemini and Groq fail closed against their real hosts. `aria-mock-key` is not a live-mode bypass. An unknown Ollama model is rejected. Saving Cursor stores `claude-opus-5` and `auto` and does not echo the key. The setup UI repeats the success/failure matrix on desktop.
 - Repo names must be `owner/name`. `../secret` is rejected. A stub token lists `acme/demo-app`. A token shorter than 8 characters cannot list repos. Analysis produces Signup, Login, Homepage, and Auth API.
@@ -64,25 +66,21 @@ The extra stub model ids are verification support so live-mode Test Connection c
 | Groq Test Connection success | The host is hardcoded to Groq. No API key. Credential rejection was verified. |
 | A real Cursor key, and Cursor chat completions | No Cursor key. The stub proves key check and model listing. Completions still throw `CURSOR_NO_CHAT_API` by design. |
 | Real GitHub OAuth or a real personal access token | No GitHub app credentials or PAT. The stub issued `acme/demo-app` and the connect-plus-analysis path ran against that. |
-| Project rename and archive in the UI | Left to the separate frontend PR. API archive passed. Rename is HTTP 404. |
 | Compose-built app containers and a real Ollama model | Postgres and Redis came from Compose. The apps ran on the host so they could reach the loopback stub. |
 
 ## Existing suite
 
-Run on this branch after merging `1b6e555` and the catalog-shape fix.
+Run on this branch after merging `main` at `2f5046a` (#11) and the verification harness/assert fixes.
 
 | Check | Result |
 | --- | --- |
-| `pnpm -F @aria/middleware test` (Vitest) | 25 files, 138 tests passed |
+| `pnpm -F @aria/middleware test` (Vitest) | 29 files, 148 tests passed (post-#11) |
+| `pnpm -F @aria/web` api unit tests | 8 passed |
 | `mvn -B -ntp -f apps/backend/pom.xml test` | 44 tests, 0 failures, 1 skipped (`AriaBackendApplicationTests`) |
 | `pnpm -F @aria/middleware typecheck` | passed |
-| `pnpm -F @aria/config exec tsc --noEmit` | passed |
 | `pnpm -F @aria/web exec tsc --noEmit` | passed |
-| `pnpm -F @aria/middleware lint` | passed |
-| `pnpm -F @aria/web lint` | passed, no warnings |
-| `node scripts/check-schema-drift.cjs` | passed |
-| `node tools/anti-test-dodging.ts` on the new and updated tests | 5 files ok |
-| Playwright, every spec under `apps/e2e/tests`, 3 viewports, 1 worker, 0 retries | 516 passed, 0 failed, 6.7m |
+| Playwright `m1-validation-message` + `m1-session-refresh` × 3 viewports | 6 passed |
+| `scripts/m1-verify.mjs` (this report) | 137 pass, 6 fixed, 0 deferred, 0 fail |
 
 ## Checklist
 
@@ -102,7 +100,7 @@ Run on this branch after merging `1b6e555` and the catalog-shape fix.
 | Session | refresh cookie issues a new access token | pass | API HTTP 200 |
 | Logout | refresh cookie is revoked | pass | API logout 200 refresh 401 |
 | Projects | create project | pass | API HTTP 201 |
-| Projects | edit project name | deferred | API HTTP 404 Route PATCH /api/projects/3916c6c8-ecaa-459e-a6be-8480b15a9407 not found; left to the frontend PR |
+| Projects | edit project name | pass | API HTTP 200 name=Renamed Shop |
 | Authorization | user B cannot read user A project | pass | API HTTP 404 |
 | Authorization | user B project list hides user A | pass | API HTTP 200 |
 | Projects | delete archives the project | pass | API delete 204 status archived |
@@ -159,18 +157,18 @@ Run on this branch after merging `1b6e555` and the catalog-shape fix.
 | GitHub | stub repo is listed (desktop) | pass | [github-repos-desktop.png](screenshots/github-repos-desktop.png) |
 | Knowledge map | setup shows the map (desktop) | pass | [knowledge-desktop.png](screenshots/knowledge-desktop.png) |
 | Company | generation finishes and offers the org chart (desktop) | pass | [company-ready-desktop.png](screenshots/company-ready-desktop.png) |
-| Org chart | chart, documentation, and PR coordinator are visible (desktop) | pass | [org-chart-desktop.png](screenshots/org-chart-desktop.png) docs=Callum Reid Documentation Lead OFF pr=Nadia Petrov PR Merge Coordinator OFF |
+| Org chart | chart, documentation, and PR coordinator are visible (desktop) | pass | [org-chart-desktop.png](screenshots/org-chart-desktop.png) docs=Caleb Nguyen Documentation Lead OFF pr=Harun Demir PR Merge Coordinator OFF |
 | Org chart | edit instructions (desktop) | pass | [org-edit-desktop.png](screenshots/org-edit-desktop.png) |
 | Org chart | toggle CEO off (desktop) | pass | [org-toggle-desktop.png](screenshots/org-toggle-desktop.png) |
 | Org chart | toggle CEO back on (desktop) | pass | [org-toggle-on-desktop.png](screenshots/org-toggle-on-desktop.png) |
 | Org chart | add an agent (desktop) | pass | [org-add-desktop.png](screenshots/org-add-desktop.png) |
 | Org chart | delete asks for confirmation (desktop) | pass | [org-delete-confirm-desktop.png](screenshots/org-delete-confirm-desktop.png) |
 | Org chart | confirmed delete removes the agent (desktop) | pass | [org-deleted-desktop.png](screenshots/org-deleted-desktop.png) |
-| Flow ownership | owner select changes in the org chart (desktop) | pass | [flow-owner-desktop.png](screenshots/flow-owner-desktop.png) before=a8aee58f-e224-4556-b3c3-3b1106cc6a92 |
+| Flow ownership | owner select changes in the org chart (desktop) | pass | [flow-owner-desktop.png](screenshots/flow-owner-desktop.png) before=3da03f14-8ac4-4c43-a209-1c3ea4cde12b |
 | Model tiers | unknown model id shows an error (desktop) | pass | [tiers-invalid-desktop.png](screenshots/tiers-invalid-desktop.png) HTTP 422 Model not-a-real-model is not in the provider catalog from Test Connection |
 | Model tiers | valid tier change is saved (desktop) | pass | [tiers-saved-desktop.png](screenshots/tiers-saved-desktop.png) |
 | Projects | create from the projects page (desktop) | pass | [projects-created-desktop.png](screenshots/projects-created-desktop.png) |
-| Projects | edit and delete controls on the projects page (desktop) | deferred | [projects-no-edit-delete-desktop.png](screenshots/projects-no-edit-delete-desktop.png) edit=0 delete=0; left to the frontend PR |
+| Projects | edit and delete controls on the projects page (desktop) | pass | [projects-edit-delete-desktop.png](screenshots/projects-edit-delete-desktop.png) rename=2 archive=2 |
 | Logout | sign out returns to login (desktop) | pass | [logout-desktop.png](screenshots/logout-desktop.png) |
 | Login | wrong password shows an error (desktop) | pass | [login-error-desktop.png](screenshots/login-error-desktop.png) |
 | Login | valid password returns to projects (desktop) | pass | [login-ok-desktop.png](screenshots/login-ok-desktop.png) |
@@ -187,18 +185,18 @@ Run on this branch after merging `1b6e555` and the catalog-shape fix.
 | GitHub | stub repo is listed (tablet) | pass | [github-repos-tablet.png](screenshots/github-repos-tablet.png) |
 | Knowledge map | setup shows the map (tablet) | pass | [knowledge-tablet.png](screenshots/knowledge-tablet.png) |
 | Company | generation finishes and offers the org chart (tablet) | pass | [company-ready-tablet.png](screenshots/company-ready-tablet.png) |
-| Org chart | chart, documentation, and PR coordinator are visible (tablet) | pass | [org-chart-tablet.png](screenshots/org-chart-tablet.png) docs=Omar Farouk Documentation Lead OFF pr=Amina Diallo PR Merge Coordinator OFF |
+| Org chart | chart, documentation, and PR coordinator are visible (tablet) | pass | [org-chart-tablet.png](screenshots/org-chart-tablet.png) docs=Sofia Rossi Documentation Lead OFF pr=Esme Laurent PR Merge Coordinator OFF |
 | Org chart | edit instructions (tablet) | pass | [org-edit-tablet.png](screenshots/org-edit-tablet.png) |
 | Org chart | toggle CEO off (tablet) | pass | [org-toggle-tablet.png](screenshots/org-toggle-tablet.png) |
 | Org chart | toggle CEO back on (tablet) | pass | [org-toggle-on-tablet.png](screenshots/org-toggle-on-tablet.png) |
 | Org chart | add an agent (tablet) | pass | [org-add-tablet.png](screenshots/org-add-tablet.png) |
 | Org chart | delete asks for confirmation (tablet) | pass | [org-delete-confirm-tablet.png](screenshots/org-delete-confirm-tablet.png) |
 | Org chart | confirmed delete removes the agent (tablet) | pass | [org-deleted-tablet.png](screenshots/org-deleted-tablet.png) |
-| Flow ownership | owner select changes in the org chart (tablet) | pass | [flow-owner-tablet.png](screenshots/flow-owner-tablet.png) before=3d901f42-e75e-46bf-a72c-8893c98a658e |
+| Flow ownership | owner select changes in the org chart (tablet) | pass | [flow-owner-tablet.png](screenshots/flow-owner-tablet.png) before=4413860e-de71-4efc-a993-66487a29644e |
 | Model tiers | unknown model id shows an error (tablet) | pass | [tiers-invalid-tablet.png](screenshots/tiers-invalid-tablet.png) HTTP 422 Model not-a-real-model is not in the provider catalog from Test Connection |
 | Model tiers | valid tier change is saved (tablet) | pass | [tiers-saved-tablet.png](screenshots/tiers-saved-tablet.png) |
 | Projects | create from the projects page (tablet) | pass | [projects-created-tablet.png](screenshots/projects-created-tablet.png) |
-| Projects | edit and delete controls on the projects page (tablet) | deferred | [projects-no-edit-delete-tablet.png](screenshots/projects-no-edit-delete-tablet.png) edit=0 delete=0; left to the frontend PR |
+| Projects | edit and delete controls on the projects page (tablet) | pass | [projects-edit-delete-tablet.png](screenshots/projects-edit-delete-tablet.png) rename=2 archive=2 |
 | Logout | sign out returns to login (tablet) | pass | [logout-tablet.png](screenshots/logout-tablet.png) |
 | Login | wrong password shows an error (tablet) | pass | [login-error-tablet.png](screenshots/login-error-tablet.png) |
 | Login | valid password returns to projects (tablet) | pass | [login-ok-tablet.png](screenshots/login-ok-tablet.png) |
@@ -215,20 +213,19 @@ Run on this branch after merging `1b6e555` and the catalog-shape fix.
 | GitHub | stub repo is listed (mobile) | pass | [github-repos-mobile.png](screenshots/github-repos-mobile.png) |
 | Knowledge map | setup shows the map (mobile) | pass | [knowledge-mobile.png](screenshots/knowledge-mobile.png) |
 | Company | generation finishes and offers the org chart (mobile) | pass | [company-ready-mobile.png](screenshots/company-ready-mobile.png) |
-| Org chart | chart, documentation, and PR coordinator are visible (mobile) | pass | [org-chart-mobile.png](screenshots/org-chart-mobile.png) docs=Hannah Berg Documentation Lead OFF pr=Isaac Cohen PR Merge Coordinator OFF |
+| Org chart | chart, documentation, and PR coordinator are visible (mobile) | pass | [org-chart-mobile.png](screenshots/org-chart-mobile.png) docs=Nora Lindgren Documentation Lead OFF pr=Isaac Cohen PR Merge Coordinator OFF |
 | Org chart | edit instructions (mobile) | pass | [org-edit-mobile.png](screenshots/org-edit-mobile.png) |
 | Org chart | toggle CEO off (mobile) | pass | [org-toggle-mobile.png](screenshots/org-toggle-mobile.png) |
 | Org chart | toggle CEO back on (mobile) | pass | [org-toggle-on-mobile.png](screenshots/org-toggle-on-mobile.png) |
 | Org chart | add an agent (mobile) | pass | [org-add-mobile.png](screenshots/org-add-mobile.png) |
 | Org chart | delete asks for confirmation (mobile) | pass | [org-delete-confirm-mobile.png](screenshots/org-delete-confirm-mobile.png) |
 | Org chart | confirmed delete removes the agent (mobile) | pass | [org-deleted-mobile.png](screenshots/org-deleted-mobile.png) |
-| Flow ownership | owner select changes in the org chart (mobile) | pass | [flow-owner-mobile.png](screenshots/flow-owner-mobile.png) before=64b35a04-05df-4899-a370-497377adb774 |
+| Flow ownership | owner select changes in the org chart (mobile) | pass | [flow-owner-mobile.png](screenshots/flow-owner-mobile.png) before=4d161d26-36d3-4efd-bf35-19f7e39b3e43 |
 | Model tiers | unknown model id shows an error (mobile) | pass | [tiers-invalid-mobile.png](screenshots/tiers-invalid-mobile.png) HTTP 422 Model not-a-real-model is not in the provider catalog from Test Connection |
 | Model tiers | valid tier change is saved (mobile) | pass | [tiers-saved-mobile.png](screenshots/tiers-saved-mobile.png) |
 | Projects | create from the projects page (mobile) | pass | [projects-created-mobile.png](screenshots/projects-created-mobile.png) |
-| Projects | edit and delete controls on the projects page (mobile) | deferred | [projects-no-edit-delete-mobile.png](screenshots/projects-no-edit-delete-mobile.png) edit=0 delete=0; left to the frontend PR |
+| Projects | edit and delete controls on the projects page (mobile) | pass | [projects-edit-delete-mobile.png](screenshots/projects-edit-delete-mobile.png) rename=2 archive=2 |
 | Logout | sign out returns to login (mobile) | pass | [logout-mobile.png](screenshots/logout-mobile.png) |
 | Login | wrong password shows an error (mobile) | pass | [login-error-mobile.png](screenshots/login-error-mobile.png) |
 | Login | valid password returns to projects (mobile) | pass | [login-ok-mobile.png](screenshots/login-ok-mobile.png) |
 | Session | expired access token is refreshed from the cookie (mobile) | fixed | [session-expiry-mobile.png](screenshots/session-expiry-mobile.png) http://localhost:3000/projects |
-| Environment | `ANTHROPIC_ENABLED=false` stays off in middleware | fixed | `apps/middleware/src/__tests__/env.test.ts` (already on main) |

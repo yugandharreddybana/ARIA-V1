@@ -6,9 +6,9 @@
 
 ## Verification of main @ 2f5046a (2026-10-27)
 
-Branch `cursor/m1-e2e-verification-24f5`. Report: `docs/verification/M1_VERIFICATION.md` and a compressed `docs/verification/M1_VERIFICATION.pdf` (full-size screenshots are the CI artifact `m1-verification-screenshots`). Base is `main` after the simplified UI (#8), M2 plan (#7), M2 backend (#9), and M2 frontend (#11).
+Branch `cursor/m1-verify-assert-rename-24f5` (from `cursor/m1-e2e-verification-24f5`). Report: `docs/verification/M1_VERIFICATION.md` and a compressed `docs/verification/M1_VERIFICATION.pdf` (full-size screenshots are the CI artifact `m1-verification-screenshots`). Base is `main` after the simplified UI (#8), M2 plan (#7), M2 backend (#9), and M2 frontend (#11).
 
-Harness (local, before #11): **133 pass, 6 fixed, 4 deferred, 0 fail**. Project rename/archive shipped in #11; harness deferred rows are outdated relative to current main and were not re-run for this merge.
+Harness (local re-run after #11): **137 pass, 6 fixed, 0 deferred, 0 fail**. `PATCH /api/projects/:id` asserts 200 + renamed body; projects page asserts `rename-project` / `archive-project` testids (pass/fail, never deferred).
 
 Still applied on top of main:
 - Signup/API callers use `messageFromApiBody` (details first).
