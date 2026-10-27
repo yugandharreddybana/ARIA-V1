@@ -32,12 +32,25 @@ async function setupCompany(page: Page) {
   await page.getByTestId('generate-company').click();
   await page.getByTestId('open-org-chart').click();
   await expect(page.getByTestId('org-chart')).toBeVisible();
+  await expect(page.getByTestId('company-source')).toContainText('source: AI', { timeout: 60_000 });
+  await shot(page, 'company');
 }
 
 test('a ticket moves through review and QA with a timeline and evidence', async ({ page }) => {
   test.setTimeout(240_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   await setupCompany(page);
-  await shot(page, 'company');
+
+  const backup = page.locator('[data-testid^="flow-backup-"]').first();
+  await expect(backup).toBeVisible();
+  const backupValue = await backup.locator('option').nth(2).getAttribute('value');
+  expect(backupValue).toBeTruthy();
+  const savedOwners = page.waitForResponse((res) => res.url().includes('/owners') && res.request().method() === 'PUT');
+  await backup.selectOption(backupValue!);
+  expect((await savedOwners).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator('[data-testid^="flow-backup-"]').first()).toHaveValue(backupValue!);
 
   await page.goto('/board');
   await page.getByTestId('new-ticket-btn').click();
@@ -49,25 +62,21 @@ test('a ticket moves through review and QA with a timeline and evidence', async 
   await expect(card).toBeVisible();
   await expect(card).toContainText('5 pt');
   await card.getByTestId('approve-ticket').click();
-
-  await expect(async () => {
-    await page.reload();
-    await expect(page.getByTestId('column-awaiting_merge').getByRole('link', { name: 'Checkout button' })).toBeVisible();
-  }).toPass({ timeout: 150_000 });
-  await expect(page.getByTestId('column-awaiting_merge').getByTestId('ticket-card')).toContainText(/pt|Awaiting merge|QA|Develop|Review/);
+  await expect(page.getByTestId('column-awaiting_merge').getByRole('link', { name: 'Checkout button' })).toBeVisible({ timeout: 150_000 });
+  await expect(page.getByTestId('column-awaiting_merge').getByTestId('ticket-card')).toContainText(/pt|Awaiting merge/);
   await shot(page, 'board');
 
   const ticketLink = page.getByTestId('column-awaiting_merge').getByRole('link', { name: 'Checkout button' });
   await ticketLink.focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('chain-status')).toContainText('Hash chain verified');
+  await expect(page.getByTestId('chain-status')).toContainText('Hash chain verified', { timeout: 20_000 });
   await expect(page.getByTestId('timeline').locator('li').first()).toBeVisible();
   await page.getByTestId('event-type-filter').selectOption('status_change');
   await expect(page.getByTestId('timeline')).toContainText('status_change');
   await page.getByTestId('edit-points').selectOption('13');
   await page.getByRole('button', { name: 'Save points' }).click();
   await expect(page.getByTestId('split-suggestion')).toBeVisible();
-  await expect(page.getByTestId('evidence-gate')).toContainText(/Gate passed|evidence/i);
+  await expect(page.getByTestId('evidence-gate')).toContainText(/Gate passed|merge gate|report/i);
   const markdown = page.waitForEvent('download');
   await page.getByTestId('download-dev-md').click();
   expect((await markdown).suggestedFilename()).toContain('.md');
@@ -82,7 +91,7 @@ test('a ticket moves through review and QA with a timeline and evidence', async 
   await page.goto('/runs');
   await expect(page.getByTestId('budget-usage')).toBeVisible();
   await expect(page.getByTestId('run-row').first()).toBeVisible();
-  await page.getByTestId('run-row').first().click();
+  await page.getByTestId('run-row').first().getByTestId('run-status').click();
   await expect(page.getByTestId('run-detail')).toBeVisible();
   await page.keyboard.press('Tab');
   const trapped = await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') != null);
@@ -93,6 +102,15 @@ test('a ticket moves through review and QA with a timeline and evidence', async 
   await page.goto('/settings');
   await expect(page.getByTestId('github-guard')).toBeVisible();
   await expect(page.getByTestId('settings-budget')).toBeVisible();
+  await page.locator('#monthly-budget').fill('abc');
+  await page.getByRole('button', { name: 'Save budget' }).click();
+  await expect(page.getByText(/positive whole number/i)).toBeVisible();
+  await page.locator('#monthly-budget').fill('1,000');
+  await page.getByRole('button', { name: 'Save budget' }).click();
+  await expect(page.getByText('Budget saved.')).toBeVisible();
+  await page.locator('#monthly-budget').fill('');
+  await page.getByRole('button', { name: 'Save budget' }).click();
+  await expect(page.getByText('Budget cleared. The workspace default applies.')).toBeVisible();
   await shot(page, 'settings');
 
   await page.goto('/projects');
@@ -109,29 +127,29 @@ test('a ticket moves through review and QA with a timeline and evidence', async 
   await page.getByTestId('project-card').filter({ hasText: 'Temp Shop Renamed' }).getByTestId('archive-project').click();
   await page.getByRole('dialog', { name: 'Archive project' }).getByRole('button', { name: 'Archive' }).click();
   await expect(page.getByTestId('project-card').filter({ hasText: 'Temp Shop Renamed' })).toContainText('archived');
+  await expect(page.getByTestId('project-card').filter({ hasText: 'Demo Shop' })).toBeVisible();
   await shot(page, 'projects');
 
   await page.goto('/board');
+  await page.getByLabel('Project').selectOption({ label: 'Demo Shop' });
   await page.getByTestId('new-ticket-btn').click();
   await page.fill('#ticket-title', 'Slow receipt');
   await page.fill('#ticket-desc', 'Hold the run. [[stub:slow=20000]]');
   await page.getByTestId('ticket-points').selectOption('2');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
-  const approved = page.waitForResponse((res) => res.url().includes('/api/tickets/') && res.request().method() === 'PATCH');
+  const approved = page.waitForResponse((res) => res.url().includes('/api/tickets/') && res.request().method() === 'PATCH' && res.ok());
   await page.getByTestId('ticket-card').filter({ hasText: 'Slow receipt' }).getByTestId('approve-ticket').click();
   expect((await approved).ok()).toBeTruthy();
   await page.goto('/runs');
   const live = page.getByTestId('run-row').filter({ hasText: /queued|running/ });
-  await expect(async () => {
-    if (await live.count() === 0) await page.reload();
-    await expect(live.first()).toBeVisible();
-  }).toPass({ timeout: 25_000 });
-  await live.first().click();
+  await expect(live.first()).toBeVisible({ timeout: 20_000 });
+  await live.first().getByTestId('run-status').click();
+  await expect(page.getByRole('log')).toContainText(/develop started|status/, { timeout: 15_000 });
   await page.getByTestId('cancel-run').click();
-  await expect(page.getByTestId('run-detail')).toContainText('cancelled', { timeout: 10_000 });
+  await expect(page.getByTestId('run-detail')).toContainText('cancelled', { timeout: 2_000 });
 
   const violations = await page.request.get('http://127.0.0.1:4010/__stub/violations');
-  if (violations.ok()) {
-    expect(await violations.json()).toEqual({ violations: 0 });
-  }
+  expect(violations.ok(), 'merge-violation stub must be reachable').toBeTruthy();
+  expect(await violations.json()).toEqual({ violations: 0 });
+  expect(pageErrors).toEqual([]);
 });
