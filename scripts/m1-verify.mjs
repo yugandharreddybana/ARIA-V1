@@ -119,7 +119,13 @@ async function apiSuite() {
   const projectId = project.json?.project?.id;
   record('Projects', 'create project', project.status === 201 && projectId ? 'pass' : 'fail', '', `HTTP ${project.status}`);
   const edited = await call(`/api/projects/${projectId}`, { method: 'PATCH', token: owner.token, body: { name: 'Renamed Shop' } });
-  record('Projects', 'edit project name', 'deferred', '', `HTTP ${edited.status} ${edited.json?.error || edited.json?.message || ''}; left to the frontend PR`);
+  record(
+    'Projects',
+    'edit project name',
+    edited.status === 200 && edited.json?.project?.name === 'Renamed Shop' ? 'pass' : 'fail',
+    '',
+    `HTTP ${edited.status} name=${edited.json?.project?.name || ''} ${edited.json?.error || edited.json?.message || ''}`.trim(),
+  );
   const foreign = await call(`/api/projects/${projectId}`, { token: other.token });
   record('Authorization', 'user B cannot read user A project', foreign.status === 404 ? 'pass' : 'fail', '', `HTTP ${foreign.status}`);
   const foreignList = await call('/api/projects', { token: other.token });
@@ -416,7 +422,12 @@ async function uiSuite() {
         await page.getByTestId('github-token').fill('live-stub-github');
         await page.getByTestId('list-repos').click();
         await page.getByTestId('repo-acme-demo-app').waitFor({ timeout: 15000 });
-        record('GitHub', `stub repo is listed (${tag})`, true ? 'pass' : 'fail', await shot(page, `github-repos-${tag}`));
+        record(
+          'GitHub',
+          `stub repo is listed (${tag})`,
+          await page.getByTestId('repo-acme-demo-app').isVisible() ? 'pass' : 'fail',
+          await shot(page, `github-repos-${tag}`),
+        );
         await page.getByTestId('repo-acme-demo-app').check();
         await page.getByTestId('connect-repos').click();
         await page.getByTestId('knowledge-summary').filter({ hasText: /signup/i }).waitFor({ timeout: 45000 });
@@ -425,7 +436,12 @@ async function uiSuite() {
         await page.getByTestId('company-size').fill('10');
         await page.getByTestId('generate-company').click();
         await page.getByTestId('open-org-chart').waitFor({ timeout: 20000 });
-        record('Company', `generation finishes and offers the org chart (${tag})`, true ? 'pass' : 'fail', await shot(page, `company-ready-${tag}`));
+        record(
+          'Company',
+          `generation finishes and offers the org chart (${tag})`,
+          await page.getByTestId('open-org-chart').isVisible() ? 'pass' : 'fail',
+          await shot(page, `company-ready-${tag}`),
+        );
         await page.getByTestId('open-org-chart').click();
         await page.getByTestId('org-chart').waitFor({ timeout: 15000 });
         const docsOff = page.locator('[data-testid^="agent-documentation"]');
@@ -459,7 +475,12 @@ async function uiSuite() {
         await page.getByTestId('add-agent').click();
         const nora = page.getByRole('button', { name: /Nora Analyst/ });
         await nora.waitFor({ timeout: 10000 });
-        record('Org chart', `add an agent (${tag})`, true ? 'pass' : 'fail', await shot(page, `org-add-${tag}`));
+        record(
+          'Org chart',
+          `add an agent (${tag})`,
+          await nora.isVisible() && (await nora.innerText()).includes('Nora Analyst') ? 'pass' : 'fail',
+          await shot(page, `org-add-${tag}`),
+        );
         await nora.click();
         await page.getByTestId('agent-delete').click();
         record('Org chart', `delete asks for confirmation (${tag})`, await page.getByTestId('agent-delete-confirm').isVisible() ? 'pass' : 'fail', await shot(page, `org-delete-confirm-${tag}`));
@@ -495,7 +516,12 @@ async function uiSuite() {
         await autoModel.press('Enter');
         await savedTiers;
         await page.getByText('Development uses claude-opus-5').waitFor({ timeout: 10000 });
-        record('Model tiers', `valid tier change is saved (${tag})`, true ? 'pass' : 'fail', await shot(page, `tiers-saved-${tag}`));
+        record(
+          'Model tiers',
+          `valid tier change is saved (${tag})`,
+          await page.getByText('Development uses claude-opus-5').isVisible() ? 'pass' : 'fail',
+          await shot(page, `tiers-saved-${tag}`),
+        );
 
         await page.goto(`${WEB}/projects`);
         await page.getByRole('button', { name: 'New Project' }).click();
@@ -503,10 +529,24 @@ async function uiSuite() {
         await page.locator('#pdesc').fill('Created from the projects page');
         await page.getByRole('button', { name: 'Create', exact: true }).click();
         await page.getByTestId('project-card').first().waitFor({ timeout: 10000 });
-        record('Projects', `create from the projects page (${tag})`, true ? 'pass' : 'fail', await shot(page, `projects-created-${tag}`));
-        const editControl = await page.getByRole('button', { name: /rename|edit project/i }).count();
-        const deleteControl = await page.getByRole('button', { name: /delete|archive/i }).count();
-        record('Projects', `edit and delete controls on the projects page (${tag})`, 'deferred', await shot(page, `projects-no-edit-delete-${tag}`), `edit=${editControl} delete=${deleteControl}; left to the frontend PR`);
+        const createdCard = page.getByTestId('project-card').filter({ hasText: `UI Shop ${tag}` }).first();
+        record(
+          'Projects',
+          `create from the projects page (${tag})`,
+          await createdCard.count() > 0 && (await createdCard.innerText()).includes(`UI Shop ${tag}`) ? 'pass' : 'fail',
+          await shot(page, `projects-created-${tag}`),
+        );
+        const renameControl = page.getByTestId('rename-project');
+        const archiveControl = page.getByTestId('archive-project');
+        const renameCount = await renameControl.count();
+        const archiveCount = await archiveControl.count();
+        record(
+          'Projects',
+          `edit and delete controls on the projects page (${tag})`,
+          renameCount > 0 && archiveCount > 0 ? 'pass' : 'fail',
+          await shot(page, `projects-edit-delete-${tag}`),
+          `rename=${renameCount} archive=${archiveCount}`,
+        );
 
         await openNav(page, tag);
         await page.getByTitle('Sign out').click();
