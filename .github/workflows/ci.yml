@@ -171,6 +171,9 @@ jobs:
           export ARIA_LLM_MODE=live
           export ARIA_GITHUB_MODE=live
           export CURSOR_API_BASE=http://127.0.0.1:4010
+          export OPENAI_API_BASE=http://127.0.0.1:4010/v1
+          export ANTHROPIC_API_BASE=http://127.0.0.1:4010
+          export NVIDIA_API_BASE=http://127.0.0.1:4010/v1
           export GITHUB_API_BASE=http://127.0.0.1:4010
           export AUTH_RATE_LIMIT_MAX=2000
           export RATE_LIMIT_MAX=10000
@@ -200,9 +203,10 @@ jobs:
           export NEXT_PUBLIC_MIDDLEWARE_URL="http://localhost:3001"
           export BASE_URL="http://localhost:3000"
           export API_URL="http://127.0.0.1:3001"
+          export M1_SKIP_JAVA=1
           pnpm -F @aria/e2e exec node ../../scripts/m1-verify.mjs
       - name: Upload Milestone 1 screenshots
-        if: matrix.project == 'chromium-desktop'
+        if: matrix.project == 'chromium-desktop' && success()
         uses: actions/upload-artifact@v4
         with:
           name: m1-verification-screenshots
