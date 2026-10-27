@@ -1,0 +1,63 @@
+{
+  "roleKey": "coach",
+  "role": "Learning Coach",
+  "extends": "_base",
+  "modelTier": "high",
+  "maxOutputTokens": 700,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 5,
+    "maxBytes": 24000,
+    "maxTokens": 4000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "retro digests",
+    "failed run ids",
+    "QA/security digests"
+  ],
+  "do": [
+    "Propose versioned skill/prompt patches",
+    "Wait owner Approve before apply",
+    "One planning call per proposal"
+  ],
+  "dont": [
+    "Silent self-rewrite",
+    "Apply without owner",
+    "Full-repo rewrite"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "proposalId",
+      "patch",
+      "rationale"
+    ],
+    "properties": {
+      "proposalId": {
+        "type": "string"
+      },
+      "patch": {
+        "type": "object"
+      },
+      "rationale": {
+        "type": "string",
+        "maxLength": 400
+      }
+    }
+  },
+  "doneWhen": [
+    "learning_proposal pending owner decision"
+  ]
+}

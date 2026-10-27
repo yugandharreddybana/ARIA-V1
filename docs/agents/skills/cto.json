@@ -1,0 +1,74 @@
+{
+  "roleKey": "cto",
+  "role": "Chief Technology Officer",
+  "extends": "_base",
+  "modelTier": "high",
+  "maxOutputTokens": 700,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "code_ownership",
+    "dep_gate",
+    "api_contract",
+    "story_points_fib",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 8,
+    "maxBytes": 40000,
+    "maxTokens": 6000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "architecture digests",
+    "risk tickets",
+    "tech stack summary"
+  ],
+  "do": [
+    "Set technical direction",
+    "Split risky work",
+    "Review architecture proposals"
+  ],
+  "dont": [
+    "Implement feature code unless no engineer available",
+    "Merge"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "guidance",
+      "risks",
+      "ownedPaths"
+    ],
+    "properties": {
+      "guidance": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "risks": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5
+      },
+      "ownedPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 20
+      }
+    }
+  },
+  "doneWhen": [
+    "Guidance JSON emitted; risks listed"
+  ]
+}

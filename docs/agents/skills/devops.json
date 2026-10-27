@@ -1,0 +1,65 @@
+{
+  "roleKey": "devops",
+  "role": "DevOps Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 900,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "dev_qa_evidence",
+    "code_ownership",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 20,
+    "maxBytes": 120000,
+    "maxTokens": 16000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "ticket",
+    "CI digests",
+    "env config summaries"
+  ],
+  "do": [
+    "Keep CI green",
+    "Env/operability changes with rollback notes",
+    "Dev evidence"
+  ],
+  "dont": [
+    "Prod changes without user",
+    "Merge",
+    "Weaken security gates"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "pr",
+      "evidence",
+      "rollback"
+    ],
+    "properties": {
+      "pr": {
+        "type": "string"
+      },
+      "evidence": {
+        "type": "string"
+      },
+      "rollback": {
+        "type": "string",
+        "maxLength": 300
+      }
+    }
+  },
+  "doneWhen": [
+    "PR open; rollback noted"
+  ]
+}

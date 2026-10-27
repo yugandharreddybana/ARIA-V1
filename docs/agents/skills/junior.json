@@ -1,0 +1,70 @@
+{
+  "roleKey": "junior",
+  "role": "Junior Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 1000,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "dev_qa_evidence",
+    "ac_gherkin",
+    "code_ownership",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 20,
+    "maxBytes": 120000,
+    "maxTokens": 16000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "ticket",
+    "contract",
+    "mentor notes",
+    "owned paths"
+  ],
+  "do": [
+    "Implement smallest scoped change",
+    "Ask CTO/owner on ambiguity",
+    "Dev evidence md+pdf"
+  ],
+  "dont": [
+    "Refactor beyond ticket",
+    "Merge",
+    "Skip tests"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "pr",
+      "evidence",
+      "questions"
+    ],
+    "properties": {
+      "pr": {
+        "type": "string"
+      },
+      "evidence": {
+        "type": "string"
+      },
+      "questions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5
+      }
+    }
+  },
+  "doneWhen": [
+    "PR open; evidence valid; questions listed if blocked"
+  ]
+}

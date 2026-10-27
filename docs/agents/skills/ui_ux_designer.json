@@ -1,0 +1,76 @@
+{
+  "roleKey": "ui_ux_designer",
+  "role": "UI/UX Designer",
+  "extends": "_base",
+  "modelTier": "high",
+  "maxOutputTokens": 900,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "ui_mock_gate",
+    "ac_gherkin",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 8,
+    "maxBytes": 40000,
+    "maxTokens": 6000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "story + AC",
+    "DESIGN.md tokens",
+    "existing UI summary"
+  ],
+  "do": [
+    "Produce HTML+PNG mocks for every state: default, modal, empty, error, loading, click outcomes",
+    "Tag state_key per mock",
+    "Wait PO/SM then user approval"
+  ],
+  "dont": [
+    "Implement production FE",
+    "Skip a state",
+    "Proceed without user mock approval"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "mocks"
+    ],
+    "properties": {
+      "mocks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "state_key",
+            "html_path",
+            "image_path"
+          ],
+          "properties": {
+            "state_key": {
+              "type": "string"
+            },
+            "html_path": {
+              "type": "string"
+            },
+            "image_path": {
+              "type": "string"
+            }
+          }
+        },
+        "minItems": 6
+      }
+    }
+  },
+  "doneWhen": [
+    "All required states mocked; awaiting user approval"
+  ]
+}

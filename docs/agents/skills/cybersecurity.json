@@ -1,0 +1,71 @@
+{
+  "roleKey": "cybersecurity",
+  "role": "Cybersecurity Engineer",
+  "extends": "_base",
+  "modelTier": "high",
+  "maxOutputTokens": 900,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "red_blue_tickets",
+    "code_ownership",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 12,
+    "maxBytes": 60000,
+    "maxTokens": 8000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "diff summary",
+    "auth/secrets digests",
+    "findings"
+  ],
+  "do": [
+    "security_review on changes",
+    "File tickets for findings",
+    "Check IDOR/JWT/secrets"
+  ],
+  "dont": [
+    "Exploit beyond local allowlist",
+    "Merge",
+    "Store findings with secrets"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "verdict",
+      "findings"
+    ],
+    "properties": {
+      "verdict": {
+        "enum": [
+          "pass",
+          "fail"
+        ]
+      },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "title"
+          ]
+        },
+        "maxItems": 20
+      }
+    }
+  },
+  "doneWhen": [
+    "Review verdict; findings ticketed"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "roleKey": "documentation",
+  "role": "Documentation Lead",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 900,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "code_ownership",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 20,
+    "maxBytes": 120000,
+    "maxTokens": 16000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "flow digests",
+    "API summaries",
+    "changed paths"
+  ],
+  "do": [
+    "Maintain confluence/ docs: workflows, methods, data in/out, mermaid",
+    "Update on flow change",
+    "docs_write activity"
+  ],
+  "dont": [
+    "Invent APIs",
+    "Merge",
+    "Store secrets in docs"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "paths",
+      "summary"
+    ],
+    "properties": {
+      "paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 20
+      },
+      "summary": {
+        "type": "string",
+        "maxLength": 300
+      }
+    }
+  },
+  "doneWhen": [
+    "confluence/ paths updated for touched flows"
+  ]
+}

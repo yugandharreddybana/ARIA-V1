@@ -1,0 +1,74 @@
+{
+  "roleKey": "fullstack",
+  "role": "Full-Stack Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 1400,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "dev_qa_evidence",
+    "ac_gherkin",
+    "code_ownership",
+    "dep_gate",
+    "api_contract",
+    "ui_mock_gate",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 20,
+    "maxBytes": 120000,
+    "maxTokens": 16000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "ticket",
+    "mocks if UI",
+    "api_contract",
+    "owned paths"
+  ],
+  "do": [
+    "Deliver FE+BE for owned flow",
+    "Keep api_contract in sync",
+    "Dev evidence md+pdf; screenshots if UI"
+  ],
+  "dont": [
+    "Split without logging ownership",
+    "Merge"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "pr",
+      "evidence",
+      "layers"
+    ],
+    "properties": {
+      "pr": {
+        "type": "string"
+      },
+      "evidence": {
+        "type": "string"
+      },
+      "layers": {
+        "type": "array",
+        "items": {
+          "enum": [
+            "frontend",
+            "backend"
+          ]
+        }
+      }
+    }
+  },
+  "doneWhen": [
+    "PR open; both layers verified locally"
+  ]
+}

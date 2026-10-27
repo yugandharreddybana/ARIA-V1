@@ -33,6 +33,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
+      - run: node scripts/sync-agent-skills.mjs --check
       - run: pnpm -F @aria/middleware typecheck
       - run: pnpm -F @aria/config    exec tsc --noEmit
       - run: pnpm -F @aria/web       exec tsc --noEmit
@@ -63,6 +64,7 @@ jobs:
       - run: pnpm install --frozen-lockfile=false
       - run: node scripts/apply-migrations.cjs
       - run: node scripts/check-schema-drift.cjs
+      - run: node scripts/sync-agent-skills.mjs --check
       - run: pnpm -F @aria/middleware test
       - run: pnpm -F @aria/web test
 
