@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Table, TBody, TD, TR } from '@/components/ui/table';
+import { ProviderCredentialsPanel } from '@/components/providers/provider-credentials-panel';
 
 interface Guard {
   defaultBranch: string;
@@ -21,7 +22,13 @@ interface Guard {
   codeRuntime: string;
 }
 interface Budget { limit: number; used: number; reserved: number; warnAt: number; projectLimit: number | null }
-interface Catalog { catalog?: string[]; planningModel: string; developmentModel: string }
+interface Catalog {
+  catalog?: string[];
+  planningModel: string;
+  developmentModel: string;
+  planning?: 'top' | 'auto';
+  development?: 'top' | 'auto';
+}
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -31,6 +38,8 @@ export default function SettingsPage() {
   const [budget, setBudget] = useState<Budget | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [budgetInput, setBudgetInput] = useState('');
+  const [planningTier, setPlanningTier] = useState<'top' | 'auto'>('top');
+  const [developmentTier, setDevelopmentTier] = useState<'top' | 'auto'>('auto');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -55,8 +64,25 @@ export default function SettingsPage() {
       setBudget(nextBudget);
       setBudgetInput(nextBudget.projectLimit == null ? '' : String(nextBudget.projectLimit));
       setCatalog(company?.modelTiers ?? null);
+      if (company?.modelTiers?.planning) setPlanningTier(company.modelTiers.planning);
+      if (company?.modelTiers?.development) setDevelopmentTier(company.modelTiers.development);
     }).catch(() => setError('Could not load project settings.'));
   }, [projectId]);
+
+  async function saveModelTiers(event: React.FormEvent) {
+    event.preventDefault();
+    if (!projectId) return;
+    setNotice('');
+    try {
+      await api(`/projects/${projectId}/model-tiers`, {
+        method: 'PATCH',
+        body: JSON.stringify({ planning: planningTier, development: developmentTier }),
+      });
+      setNotice('Model tiers saved.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save model tiers.');
+    }
+  }
 
   async function saveRuntime(codeRuntime: 'cursor_cloud' | 'local_worktree') {
     setNotice('');
@@ -133,6 +159,14 @@ export default function SettingsPage() {
       {error && <ErrorNote>{error}</ErrorNote>}
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Providers</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProviderCredentialsPanel mode="settings" projectId={projectId || undefined} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Project</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -178,6 +212,21 @@ export default function SettingsPage() {
             <p className="text-sm" data-testid="settings-catalog">
               Planning {catalog.planningModel}. Development {catalog.developmentModel}. Catalog: {catalog.catalog?.length ? catalog.catalog.join(', ') : 'none stored'}.
             </p>
+          )}
+          {projectId && (
+            <form onSubmit={saveModelTiers} className="space-y-2 text-sm" data-testid="settings-model-tiers">
+              <Label htmlFor="tier-planning">Planning tier</Label>
+              <select id="tier-planning" className="field" data-testid="tier-planning" value={planningTier} onChange={(e) => setPlanningTier(e.target.value === 'auto' ? 'auto' : 'top')}>
+                <option value="top">top</option>
+                <option value="auto">auto</option>
+              </select>
+              <Label htmlFor="tier-development">Development tier</Label>
+              <select id="tier-development" className="field" data-testid="tier-development" value={developmentTier} onChange={(e) => setDevelopmentTier(e.target.value === 'top' ? 'top' : 'auto')}>
+                <option value="top">top</option>
+                <option value="auto">auto</option>
+              </select>
+              <Button type="submit" variant="outline">Save tiers</Button>
+            </form>
           )}
           {notice && <p role="status" className="text-sm">{notice}</p>}
         </CardContent>

@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error.middleware';
 import type { LlmConfigInput } from '../schemas/workspace.schema';
 import { decryptSecret, encryptSecret, type SecretContext } from './crypto.service';
 import { testProviderConnection, type ConnectionResult, type LlmProviderId } from './llmProvider.service';
+import { upsertFromLegacyLlm } from './providers/credentials.service';
 
 function encryptApiKey(plain: string, ctx: SecretContext): string {
   return encryptSecret(plain, ctx);
@@ -43,6 +44,15 @@ export async function saveLlmConfig(
       updatedAt: new Date(),
     })
     .where(eq(workspaces.id, workspaceId));
+
+  // Mirror into provider_credentials so M3A active-credential path stays in sync.
+  await upsertFromLegacyLlm(workspaceId, {
+    provider: config.provider,
+    apiKey: config.apiKey ?? null,
+    baseUrl,
+    model: config.model,
+    catalog: tested?.models,
+  });
 }
 
 export async function getLlmConfig(workspaceId: string) {
@@ -79,5 +89,8 @@ export async function testLlmConnectivity(
 }
 
 function isProvider(provider: string): provider is LlmProviderId {
-  return ['cursor', 'gemini', 'groq', 'ollama', 'openai', 'anthropic', 'nvidia', 'custom', 'openai_compatible'].includes(provider);
+  return [
+    'cursor', 'claude_code', 'codex', 'antigravity',
+    'gemini', 'groq', 'ollama', 'openai', 'anthropic', 'nvidia', 'custom', 'openai_compatible',
+  ].includes(provider);
 }
