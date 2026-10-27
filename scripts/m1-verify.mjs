@@ -416,6 +416,9 @@ async function uiSuite() {
           ];
           for (const [id, key, base, expectOk] of cases) {
             await page.getByTestId(`provider-${id}`).click();
+            // M3A allows several labeled keys; unique labels avoid 409 reuse of a prior ok row
+            // (e.g. a second ollama attempt must not retest the stub URL from the first).
+            await page.getByTestId('credential-label').fill(`${id}-${expectOk ? 'ok' : 'bad'}-${Date.now()}`);
             if (base !== null) await page.getByTestId('llm-base-url').fill(base);
             if (key !== null) await page.getByTestId('llm-api-key').fill(key);
             await page.getByTestId('test-connection').click();

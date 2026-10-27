@@ -11,8 +11,7 @@ import { dueAt } from './tickets/schedule';
 import { loadWorkspaceLlm } from './guardedLlm.service';
 import { cancelForTicket, enqueue, releaseHeldRuns, type HeldRun } from './runs/runQueue';
 import { getPgPool } from './db.client';
-import { codeWorkerFor } from './models/codeWorker';
-import { workspaceCursorKey } from './models/cursorKey';
+import { codeWorkerForWorkspace } from './providers/resolveWorker';
 
 function sanitise(s: string, max: number): string {
   return s.trim().slice(0, max);
@@ -190,8 +189,7 @@ export async function updateTicket(
       const cloud = held.filter((run) => run.external_agent_id && run.external_run_id);
       if (cloud.length) {
         try {
-          const apiKey = await workspaceCursorKey(workspaceId);
-          const worker = codeWorkerFor();
+          const { worker, apiKey } = await codeWorkerForWorkspace(workspaceId);
           for (const run of cloud) {
             await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
           }

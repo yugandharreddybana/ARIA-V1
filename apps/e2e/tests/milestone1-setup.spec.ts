@@ -16,7 +16,8 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await expect(page.getByTestId('provider-cursor')).toBeVisible();
   await page.getByTestId('llm-api-key').fill('aria-mock-key');
   await page.getByTestId('test-connection').click();
-  await expect(page.getByTestId('test-connection-result')).toContainText(/succeeded|verified/i);
+  await expect(page.getByTestId('test-connection-result')).toContainText(/activated|succeeded|verified/i);
+  await expect(page.getByTestId('setup-next')).toBeEnabled({ timeout: 15_000 });
   await page.getByTestId('setup-next').click();
 
   await page.getByTestId('github-token').fill('aria-mock-github');

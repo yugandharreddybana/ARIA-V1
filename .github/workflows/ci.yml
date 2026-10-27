@@ -195,7 +195,7 @@ jobs:
           echo "stack did not become healthy" >&2
           tail -n 80 /tmp/aria-stub.log /tmp/aria-middleware.log /tmp/aria-web.log >&2 || true
           exit 1
-      - run: pnpm -F @aria/e2e exec playwright test tests/milestone2-agents.spec.ts tests/milestone1-setup.spec.ts tests/m1-validation-message.spec.ts tests/m1-session-refresh.spec.ts tests/auth/landing.spec.ts tests/sprint1-auth.spec.ts tests/sprint2-projects.spec.ts tests/sprint3-analysis.spec.ts tests/sprint4-tickets.spec.ts tests/sprint4-sessions.spec.ts tests/sprint4-planning.spec.ts tests/sprint4-team.spec.ts tests/sprint4-settings.spec.ts tests/sprint4-ai.spec.ts --project=${{ matrix.project }}
+      - run: pnpm -F @aria/e2e exec playwright test tests/milestone3a-providers.spec.ts tests/milestone2-agents.spec.ts tests/milestone1-setup.spec.ts tests/m1-validation-message.spec.ts tests/m1-session-refresh.spec.ts tests/auth/landing.spec.ts tests/sprint1-auth.spec.ts tests/sprint2-projects.spec.ts tests/sprint3-analysis.spec.ts tests/sprint4-tickets.spec.ts tests/sprint4-sessions.spec.ts tests/sprint4-planning.spec.ts tests/sprint4-team.spec.ts tests/sprint4-settings.spec.ts tests/sprint4-ai.spec.ts --project=${{ matrix.project }}
       - name: Capture Milestone 1 screenshots
         if: matrix.project == 'chromium-desktop'
         run: |

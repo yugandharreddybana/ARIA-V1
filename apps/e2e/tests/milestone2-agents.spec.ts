@@ -20,7 +20,8 @@ async function setupCompany(page: Page) {
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByTestId('llm-api-key').fill('aria-mock-key');
   await page.getByTestId('test-connection').click();
-  await expect(page.getByTestId('test-connection-result')).toContainText(/succeeded|verified/i);
+  await expect(page.getByTestId('test-connection-result')).toContainText(/activated|succeeded|verified/i);
+  await expect(page.getByTestId('setup-next')).toBeEnabled({ timeout: 15_000 });
   await page.getByTestId('setup-next').click();
   await page.getByTestId('github-token').fill('aria-mock-github');
   await page.getByTestId('list-repos').click();

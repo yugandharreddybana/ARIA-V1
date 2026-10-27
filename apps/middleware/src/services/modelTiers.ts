@@ -73,14 +73,17 @@ export function defaultTierModels(provider: LlmProviderId, workspaceModel?: stri
   switch (provider) {
     case 'cursor':
       return { top: CURSOR_TOP_MODEL, auto: CURSOR_AUTO_MODEL };
+    case 'claude_code':
+    case 'anthropic':
+      return { top: 'claude-opus-4-7', auto: 'claude-sonnet-4-6' };
+    case 'codex':
+    case 'openai':
+      return { top: 'gpt-4.1', auto: 'gpt-4.1-mini' };
+    case 'antigravity':
     case 'gemini':
       return { top: 'gemini-2.5-pro', auto: 'gemini-2.5-flash' };
     case 'groq':
       return { top: 'llama-3.3-70b-versatile', auto: 'llama-3.1-8b-instant' };
-    case 'openai':
-      return { top: 'gpt-4.1', auto: 'gpt-4.1-mini' };
-    case 'anthropic':
-      return { top: 'claude-opus-4-7', auto: 'claude-sonnet-4-6' };
     case 'nvidia':
       return { top: 'nvidia/llama-3.1-nemotron-70b-instruct', auto: 'meta/llama-3.1-8b-instruct' };
     case 'ollama':

@@ -8,21 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
+import { ProviderCredentialsPanel } from '@/components/providers/provider-credentials-panel';
 import { cn } from '@/lib/utils';
-
-type ProviderId = 'cursor' | 'gemini' | 'groq' | 'ollama' | 'openai' | 'anthropic' | 'openai_compatible';
-
-const FIXED_HOSTS = new Set<ProviderId>(['cursor', 'gemini', 'groq', 'openai', 'anthropic']);
-
-const PROVIDERS: Array<{ id: ProviderId; label: string; model: string; baseUrl?: string; needsKey: boolean; hint: string }> = [
-  { id: 'cursor', label: 'Cursor', model: 'cursor-agent', needsKey: true, hint: 'Default. Verifies a Cloud Agents API key. Cursor cannot complete chat prompts.' },
-  { id: 'gemini', label: 'Gemini', model: 'gemini-2.0-flash', needsKey: true, hint: 'Google AI Studio key.' },
-  { id: 'groq', label: 'Groq', model: 'llama-3.3-70b-versatile', needsKey: true, hint: 'OpenAI-compatible Groq key.' },
-  { id: 'ollama', label: 'Ollama', model: 'qwen2.5-coder:7b', baseUrl: 'http://localhost:11434', needsKey: false, hint: 'Local Ollama server. The base URL is required.' },
-  { id: 'openai', label: 'OpenAI', model: 'gpt-4o-mini', needsKey: true, hint: 'OpenAI API key.' },
-  { id: 'anthropic', label: 'Anthropic', model: 'claude-sonnet-4-5', needsKey: true, hint: 'Anthropic API key.' },
-  { id: 'openai_compatible', label: 'OpenAI-compatible', model: 'local-model', baseUrl: 'http://localhost:8080/v1', needsKey: true, hint: 'Any base URL that serves /v1/models and /v1/chat/completions.' },
-];
 
 interface RepoRow { fullName: string; private: boolean; defaultBranch: string }
 interface FlowRow { id: string; name: string; kind: string; description: string }
@@ -30,6 +17,7 @@ interface JobRow { id: string; status: string; errorMessage: string | null }
 interface SetupState {
   project: { id: string; name: string } | null;
   llmConfigured: boolean;
+  credentialsReady?: { ok: boolean };
   repoCount: number;
   knowledgeReady: boolean;
   summary: string;
@@ -72,12 +60,7 @@ export default function SetupPage() {
   const [error, setError] = useState('');
   const [projectId, setProjectId] = useState('');
   const [projectName, setProjectName] = useState('');
-  const [provider, setProvider] = useState<ProviderId>('cursor');
-  const [model, setModel] = useState(PROVIDERS[0].model);
-  const [baseUrl, setBaseUrl] = useState(PROVIDERS[0].baseUrl ?? '');
-  const [apiKey, setApiKey] = useState('');
-  const [tested, setTested] = useState(false);
-  const [testMessage, setTestMessage] = useState('');
+  const [providersReady, setProvidersReady] = useState(false);
   const [githubToken, setGithubToken] = useState('');
   const [repos, setRepos] = useState<RepoRow[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -90,27 +73,6 @@ export default function SetupPage() {
   const [developmentTier, setDevelopmentTier] = useState<'top' | 'auto'>('auto');
   const [busy, setBusy] = useState(false);
   const resumed = useRef(false);
-
-  const preset = PROVIDERS.find((item) => item.id === provider) ?? PROVIDERS[0];
-  const allowsBaseUrl = !FIXED_HOSTS.has(provider);
-
-  function llmPayload() {
-    return {
-      provider,
-      model,
-      apiKey: apiKey || undefined,
-      ...(allowsBaseUrl ? { baseUrl: baseUrl || undefined } : {}),
-    };
-  }
-
-  function chooseProvider(id: ProviderId) {
-    const next = PROVIDERS.find((item) => item.id === id) ?? PROVIDERS[0];
-    setProvider(id);
-    setModel(next.model);
-    setBaseUrl(next.baseUrl ?? '');
-    setTested(false);
-    setTestMessage('');
-  }
 
   async function createProject(event: React.FormEvent) {
     event.preventDefault();
@@ -128,33 +90,13 @@ export default function SetupPage() {
     } finally { setBusy(false); }
   }
 
-  async function testConnection() {
-    setBusy(true); setError(''); setTested(false);
-    try {
-      const result = await api<{ ok: boolean; message: string }>('/workspace/llm-config/test', {
-        method: 'POST',
-        body: JSON.stringify(llmPayload()),
-      });
-      setTestMessage(result.message);
-      setTested(result.ok);
-    } catch (err) {
-      setTested(false);
-      setTestMessage(err instanceof ApiError ? err.message : 'Connection failed');
-    } finally { setBusy(false); }
-  }
-
-  async function saveProvider(event: React.FormEvent) {
-    event.preventDefault();
-    if (!tested) return;
+  async function continueAfterProviders() {
     setBusy(true); setError('');
     try {
-      await api('/workspace/llm-config', {
-        method: 'PATCH',
-        body: JSON.stringify(llmPayload()),
-      });
+      await api('/setup/complete', { method: 'POST' });
       setStep(3);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save the provider');
+      setError(err instanceof ApiError ? err.message : 'Activate planning and coding credentials first');
     } finally { setBusy(false); }
   }
 
@@ -276,47 +218,26 @@ export default function SetupPage() {
       {step === 2 && (
         <Card>
           <CardHeader>
-            <CardTitle>Choose a model provider</CardTitle>
-            <CardDescription>Cursor is the default. Test Connection must succeed before you continue.</CardDescription>
+            <CardTitle>Connect providers</CardTitle>
+            <CardDescription>
+              No product default. Test Connection must succeed, then activate planning and coding. Coding lists only canCode agents.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={saveProvider} className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {PROVIDERS.map((item) => (
-                  <Button
-                    key={item.id}
-                    type="button"
-                    variant={provider === item.id ? 'aria' : 'outline'}
-                    data-testid={`provider-${item.id}`}
-                    onClick={() => chooseProvider(item.id)}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </div>
-              <p className="text-sm text-muted-foreground">{preset.hint}</p>
-              <div className="space-y-1.5">
-                <Label htmlFor="model">Model</Label>
-                <Input id="model" data-testid="llm-model" value={model} onChange={(event) => { setModel(event.target.value); setTested(false); }} />
-              </div>
-              {allowsBaseUrl && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="base-url">Base URL</Label>
-                  <Input id="base-url" data-testid="llm-base-url" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setTested(false); }} />
-                </div>
-              )}
-              {preset.needsKey && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="api-key">API key</Label>
-                  <Input id="api-key" data-testid="llm-api-key" type="password" autoComplete="off" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setTested(false); }} />
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" data-testid="test-connection" onClick={testConnection} disabled={busy}>Test Connection</Button>
-                <Button type="submit" variant="aria" data-testid="setup-next" disabled={!tested || busy}>Next</Button>
-              </div>
-              {testMessage && <p data-testid="test-connection-result" className="text-sm">{testMessage}</p>}
-            </form>
+          <CardContent className="space-y-4">
+            <ProviderCredentialsPanel
+              mode="setup"
+              projectId={projectId || undefined}
+              onReadyChange={setProvidersReady}
+            />
+            <Button
+              type="button"
+              variant="aria"
+              data-testid="setup-next"
+              disabled={!providersReady || busy}
+              onClick={() => void continueAfterProviders()}
+            >
+              Next
+            </Button>
           </CardContent>
         </Card>
       )}

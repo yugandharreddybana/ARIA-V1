@@ -8,7 +8,8 @@
 import { defaultTierModels, selectTierModels, type CatalogEntry, type TierModels } from './modelTiers';
 
 export const LLM_PROVIDERS = [
-  'cursor', 'gemini', 'groq', 'ollama', 'openai', 'anthropic', 'nvidia', 'custom', 'openai_compatible',
+  'cursor', 'claude_code', 'codex', 'antigravity',
+  'gemini', 'groq', 'ollama', 'openai', 'anthropic', 'nvidia', 'custom', 'openai_compatible',
 ] as const;
 
 export type LlmProviderId = typeof LLM_PROVIDERS[number];
@@ -159,6 +160,13 @@ async function probe(config: LlmEndpoint): Promise<ProbeResult> {
       const models = await readModels(`${base}/v1/models`, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, 8000);
       return models.status === 200 ? models : { status: models.status, models: [] };
     }
+    case 'claude_code':
+    case 'anthropic':
+      return readModels(`${envBase('ANTHROPIC_API_BASE', 'https://api.anthropic.com')}/v1/models`, { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, 8000);
+    case 'codex':
+    case 'openai':
+      return readModels(`${envBase('OPENAI_API_BASE', 'https://api.openai.com/v1')}/models`, { Authorization: `Bearer ${key}` }, 8000);
+    case 'antigravity':
     case 'gemini':
       return readModels(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=${encodeURIComponent(key)}`, {}, 8000);
     case 'groq':
@@ -171,10 +179,6 @@ async function probe(config: LlmEndpoint): Promise<ProbeResult> {
       if (!probed.models.some((model) => model.id.startsWith(wanted))) return { status: 404, models: [] };
       return probed;
     }
-    case 'openai':
-      return readModels(`${envBase('OPENAI_API_BASE', 'https://api.openai.com/v1')}/models`, { Authorization: `Bearer ${key}` }, 8000);
-    case 'anthropic':
-      return readModels(`${envBase('ANTHROPIC_API_BASE', 'https://api.anthropic.com')}/v1/models`, { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, 8000);
     case 'nvidia':
       return readModels(`${envBase('NVIDIA_API_BASE', 'https://integrate.api.nvidia.com/v1')}/models`, { Authorization: `Bearer ${key}` }, 8000);
     case 'custom':
@@ -214,6 +218,7 @@ export async function completeChat(config: LlmEndpoint, messages: ChatMessage[])
       const data = await res.json() as { message?: { content?: string } };
       return data.message?.content ?? '';
     }
+    case 'claude_code':
     case 'anthropic': {
       const system = messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
       const rest = messages.filter((message) => message.role !== 'system');
@@ -236,6 +241,7 @@ export async function completeChat(config: LlmEndpoint, messages: ChatMessage[])
       const data = await res.json() as { content?: Array<{ text?: string }> };
       return data.content?.map((part) => part.text ?? '').join('') ?? '';
     }
+    case 'antigravity':
     case 'gemini': {
       const prompt = messages.map((message) => `${message.role}: ${message.content}`).join('\n');
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey ?? '')}`;
@@ -249,6 +255,7 @@ export async function completeChat(config: LlmEndpoint, messages: ChatMessage[])
       const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
       return data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
     }
+    case 'codex':
     case 'groq':
     case 'openai':
     case 'nvidia':
@@ -266,11 +273,12 @@ async function openAiCompatible(config: LlmEndpoint, messages: ChatMessage[]): P
   const defaults: Partial<Record<LlmProviderId, string>> = {
     groq: 'https://api.groq.com/openai/v1',
     openai: envBase('OPENAI_API_BASE', 'https://api.openai.com/v1'),
+    codex: envBase('OPENAI_API_BASE', 'https://api.openai.com/v1'),
     nvidia: envBase('NVIDIA_API_BASE', 'https://integrate.api.nvidia.com/v1'),
   };
-  const fixed = config.provider === 'groq' || config.provider === 'openai' || config.provider === 'nvidia';
+  const fixed = config.provider === 'groq' || config.provider === 'openai' || config.provider === 'nvidia' || config.provider === 'codex';
   const base = (fixed ? defaults[config.provider] ?? '' : config.baseUrl || '').replace(/\/$/, '');
-  const root = base.endsWith('/v1') || config.provider === 'groq' || config.provider === 'openai' || config.provider === 'nvidia'
+  const root = base.endsWith('/v1') || fixed
     ? base
     : `${base}/v1`;
   const res = await fetch(`${root}/chat/completions`, {
