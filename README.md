@@ -58,6 +58,17 @@ pnpm dev
 - Zod input validation on every API endpoint
 - CORS restricted to configured origins
 
+## Shadow Learning workflow
+
+After a PR merges, `.github/workflows/shadow-learning.yml` drafts an `ai-only` experience.yml entry on a `shadow-learning/<sha>` branch.
+
+**Auto-open the follow-up PR** (pick one):
+
+1. **Repo setting** — Settings → Actions → General → Workflow permissions → enable *Allow GitHub Actions to create and approve pull requests*, or
+2. **PAT secret** — add `SHADOW_LEARNING_PAT` (fine-grained PAT with Contents + Pull requests write). The job prefers this over `GITHUB_TOKEN` when present.
+
+Without either, the job still pushes the lessons branch, writes a compare link into the Actions job summary, and exits successfully so CI stays green.
+
 ## License
 
 Private — All rights reserved.

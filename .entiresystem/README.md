@@ -40,6 +40,12 @@ Layout locked by **ADR-0007**. Veracity scoring by **ADR-0008**.
 - **Always** regenerate `.backend/<workspace>/` via `pnpm model-transfer` after changes here. The
   derived workspace is NOT committed; it is rebuilt from this tree on demand without an LLM call.
 
+## Shadow Learning (GitHub Action)
+
+Merged PRs trigger `.github/workflows/shadow-learning.yml`, which appends an `ai-only` draft to the matching skill's `experience.yml` on branch `shadow-learning/<sha>`.
+
+To auto-open that follow-up PR: enable **Allow GitHub Actions to create and approve pull requests** under Settings → Actions → General → Workflow permissions, *or* add secret `SHADOW_LEARNING_PAT` (Contents + Pull requests write). Without those, the job pushes the branch and leaves a compare link in the job summary.
+
 ## Verify locally
 
 ```sh

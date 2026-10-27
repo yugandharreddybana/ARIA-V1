@@ -5,6 +5,13 @@ name: shadow-learning
 # as a follow-up PR. The proposals are always `veracity: ai-only` — a human must promote
 # them via PR review to graduate to `human-approved`.
 # A push only runs the ready job. Lesson extraction stays on a merged pull request.
+#
+# Auto-PR enablement (pick one):
+#   1. Settings → Actions → General → Workflow permissions → enable
+#      "Allow GitHub Actions to create and approve pull requests", or
+#   2. Add repo secret SHADOW_LEARNING_PAT (fine-grained PAT with Contents + Pull requests write).
+# Without either, this job still pushes the lessons branch and writes a compare link
+# into the job summary so the owner can open the PR in one click.
 
 on:
   push:
@@ -88,9 +95,13 @@ jobs:
 
       - name: Open follow-up PR with the draft entry
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer optional PAT so PR create works without the Actions "create and approve PRs" setting.
+          GH_TOKEN: ${{ secrets.SHADOW_LEARNING_PAT || secrets.GITHUB_TOKEN }}
           SHA: ${{ steps.refs.outputs.sha }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
+          set -euo pipefail
           PAYLOAD=$(cat .aria/shadow_learning/proposed.yml)
           SKILL=$(node -e "console.log(JSON.parse(process.argv[1]).skill)" "$PAYLOAD")
           export YAML=$(node -e "process.stdout.write(JSON.parse(process.argv[1]).yaml)" "$PAYLOAD")
@@ -99,7 +110,16 @@ jobs:
           git config user.email "aria-bot@users.noreply.github.com"
           git checkout -B "$BRANCH"
           export FILE=".entiresystem/skills/${SKILL}/experience.yml"
-          if grep -q '^best_practices: \[\]' "$FILE" 2>/dev/null; then
+          if [ ! -f "$FILE" ]; then
+            echo "No new lessons — $FILE not present yet. Skipping."
+            {
+              echo "## Shadow Learning"
+              echo
+              echo "Skipped: \`$FILE\` is not present yet, so there is nothing to draft."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if grep -q '^best_practices: \[\]' "$FILE"; then
             python3 - <<'PY'
           import os, pathlib
           file = pathlib.Path(os.environ['FILE'])
@@ -108,15 +128,58 @@ jobs:
           src = src.replace('best_practices: []', 'best_practices:\n' + ''.join('  ' + l + '\n' for l in yaml.splitlines()))
           file.write_text(src)
           PY
-          elif [ -f "$FILE" ]; then
-            printf '%s' "$YAML" | sed 's/^/  /' >> "$FILE"
           else
-            echo "skipping — $FILE not present yet."
-            exit 0
+            printf '%s' "$YAML" | sed 's/^/  /' >> "$FILE"
           fi
           git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "No new lessons — experience.yml unchanged after draft. Skipping."
+            {
+              echo "## Shadow Learning"
+              echo
+              echo "Skipped: draft produced no changes in \`$FILE\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           git commit -m "shadow-learning(${SKILL}): draft entry from ${SHA}"
           git push -u origin "$BRANCH"
-          gh pr create --base main --head "$BRANCH" \
-            --title "Shadow Learning: draft for ${SKILL}" \
-            --body  "Auto-extracted lesson candidate (veracity: ai-only). Promote to human-approved by editing the entry, or close to discard."
+
+          COMPARE_URL="https://github.com/${REPO}/compare/${DEFAULT_BRANCH}...${BRANCH}?expand=1"
+          TITLE="Shadow Learning: draft for ${SKILL}"
+          BODY="Auto-extracted lesson candidate (veracity: ai-only). Promote to human-approved by editing the entry, or close to discard."
+
+          set +e
+          PR_OUT=$(gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" --title "$TITLE" --body "$BODY" 2>&1)
+          PR_STATUS=$?
+          set -e
+          if [ "$PR_STATUS" -eq 0 ]; then
+            echo "$PR_OUT"
+            {
+              echo "## Shadow Learning"
+              echo
+              echo "Opened follow-up PR: $PR_OUT"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Only the Actions "create/approve pull requests" permission error is soft-failed.
+          if echo "$PR_OUT" | grep -qi 'GitHub Actions is not permitted to create or approve pull requests'; then
+            echo "gh pr create blocked by repo Actions permissions; branch pushed. Owner can open the PR via the compare link."
+            {
+              echo "## Shadow Learning — PR not auto-created"
+              echo
+              echo "GitHub Actions is not permitted to create pull requests in this repository."
+              echo "The lessons branch was pushed successfully."
+              echo
+              echo "**Open the PR in one click:** [Compare \`${BRANCH}\` → \`${DEFAULT_BRANCH}\`](${COMPARE_URL})"
+              echo
+              echo "To enable full auto-PRs, either:"
+              echo "1. Settings → Actions → General → Workflow permissions → enable **Allow GitHub Actions to create and approve pull requests**, or"
+              echo "2. Add a fine-grained PAT as repo secret \`SHADOW_LEARNING_PAT\` (Contents + Pull requests write)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::error::gh pr create failed unexpectedly"
+          echo "$PR_OUT"
+          exit "$PR_STATUS"
