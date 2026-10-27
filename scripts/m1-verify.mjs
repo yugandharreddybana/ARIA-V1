@@ -509,7 +509,8 @@ async function uiSuite() {
           await nora.isVisible() && (await nora.innerText()).includes('Nora Analyst') ? 'pass' : 'fail',
           await shot(page, `org-add-${tag}`),
         );
-        await nora.click();
+        const noraOption = page.locator('[data-testid="org-agent-picker"] option').filter({ hasText: 'Nora Analyst' });
+        await page.getByTestId('org-agent-picker').selectOption({ value: await noraOption.getAttribute('value') });
         await page.getByTestId('agent-delete').click();
         record('Org chart', `delete asks for confirmation (${tag})`, await page.getByTestId('agent-delete-confirm').isVisible() ? 'pass' : 'fail', await shot(page, `org-delete-confirm-${tag}`));
         await page.getByTestId('agent-delete-confirm').click();

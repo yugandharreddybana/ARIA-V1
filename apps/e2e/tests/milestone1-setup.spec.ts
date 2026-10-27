@@ -53,7 +53,8 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await added;
   const nora = page.getByRole('button', { name: /Nora Analyst/ });
   await expect(nora).toBeVisible();
-  await nora.click();
+  const noraOption = page.locator('[data-testid="org-agent-picker"] option').filter({ hasText: 'Nora Analyst' });
+  await page.getByTestId('org-agent-picker').selectOption({ value: await noraOption.getAttribute('value') as string });
   await page.getByTestId('agent-delete').click();
   const deleted = page.waitForResponse((res) => res.request().method() === 'DELETE' && res.ok());
   await page.getByTestId('agent-delete-confirm').click();
