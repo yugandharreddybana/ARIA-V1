@@ -431,8 +431,11 @@ async function uiSuite() {
         await page.getByTestId('provider-cursor').click();
         await page.getByTestId('llm-api-key').fill('live-stub-key');
         await page.getByTestId('test-connection').click();
-        await page.getByTestId('test-connection-result').waitFor();
-        await page.getByTestId('setup-next').click();
+        const cursorReady = page.getByTestId('test-connection-result');
+        await cursorReady.waitFor({ timeout: 20000 });
+        await expectText(cursorReady, 'verified');
+        await page.getByTestId('setup-next').waitFor({ state: 'visible', timeout: 10000 });
+        await page.getByTestId('setup-next').click({ timeout: 15000 });
         await page.getByTestId('github-token').fill('short');
         const listDisabled = await page.getByTestId('list-repos').isDisabled();
         record('GitHub', `token shorter than 8 characters cannot list repos (${tag})`, listDisabled ? 'pass' : 'fail', await shot(page, `github-short-token-${tag}`));
