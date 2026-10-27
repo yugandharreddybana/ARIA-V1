@@ -26,7 +26,11 @@ test('setup blocks without coding activate; coding list omits ollama; multi-key 
   await expect(page.getByTestId('provider-list-coding')).toBeVisible();
   await expect(page.getByTestId('provider-cursor')).toBeVisible();
   await expect(page.getByTestId('provider-claude_code')).toBeVisible();
+  await expect(page.getByTestId('provider-codex')).toBeVisible();
+  await expect(page.getByTestId('provider-antigravity')).toBeVisible();
   await expect(page.getByTestId('provider-list-coding').getByTestId('provider-ollama')).toHaveCount(0);
+  await expect(page.getByTestId('provider-list-coding').getByTestId('provider-openai')).toHaveCount(0);
+  await expect(page.getByTestId('provider-list-coding').getByTestId('provider-gemini')).toHaveCount(0);
 
   await expect(page.getByTestId('setup-next')).toBeDisabled();
 
@@ -36,6 +40,15 @@ test('setup blocks without coding activate; coding list omits ollama; multi-key 
   await page.getByTestId('test-connection').click();
   await expect(page.getByTestId('test-connection-result')).toContainText(/activated|succeeded|verified/i, { timeout: 15_000 });
   await expect(page.getByTestId('active-planning-badge')).toBeVisible({ timeout: 15_000 });
+  // canCode providers also fill the empty coding slot on first planning activate
+  await expect(page.getByTestId('active-coding-badge')).toBeVisible({ timeout: 15_000 });
+
+  // Explicit coding-only path: coding tab still lists only canCode providers and re-activate works
+  await page.getByTestId('tier-tab-coding').click();
+  await expect(page.getByTestId('provider-list-coding').getByTestId('provider-ollama')).toHaveCount(0);
+  await page.getByTestId('provider-cursor').click();
+  await page.getByRole('button', { name: 'Use for coding' }).first().click();
+  await expect(page.getByTestId('active-coding-badge')).toBeVisible();
 
   await page.getByTestId('setup-next').click();
   await expect(page.getByTestId('github-token')).toBeVisible({ timeout: 15_000 });

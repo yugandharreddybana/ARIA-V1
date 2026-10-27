@@ -2,16 +2,18 @@
 -- Later slices: INSERT into runtime_kinds only. Never re-ADD a runtime CHECK.
 
 -- Hibernate may have narrowed llm_provider to a PG enum; M3A needs free-form provider ids.
+-- No product-default provider (Decision 1): drop any column DEFAULT so a fresh
+-- workspace does not silently become "cursor" — setup/activate sets the value.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'llm_provider') THEN
     ALTER TABLE workspaces ALTER COLUMN llm_provider DROP DEFAULT;
     ALTER TABLE workspaces
       ALTER COLUMN llm_provider TYPE TEXT USING llm_provider::text;
-    ALTER TABLE workspaces ALTER COLUMN llm_provider SET DEFAULT 'cursor';
     DROP TYPE IF EXISTS llm_provider;
   END IF;
 END $$;
+ALTER TABLE workspaces ALTER COLUMN llm_provider DROP DEFAULT;
 
 CREATE TABLE IF NOT EXISTS provider_credentials (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

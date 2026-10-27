@@ -27,9 +27,10 @@ Recorded on 2026-10-27 on `cursor/m3a-providers-3ee9`:
 - `node scripts/check-schema-drift.cjs` passed (includes `provider_credentials`, `runtime_kinds`, `agent_runs_runtime_fk`).
 - V21 applied; `llm_provider` coerced to TEXT when a PG enum was present.
 - Middleware + web `tsc --noEmit` passed. Middleware eslint `--max-warnings 0` passed.
-- `pnpm -F @aria/middleware test`: **30 files, 157 tests** passed (+2 files, +11 tests vs M2 verification 146). New coverage: `providersForTier` omits Ollama from coding; multi-label encrypt; Test Connection gate; `POST /setup/complete` 409; GET serializers strip `gcm:v2`.
-- Playwright, three viewports, retries 0: **9 passed** (M1 setup ×3, M2 agents ×3, M3A providers ×3) in 1.6m against live provider stub.
-- M3A spec checks: setup Next disabled until activate; coding list omits `provider-ollama`; Cursor Test Connection activates planning (+ coding when binary ok); Settings multi-label key + model tiers.
+- `pnpm -F @aria/middleware test`: **31 files, 162 tests** passed. Coverage: `providersForTier` omits Ollama from coding; multi-label encrypt; Test Connection gate; `POST /setup/complete` 409; GET serializers strip `gcm:v2`; `createCliCodeWorker` exit-0 / non-zero / timeout; `maybeFailover` spare-key promote + `provider_unhealthy` queue block.
+- Playwright, three viewports, retries 0: **9 passed** (M1 setup ×3, M2 agents ×3, M3A providers ×3) against live provider stub.
+- M3A spec checks: setup Next disabled until activate; coding list omits ollama/openai/gemini; coding badge after planning activate for canCode providers; coding-tab "Use for coding"; Settings multi-label key + model tiers.
+- V21 drops `workspaces.llm_provider` column DEFAULT (no product-default provider); setup/activate sets the value.
 
 ## Screenshots
 
@@ -44,4 +45,4 @@ Local Playwright failure screenshots from the first stub-less M2 run are discard
 
 ## Summary
 
-M3A delivers multi-provider credentials, adapters, stubs, Test Connection activate gate, capability-filtered lists, and simple setup/Settings UI without touching V22 (M3B). Deviations: live CLI stdout follow remains a thin shim (stub reuses Cursor cloud worker); provider-unhealthy notification table waits for M3E (queue block + key failover ship here).
+M3A delivers multi-provider credentials, adapters, stubs, Test Connection activate gate, capability-filtered lists, and simple setup/Settings UI without touching V22 (M3B). Deviations: stub/CI uses the Cursor cloud worker against the provider stub; live mode runs the real CLI and tracks the child process (wait for exit, map exit code to finished/error, timeout + kill, capture stdout/stderr to the run log — streaming can come later). Provider-unhealthy notification table waits for M3E (queue block + key failover ship here).

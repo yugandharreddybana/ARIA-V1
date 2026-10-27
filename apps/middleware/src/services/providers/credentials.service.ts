@@ -300,7 +300,7 @@ export async function completeSetup(workspaceId: string): Promise<void> {
 }
 
 /** When the active credential fails, promote another ok key for the same provider; else pause coding queue. */
-async function maybeFailover(workspaceId: string, failedId: string, provider: ProviderId): Promise<void> {
+export async function maybeFailover(workspaceId: string, failedId: string, provider: ProviderId): Promise<void> {
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
   if (!workspace) return;
   const isActive = workspace.activePlanningCredentialId === failedId || workspace.activeCodingCredentialId === failedId;

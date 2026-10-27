@@ -2,6 +2,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import app from '../app';
 import { getPgPool } from '../services/db.client';
+import { maybeFailover } from '../services/providers/credentials.service';
 
 async function signup() {
   const email = `m3a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@aria.dev`;
@@ -114,5 +115,68 @@ describe('M3A provider credentials API', () => {
     const listed = await request(app).get('/api/providers/credentials').set(auth);
     expect(listed.body.credentials.some((c: { provider: string }) => c.provider === 'cursor')).toBe(true);
     expect(listed.body.activePlanningCredentialId).toBeTruthy();
+  });
+
+  it('fails over to another ok labeled key for the same provider', async () => {
+    const { auth, workspaceId } = await signup();
+    const primary = await request(app).post('/api/providers/credentials').set(auth).send({
+      provider: 'cursor', label: 'primary', apiKey: 'aria-mock-key-primary',
+    });
+    const spare = await request(app).post('/api/providers/credentials').set(auth).send({
+      provider: 'cursor', label: 'spare', apiKey: 'aria-mock-key-spare',
+    });
+    expect(primary.status).toBe(201);
+    expect(spare.status).toBe(201);
+    await request(app).post(`/api/providers/credentials/${primary.body.credential.id}/test`).set(auth).send({}).expect(200);
+    await request(app).post(`/api/providers/credentials/${spare.body.credential.id}/test`).set(auth).send({}).expect(200);
+    await request(app).post(`/api/providers/credentials/${primary.body.credential.id}/activate`).set(auth).send({ tier: 'planning' }).expect(200);
+    await request(app).post(`/api/providers/credentials/${primary.body.credential.id}/activate`).set(auth).send({ tier: 'coding' }).expect(200);
+
+    await getPgPool().query(
+      `UPDATE provider_credentials SET connection_status = 'failed', last_error = 'simulated' WHERE id = $1::uuid`,
+      [primary.body.credential.id],
+    );
+    await maybeFailover(workspaceId, primary.body.credential.id, 'cursor');
+
+    const listed = await request(app).get('/api/providers/credentials').set(auth);
+    expect(listed.body.activePlanningCredentialId).toBe(spare.body.credential.id);
+    expect(listed.body.activeCodingCredentialId).toBe(spare.body.credential.id);
+  });
+
+  it('blocks queued coding runs with provider_unhealthy when no spare key exists', async () => {
+    const { auth, workspaceId } = await signup();
+    const project = await request(app).post('/api/setup/project').set(auth).send({ name: 'Failover Shop' });
+    expect(project.status).toBe(201);
+    const projectId = project.body.project.id as string;
+
+    const only = await request(app).post('/api/providers/credentials').set(auth).send({
+      provider: 'cursor', label: 'solo', apiKey: 'aria-mock-key-solo',
+    });
+    expect(only.status).toBe(201);
+    await request(app).post(`/api/providers/credentials/${only.body.credential.id}/test`).set(auth).send({}).expect(200);
+    await request(app).post(`/api/providers/credentials/${only.body.credential.id}/activate`).set(auth).send({ tier: 'coding' }).expect(200);
+
+    const queued = await getPgPool().query<{ id: string }>(
+      `INSERT INTO agent_runs (
+         workspace_id, project_id, activity, task_type, runtime, status, idempotency_key
+       ) VALUES (
+         $1::uuid, $2::uuid, 'develop', 'coding', 'cursor_cloud', 'queued', $3
+       ) RETURNING id`,
+      [workspaceId, projectId, `failover-block-${Date.now()}`],
+    );
+    expect(queued.rows[0]?.id).toBeTruthy();
+
+    await getPgPool().query(
+      `UPDATE provider_credentials SET connection_status = 'failed' WHERE id = $1::uuid`,
+      [only.body.credential.id],
+    );
+    await maybeFailover(workspaceId, only.body.credential.id, 'cursor');
+
+    const row = await getPgPool().query<{ status: string; blocked_reason: string | null }>(
+      `SELECT status, blocked_reason FROM agent_runs WHERE id = $1::uuid`,
+      [queued.rows[0].id],
+    );
+    expect(row.rows[0]?.status).toBe('blocked');
+    expect(row.rows[0]?.blocked_reason).toBe('provider_unhealthy');
   });
 });
