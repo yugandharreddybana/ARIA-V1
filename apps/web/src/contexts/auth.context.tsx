@@ -1,6 +1,6 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
-import { api, ApiError } from '@/lib/api';
+import { abandonSession, api, ApiError } from '@/lib/api';
 import type { PublicUser, AuthResponse } from '@aria/shared';
 
 interface AuthContextValue {
@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api<{ user: PublicUser }>('/auth/me');
       setUser(data.user);
     } catch {
-      if (typeof window !== 'undefined') localStorage.removeItem('aria_token');
+      abandonSession();
       setUser(null);
     }
   }, []);
@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try { await api('/auth/logout', { method: 'POST' }); } catch { /* noop */ }
-    if (typeof window !== 'undefined') localStorage.removeItem('aria_token');
+    abandonSession();
     setUser(null);
   }, []);
 

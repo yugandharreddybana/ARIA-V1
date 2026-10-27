@@ -1,0 +1,1011 @@
+{
+  "summary": {
+    "pass": 133,
+    "fail": 0,
+    "fixed": 6,
+    "deferred": 4
+  },
+  "results": [
+    {
+      "feature": "Stack",
+      "scenario": "middleware health",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Stack",
+      "scenario": "Java backend health",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Stack",
+      "scenario": "provider stub /v1/me",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Signup",
+      "scenario": "API creates account and returns an access token",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 201"
+    },
+    {
+      "feature": "Signup",
+      "scenario": "duplicate email rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 409"
+    },
+    {
+      "feature": "Signup",
+      "scenario": "weak password rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 400"
+    },
+    {
+      "feature": "Login",
+      "scenario": "wrong password rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 401"
+    },
+    {
+      "feature": "Login",
+      "scenario": "valid password returns a token and an HttpOnly refresh cookie",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Session",
+      "scenario": "access token reads the current user",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Session",
+      "scenario": "missing token is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 401"
+    },
+    {
+      "feature": "Session",
+      "scenario": "garbage access token is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 401"
+    },
+    {
+      "feature": "Session",
+      "scenario": "refresh cookie issues a new access token",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Logout",
+      "scenario": "refresh cookie is revoked",
+      "result": "pass",
+      "evidence": "",
+      "detail": "logout 200 refresh 401"
+    },
+    {
+      "feature": "Projects",
+      "scenario": "create project",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 201"
+    },
+    {
+      "feature": "Projects",
+      "scenario": "edit project name",
+      "result": "deferred",
+      "evidence": "",
+      "detail": "HTTP 404 Route PATCH /api/projects/3916c6c8-ecaa-459e-a6be-8480b15a9407 not found; left to the frontend PR"
+    },
+    {
+      "feature": "Authorization",
+      "scenario": "user B cannot read user A project",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 404"
+    },
+    {
+      "feature": "Authorization",
+      "scenario": "user B project list hides user A",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Projects",
+      "scenario": "delete archives the project",
+      "result": "pass",
+      "evidence": "",
+      "detail": "delete 204 status archived"
+    },
+    {
+      "feature": "Authorization",
+      "scenario": "user B cannot archive user A project",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 404"
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "cursor Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 Cursor API key verified. Planning model claude-opus-5. Auto model auto. This key cannot run chat completions."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "openai Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 openai connection succeeded. Planning model gpt-4.1. Standard model gpt-4.1-mini."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "anthropic Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 anthropic connection succeeded. Planning model claude-opus-4-7. Standard model claude-sonnet-4-6."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "nvidia Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 nvidia connection succeeded. Planning model nvidia/llama-3.1-nemotron-70b-instruct. Standard model meta/llama-3.1-8b-instruct."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "ollama Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 ollama connection succeeded. Planning model qwen2.5-coder:7b. Standard model nomic-embed-text."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "openai_compatible Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 openai_compatible connection succeeded. Planning model local-model. Standard model claude-opus-5."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "custom Test Connection against the stub",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 custom connection succeeded. Planning model local-model. Standard model claude-opus-5."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "gemini Test Connection without a real key fails closed",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 422 Provider returned HTTP 400"
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "groq Test Connection without a real key fails closed",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 422 Credentials were rejected"
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "live mode does not treat aria-mock-key as a mock success",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 422 Provider returned HTTP 400"
+    },
+    {
+      "feature": "Model validation",
+      "scenario": "unknown Ollama model is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "Provider returned HTTP 404"
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "saving Cursor stores tier ids and hides the key",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200 top=claude-opus-5 auto=auto"
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "repo name that is not owner/name is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 400"
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "repo name with .. is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 400"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "model id outside the tested catalog is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 422"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "catalog ids can be pinned",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "token connects and lists the stub repo",
+      "result": "pass",
+      "evidence": "",
+      "detail": "token 200 repos 200"
+    },
+    {
+      "feature": "Authorization",
+      "scenario": "user B has no GitHub token",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 400"
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "connecting a listed repo queues analysis",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 201"
+    },
+    {
+      "feature": "Knowledge map",
+      "scenario": "analysis builds flows for signup, login, and the homepage",
+      "result": "pass",
+      "evidence": "",
+      "detail": "Signup, Login, Homepage, Auth API"
+    },
+    {
+      "feature": "Authorization",
+      "scenario": "user B cannot read the knowledge map",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 404"
+    },
+    {
+      "feature": "Company",
+      "scenario": "size 3 counts ON seats and always includes docs + PR coordinator",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 202 on=3 docs=false pr=false"
+    },
+    {
+      "feature": "Company",
+      "scenario": "size 10 counts ON seats and always includes docs + PR coordinator",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 202 on=10 docs=false pr=false"
+    },
+    {
+      "feature": "Company",
+      "scenario": "size 12 counts ON seats and always includes docs + PR coordinator",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 202 on=12 docs=true pr=true"
+    },
+    {
+      "feature": "Company",
+      "scenario": "size 40 counts ON seats and always includes docs + PR coordinator",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 202 on=40 docs=true pr=true"
+    },
+    {
+      "feature": "Company",
+      "scenario": "size below 3 and above 40 is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "400/400"
+    },
+    {
+      "feature": "Flow ownership",
+      "scenario": "owner and backup can be reassigned on the same project",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 200"
+    },
+    {
+      "feature": "Flow ownership",
+      "scenario": "an owner from another project is rejected",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 400"
+    },
+    {
+      "feature": "Flow ownership",
+      "scenario": "deleting the owner promotes the backup",
+      "result": "pass",
+      "evidence": "",
+      "detail": "delete 204 owner true"
+    },
+    {
+      "feature": "Company",
+      "scenario": "regeneration without force returns 409 and keeps the org",
+      "result": "pass",
+      "evidence": "",
+      "detail": "ticket 201 regen 409"
+    },
+    {
+      "feature": "Company",
+      "scenario": "forced regeneration replaces the org in one response",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 202 on=8"
+    },
+    {
+      "feature": "Company",
+      "scenario": "legacy unvalidated skill create returns 410",
+      "result": "pass",
+      "evidence": "",
+      "detail": "HTTP 410"
+    },
+    {
+      "feature": "Landing",
+      "scenario": "home page renders (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/landing-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Signup",
+      "scenario": "name shorter than 2 characters is rejected (desktop)",
+      "result": "fixed",
+      "evidence": "docs/verification/screenshots/signup-validation-desktop.png",
+      "detail": "Name must be at least 2 characters"
+    },
+    {
+      "feature": "Signup",
+      "scenario": "account lands on setup (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/signup-dashboard-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "empty state (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-empty-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "loading state (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-loading-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "error state (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-error-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Setup",
+      "scenario": "projects page offers setup (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/dashboard-empty-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "provider picker (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/providers-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "cursor Test Connection success in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-cursor-ok.png",
+      "detail": "Cursor API key verified. Planning model claude-opus-5. Auto model auto. This key cannot run chat completions."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "openai Test Connection success in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-openai-ok.png",
+      "detail": "openai connection succeeded. Planning model gpt-4.1. Standard model gpt-4.1-mini."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "anthropic Test Connection success in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-anthropic-ok.png",
+      "detail": "anthropic connection succeeded. Planning model claude-opus-4-7. Standard model claude-sonnet-4-6."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "ollama Test Connection success in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-ollama-ok.png",
+      "detail": "ollama connection succeeded. Planning model qwen2.5-coder:7b. Standard model nomic-embed-text."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "openai_compatible Test Connection success in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-openai_compatible-ok.png",
+      "detail": "openai_compatible connection succeeded. Planning model local-model. Standard model claude-opus-5."
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "gemini Test Connection failure in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-gemini-fail.png",
+      "detail": "Provider returned HTTP 400"
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "groq Test Connection failure in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-groq-fail.png",
+      "detail": "Credentials were rejected"
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "ollama Test Connection failure in the setup UI",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/provider-ollama-fail.png",
+      "detail": "Connection failed: fetch failed"
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "token shorter than 8 characters cannot list repos (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/github-short-token-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "stub repo is listed (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/github-repos-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Knowledge map",
+      "scenario": "setup shows the map (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/knowledge-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Company",
+      "scenario": "generation finishes and offers the org chart (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/company-ready-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "chart, documentation, and PR coordinator are visible (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-chart-desktop.png",
+      "detail": "docs=Callum Reid\nDocumentation Lead\nOFF pr=Nadia Petrov\nPR Merge Coordinator\nOFF"
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "edit instructions (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-edit-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "toggle CEO off (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-toggle-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "toggle CEO back on (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-toggle-on-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "add an agent (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-add-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "delete asks for confirmation (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-delete-confirm-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "confirmed delete removes the agent (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-deleted-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Flow ownership",
+      "scenario": "owner select changes in the org chart (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/flow-owner-desktop.png",
+      "detail": "before=a8aee58f-e224-4556-b3c3-3b1106cc6a92"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "unknown model id shows an error (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/tiers-invalid-desktop.png",
+      "detail": "HTTP 422 Model not-a-real-model is not in the provider catalog from Test Connection"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "valid tier change is saved (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/tiers-saved-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "create from the projects page (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-created-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "edit and delete controls on the projects page (desktop)",
+      "result": "deferred",
+      "evidence": "docs/verification/screenshots/projects-no-edit-delete-desktop.png",
+      "detail": "edit=0 delete=0; left to the frontend PR"
+    },
+    {
+      "feature": "Logout",
+      "scenario": "sign out returns to login (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/logout-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Login",
+      "scenario": "wrong password shows an error (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/login-error-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Login",
+      "scenario": "valid password returns to projects (desktop)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/login-ok-desktop.png",
+      "detail": ""
+    },
+    {
+      "feature": "Session",
+      "scenario": "expired access token is refreshed from the cookie (desktop)",
+      "result": "fixed",
+      "evidence": "docs/verification/screenshots/session-expiry-desktop.png",
+      "detail": "http://localhost:3000/projects"
+    },
+    {
+      "feature": "Landing",
+      "scenario": "home page renders (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/landing-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Signup",
+      "scenario": "name shorter than 2 characters is rejected (tablet)",
+      "result": "fixed",
+      "evidence": "docs/verification/screenshots/signup-validation-tablet.png",
+      "detail": "Name must be at least 2 characters"
+    },
+    {
+      "feature": "Signup",
+      "scenario": "account lands on setup (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/signup-dashboard-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "empty state (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-empty-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "loading state (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-loading-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "error state (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-error-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Setup",
+      "scenario": "projects page offers setup (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/dashboard-empty-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "provider picker (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/providers-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "token shorter than 8 characters cannot list repos (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/github-short-token-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "stub repo is listed (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/github-repos-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Knowledge map",
+      "scenario": "setup shows the map (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/knowledge-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Company",
+      "scenario": "generation finishes and offers the org chart (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/company-ready-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "chart, documentation, and PR coordinator are visible (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-chart-tablet.png",
+      "detail": "docs=Omar Farouk\nDocumentation Lead\nOFF pr=Amina Diallo\nPR Merge Coordinator\nOFF"
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "edit instructions (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-edit-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "toggle CEO off (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-toggle-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "toggle CEO back on (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-toggle-on-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "add an agent (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-add-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "delete asks for confirmation (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-delete-confirm-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "confirmed delete removes the agent (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-deleted-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Flow ownership",
+      "scenario": "owner select changes in the org chart (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/flow-owner-tablet.png",
+      "detail": "before=3d901f42-e75e-46bf-a72c-8893c98a658e"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "unknown model id shows an error (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/tiers-invalid-tablet.png",
+      "detail": "HTTP 422 Model not-a-real-model is not in the provider catalog from Test Connection"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "valid tier change is saved (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/tiers-saved-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "create from the projects page (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-created-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "edit and delete controls on the projects page (tablet)",
+      "result": "deferred",
+      "evidence": "docs/verification/screenshots/projects-no-edit-delete-tablet.png",
+      "detail": "edit=0 delete=0; left to the frontend PR"
+    },
+    {
+      "feature": "Logout",
+      "scenario": "sign out returns to login (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/logout-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Login",
+      "scenario": "wrong password shows an error (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/login-error-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Login",
+      "scenario": "valid password returns to projects (tablet)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/login-ok-tablet.png",
+      "detail": ""
+    },
+    {
+      "feature": "Session",
+      "scenario": "expired access token is refreshed from the cookie (tablet)",
+      "result": "fixed",
+      "evidence": "docs/verification/screenshots/session-expiry-tablet.png",
+      "detail": "http://localhost:3000/projects"
+    },
+    {
+      "feature": "Landing",
+      "scenario": "home page renders (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/landing-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Signup",
+      "scenario": "name shorter than 2 characters is rejected (mobile)",
+      "result": "fixed",
+      "evidence": "docs/verification/screenshots/signup-validation-mobile.png",
+      "detail": "Name must be at least 2 characters"
+    },
+    {
+      "feature": "Signup",
+      "scenario": "account lands on setup (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/signup-dashboard-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "empty state (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-empty-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "loading state (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-loading-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "error state (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-error-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Setup",
+      "scenario": "projects page offers setup (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/dashboard-empty-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "LLM providers",
+      "scenario": "provider picker (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/providers-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "token shorter than 8 characters cannot list repos (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/github-short-token-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "GitHub",
+      "scenario": "stub repo is listed (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/github-repos-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Knowledge map",
+      "scenario": "setup shows the map (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/knowledge-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Company",
+      "scenario": "generation finishes and offers the org chart (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/company-ready-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "chart, documentation, and PR coordinator are visible (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-chart-mobile.png",
+      "detail": "docs=Hannah Berg\nDocumentation Lead\nOFF pr=Isaac Cohen\nPR Merge Coordinator\nOFF"
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "edit instructions (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-edit-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "toggle CEO off (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-toggle-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "toggle CEO back on (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-toggle-on-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "add an agent (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-add-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "delete asks for confirmation (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-delete-confirm-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Org chart",
+      "scenario": "confirmed delete removes the agent (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/org-deleted-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Flow ownership",
+      "scenario": "owner select changes in the org chart (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/flow-owner-mobile.png",
+      "detail": "before=64b35a04-05df-4899-a370-497377adb774"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "unknown model id shows an error (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/tiers-invalid-mobile.png",
+      "detail": "HTTP 422 Model not-a-real-model is not in the provider catalog from Test Connection"
+    },
+    {
+      "feature": "Model tiers",
+      "scenario": "valid tier change is saved (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/tiers-saved-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "create from the projects page (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/projects-created-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Projects",
+      "scenario": "edit and delete controls on the projects page (mobile)",
+      "result": "deferred",
+      "evidence": "docs/verification/screenshots/projects-no-edit-delete-mobile.png",
+      "detail": "edit=0 delete=0; left to the frontend PR"
+    },
+    {
+      "feature": "Logout",
+      "scenario": "sign out returns to login (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/logout-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Login",
+      "scenario": "wrong password shows an error (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/login-error-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Login",
+      "scenario": "valid password returns to projects (mobile)",
+      "result": "pass",
+      "evidence": "docs/verification/screenshots/login-ok-mobile.png",
+      "detail": ""
+    },
+    {
+      "feature": "Session",
+      "scenario": "expired access token is refreshed from the cookie (mobile)",
+      "result": "fixed",
+      "evidence": "docs/verification/screenshots/session-expiry-mobile.png",
+      "detail": "http://localhost:3000/projects"
+    }
+  ]
+}

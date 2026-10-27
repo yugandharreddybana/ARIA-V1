@@ -257,7 +257,27 @@ export function startStub({ port = 0 } = {}) {
       }
       if (path === '/v1/me') return send(res, 200, { apiKeyName: 'stub' });
       if (path === '/v1/models') {
-        return send(res, 200, { models: [{ id: 'claude-opus-5' }, { id: 'auto', aliases: ['auto-smart'] }] });
+        return send(res, 200, {
+          models: [
+            { id: 'claude-opus-5' },
+            { id: 'auto', aliases: ['auto-smart'] },
+            { id: 'gpt-4.1' },
+            { id: 'gpt-4.1-mini' },
+            { id: 'claude-opus-4-7' },
+            { id: 'claude-sonnet-4-6' },
+            { id: 'gemini-2.5-pro' },
+            { id: 'gemini-2.5-flash' },
+            { id: 'llama-3.3-70b-versatile' },
+            { id: 'llama-3.1-8b-instant' },
+            { id: 'nvidia/llama-3.1-nemotron-70b-instruct' },
+            { id: 'meta/llama-3.1-8b-instruct' },
+            { id: 'qwen2.5-coder:7b' },
+            { id: 'local-model' },
+          ],
+        });
+      }
+      if (path === '/api/tags') {
+        return send(res, 200, { models: [{ name: 'qwen2.5-coder:7b' }, { name: 'nomic-embed-text' }] });
       }
       if (path === '/__stub/violations') return send(res, 200, { violations });
       if (path === '/user/repos') {

@@ -11,7 +11,7 @@ import { decorateFlows, ownersOf, setOwners, type FlowLayer } from './flows/flow
 import { enqueue, blockQueuedForAgent, cancelRunningForAgent, unblockQueuedForAgent } from './runs/runQueue';
 import { codeWorkerFor } from './models/codeWorker';
 import { workspaceCursorKey } from './models/cursorKey';
-import { readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
+import { catalogModelIds, readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
 
 export interface AgentView {
   id: string;
@@ -69,7 +69,7 @@ async function workspaceChoice(workspaceId: string) {
     provider: providerId(row?.llmProvider),
     model: row?.llmModel ?? null,
     tierModels: tierModelMap(row?.llmTierModels),
-    catalog: Array.isArray(row?.llmModelCatalog) ? row.llmModelCatalog.filter((id): id is string => typeof id === 'string') : [],
+    catalog: catalogModelIds(row?.llmModelCatalog),
   };
 }
 

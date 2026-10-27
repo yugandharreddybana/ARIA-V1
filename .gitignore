@@ -38,6 +38,9 @@ coverage/
 playwright-report/
 test-results/
 
+# Milestone 1 verification full-size screenshots (CI artifact only; PDF embeds downscales)
+docs/verification/screenshots/
+
 # Turborepo
 .turbo/
 
