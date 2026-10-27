@@ -21,3 +21,6 @@ failure_stories:
     resolution: "Replace with `.aria/` (daemon-private runtime) gitignored; `.entiresystem/` committed. Added `.entiresystem/.gitignore` for narrow runtime artefacts only."
     veracity: human-authored
     captured_at: "2026-05-16T00:00:00Z"
+  - text: "fix(ci): soft-fail shadow-learning PR create when Actions lacks permission (#16) (sha dc20c0c)"
+    veracity: ai-only
+    captured_at: "2026-10-27T10:08:40.209Z"
