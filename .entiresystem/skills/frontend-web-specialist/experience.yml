@@ -18,3 +18,6 @@ anti_patterns:
     captured_at: "2026-05-16T00:00:00Z"
 
 failure_stories: []
+  - text: "Milestone 3B: V22 Jira hierarchy, path ownership, sprints, board UI (#13) (sha e973416)"
+    veracity: ai-only
+    captured_at: "2026-10-27T13:01:47.694Z"
