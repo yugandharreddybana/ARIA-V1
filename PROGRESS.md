@@ -19,6 +19,10 @@ Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 
 
 ---
 
+## In flight — shadow-learning PR fallback
+
+Branch: `cursor/shadow-learning-pr-fallback-c63f`. Fixes `extract-lessons` when Actions cannot create PRs: prefer optional `SHADOW_LEARNING_PAT`, else push branch + compare link in `$GITHUB_STEP_SUMMARY` and exit 0; skip cleanly when there are no new lessons; document auto-PR enablement in the workflow + README + `.entiresystem/README.md`.
+
 ## Milestone 3 — plan (this branch)
 
 Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 4** (no feature code). Base: main (#9+#11). Rev 4 re-review: DAG **A∥B → C → D∥E∥F** (E/F depend on C); reserved V21–V28; **`activity_kinds` / `runtime_kinds` FK** seeded in C/A so D/E/F never rewrite activity CHECK. Prior rev 3: idea_cards, red/blue lockdown, ownership, learning M3I, traceability.
