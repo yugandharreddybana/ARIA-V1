@@ -4,6 +4,19 @@
   "extends": "_base",
   "modelTier": "high",
   "maxOutputTokens": 800,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "red_blue_tickets",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 12,
+    "maxBytes": 60000,
+    "maxTokens": 8000
+  },
   "contextLoad": [
     "ticket",
     "contract",
@@ -15,13 +28,14 @@
     "prior findings ids"
   ],
   "do": [
-    "Probe local allowlist only",
+    "Network egress denied by default; only an explicit local allowlist",
+    "Probe allowlisted local endpoints only",
     "Emit findings → tickets",
     "Respect rate/round caps",
     "Strip secrets from env"
   ],
   "dont": [
-    "Public DNS/egress",
+    "Any non-allowlisted network egress or public DNS",
     "Touch primary DB volume",
     "Keep provider credentials in runtime"
   ],

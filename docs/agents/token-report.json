@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-10-27T10:32:52.891Z",
+  "measuredAt": "2026-10-27T10:45:32.951Z",
   "method": "ceil(utf8Bytes/4)",
   "rewriteExisting": {
     "before": 5828,
@@ -94,213 +94,340 @@
     ]
   },
   "runtimeComposedPrompt": {
-    "note": "Per invocation: one role composeInstructions (hard-rule ids, not full _base prose). Before ≈ old short template repeated.",
+    "note": "Per invocation: one role composeInstructions with mapped hard-rule imperatives + context caps.",
     "beforeTemplateTokens": 160,
     "beforeTotalApprox": 3360,
-    "afterTotalAllRoles": 4754,
-    "meanAfter": 226,
-    "maxAfter": 249,
-    "baseJsonTokens": 615,
+    "afterTotalAllRoles": 6946,
+    "meanAfter": 331,
+    "maxAfter": 423,
+    "baseJsonTokens": 595,
+    "generatedCatalogueTokens": 10348,
     "rows": [
       {
         "roleKey": "aiml",
         "beforeApprox": 160,
-        "after": 211
+        "after": 326,
+        "hardRules": 8,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "backend",
         "beforeApprox": 160,
-        "after": 235
+        "after": 387,
+        "hardRules": 10,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "blue_team",
         "beforeApprox": 160,
-        "after": 207
+        "after": 364,
+        "hardRules": 8,
+        "caps": {
+          "maxFiles": 12,
+          "maxBytes": 60000,
+          "maxTokens": 8000
+        }
       },
       {
         "roleKey": "business",
         "beforeApprox": 160,
-        "after": 209
+        "after": 274,
+        "hardRules": 6,
+        "caps": {
+          "maxFiles": 5,
+          "maxBytes": 24000,
+          "maxTokens": 4000
+        }
       },
       {
         "roleKey": "ceo",
         "beforeApprox": 160,
-        "after": 228
+        "after": 303,
+        "hardRules": 7,
+        "caps": {
+          "maxFiles": 5,
+          "maxBytes": 24000,
+          "maxTokens": 4000
+        }
       },
       {
         "roleKey": "cfo",
         "beforeApprox": 160,
-        "after": 222
+        "after": 287,
+        "hardRules": 6,
+        "caps": {
+          "maxFiles": 5,
+          "maxBytes": 24000,
+          "maxTokens": 4000
+        }
       },
       {
         "roleKey": "coach",
         "beforeApprox": 160,
-        "after": 229
+        "after": 265,
+        "hardRules": 5,
+        "caps": {
+          "maxFiles": 5,
+          "maxBytes": 24000,
+          "maxTokens": 4000
+        }
       },
       {
         "roleKey": "cto",
         "beforeApprox": 160,
-        "after": 223
+        "after": 352,
+        "hardRules": 9,
+        "caps": {
+          "maxFiles": 8,
+          "maxBytes": 40000,
+          "maxTokens": 6000
+        }
       },
       {
         "roleKey": "cybersecurity",
         "beforeApprox": 160,
-        "after": 225
+        "after": 326,
+        "hardRules": 7,
+        "caps": {
+          "maxFiles": 12,
+          "maxBytes": 60000,
+          "maxTokens": 8000
+        }
       },
       {
         "roleKey": "devops",
         "beforeApprox": 160,
-        "after": 214
+        "after": 309,
+        "hardRules": 7,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "documentation",
         "beforeApprox": 160,
-        "after": 228
+        "after": 291,
+        "hardRules": 6,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "frontend",
         "beforeApprox": 160,
-        "after": 245
+        "after": 423,
+        "hardRules": 11,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "fullstack",
         "beforeApprox": 160,
-        "after": 223
+        "after": 400,
+        "hardRules": 11,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "junior",
         "beforeApprox": 160,
-        "after": 221
+        "after": 331,
+        "hardRules": 8,
+        "caps": {
+          "maxFiles": 20,
+          "maxBytes": 120000,
+          "maxTokens": 16000
+        }
       },
       {
         "roleKey": "pr_coordinator",
         "beforeApprox": 160,
-        "after": 220
+        "after": 304,
+        "hardRules": 7,
+        "caps": {
+          "maxFiles": 8,
+          "maxBytes": 40000,
+          "maxTokens": 6000
+        }
       },
       {
         "roleKey": "product_owner",
         "beforeApprox": 160,
-        "after": 226
+        "after": 368,
+        "hardRules": 10,
+        "caps": {
+          "maxFiles": 8,
+          "maxBytes": 40000,
+          "maxTokens": 6000
+        }
       },
       {
         "roleKey": "qa",
         "beforeApprox": 160,
-        "after": 244
+        "after": 351,
+        "hardRules": 8,
+        "caps": {
+          "maxFiles": 15,
+          "maxBytes": 80000,
+          "maxTokens": 12000
+        }
       },
       {
         "roleKey": "red_team",
         "beforeApprox": 160,
-        "after": 236
+        "after": 339,
+        "hardRules": 6,
+        "caps": {
+          "maxFiles": 12,
+          "maxBytes": 60000,
+          "maxTokens": 8000
+        }
       },
       {
         "roleKey": "research",
         "beforeApprox": 160,
-        "after": 225
+        "after": 290,
+        "hardRules": 6,
+        "caps": {
+          "maxFiles": 5,
+          "maxBytes": 24000,
+          "maxTokens": 4000
+        }
       },
       {
         "roleKey": "scrum_master",
         "beforeApprox": 160,
-        "after": 234
+        "after": 331,
+        "hardRules": 8,
+        "caps": {
+          "maxFiles": 8,
+          "maxBytes": 40000,
+          "maxTokens": 6000
+        }
       },
       {
         "roleKey": "ui_ux_designer",
         "beforeApprox": 160,
-        "after": 249
+        "after": 325,
+        "hardRules": 7,
+        "caps": {
+          "maxFiles": 8,
+          "maxBytes": 40000,
+          "maxTokens": 6000
+        }
       }
     ]
   },
   "newCatalogue": {
-    "note": "Net-new lean role files. Hard rules live once in _base (referenced, not copied).",
-    "totalTokens": 6036,
+    "note": "docs/agents/skills is source of truth; catalogue.generated.cjs is the runtime embed.",
+    "totalTokens": 7504,
     "files": 22,
     "rows": [
       {
         "id": "docs/agents/skills/_base.json",
-        "tokens": 615
+        "tokens": 595
       },
       {
         "id": "docs/agents/skills/aiml.json",
-        "tokens": 213
+        "tokens": 284
       },
       {
         "id": "docs/agents/skills/backend.json",
-        "tokens": 239
+        "tokens": 318
       },
       {
         "id": "docs/agents/skills/blue_team.json",
-        "tokens": 219
+        "tokens": 316
       },
       {
         "id": "docs/agents/skills/business.json",
-        "tokens": 216
+        "tokens": 276
       },
       {
         "id": "docs/agents/skills/ceo.json",
-        "tokens": 262
+        "tokens": 326
       },
       {
         "id": "docs/agents/skills/cfo.json",
-        "tokens": 256
+        "tokens": 315
       },
       {
         "id": "docs/agents/skills/coach.json",
-        "tokens": 236
+        "tokens": 290
       },
       {
         "id": "docs/agents/skills/cto.json",
-        "tokens": 267
+        "tokens": 342
       },
       {
         "id": "docs/agents/skills/cybersecurity.json",
-        "tokens": 257
+        "tokens": 323
       },
       {
         "id": "docs/agents/skills/devops.json",
-        "tokens": 218
+        "tokens": 284
       },
       {
         "id": "docs/agents/skills/documentation.json",
-        "tokens": 235
+        "tokens": 295
       },
       {
         "id": "docs/agents/skills/frontend.json",
-        "tokens": 250
+        "tokens": 335
       },
       {
         "id": "docs/agents/skills/fullstack.json",
-        "tokens": 245
+        "tokens": 330
       },
       {
         "id": "docs/agents/skills/junior.json",
-        "tokens": 240
+        "tokens": 311
       },
       {
         "id": "docs/agents/skills/pr_coordinator.json",
-        "tokens": 254
+        "tokens": 317
       },
       {
         "id": "docs/agents/skills/product_owner.json",
-        "tokens": 377
+        "tokens": 457
       },
       {
         "id": "docs/agents/skills/qa.json",
-        "tokens": 286
+        "tokens": 355
       },
       {
         "id": "docs/agents/skills/red_team.json",
-        "tokens": 246
+        "tokens": 336
       },
       {
         "id": "docs/agents/skills/research.json",
-        "tokens": 302
+        "tokens": 362
       },
       {
         "id": "docs/agents/skills/scrum_master.json",
-        "tokens": 280
+        "tokens": 350
       },
       {
         "id": "docs/agents/skills/ui_ux_designer.json",
-        "tokens": 323
+        "tokens": 387
       }
     ]
   }

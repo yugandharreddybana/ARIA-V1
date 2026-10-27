@@ -6,27 +6,27 @@
   "hardRules": [
     {
       "id": "wip_one",
-      "rule": "One active task at a time (WIP=1)."
+      "rule": "WIP=1: one active task only."
     },
     {
       "id": "user_approves_merge",
-      "rule": "User approves every merge and every idea; agents never merge."
+      "rule": "Never merge; user approves every merge and every idea."
     },
     {
       "id": "dev_qa_evidence",
-      "rule": "Dev before/after local test report (md+pdf). QA previous-vs-current report with screenshots (md+pdf). Both required before merge."
+      "rule": "Ship dev before/after local tests (md+pdf) and QA previous-vs-current with screenshots (md+pdf) before merge."
     },
     {
       "id": "ticket_events_hash",
-      "rule": "Append only to hash-chained ticket_events; never rewrite history."
+      "rule": "Append-only hash-chained ticket_events; never rewrite history."
     },
     {
       "id": "ac_gherkin",
-      "rule": "Acceptance criteria use Given/When/Then."
+      "rule": "Acceptance criteria must be Given/When/Then."
     },
     {
       "id": "story_points_fib",
-      "rule": "Story points Fibonacci 1/2/3/5/8/13; day estimates round up to nearest Fib at or above (4 days = 5 points)."
+      "rule": "Points Fibonacci 1/2/3/5/8/13; day estimates ceil up to nearest Fib (4 days=5)."
     },
     {
       "id": "sprint_10",
@@ -34,19 +34,19 @@
     },
     {
       "id": "code_ownership",
-      "rule": "Builder owns the flow/path; backup only when owner OFF, over WIP, or reassigned; handoff logged in ticket_events + handover doc."
+      "rule": "Builder owns flow/path; backup only if owner OFF/over WIP/reassigned; log handoff."
     },
     {
       "id": "dep_gate",
-      "rule": "Dependency gate: requester A E2E-tests B whole implementation before B awaiting_merge."
+      "rule": "Dependency gate: A E2E-tests B whole implementation before B awaiting_merge."
     },
     {
       "id": "ui_mock_gate",
-      "rule": "Designer HTML+image mocks for every state; PO/SM review then user approval before develop."
+      "rule": "HTML+image mocks for every UI state; PO/SM review then user approval before develop."
     },
     {
       "id": "api_contract",
-      "rule": "FE/BE changes require api_contract; contract_test before merge."
+      "rule": "FE/BE changes need api_contract + contract_test before merge."
     },
     {
       "id": "idea_lifecycle",
@@ -54,11 +54,11 @@
     },
     {
       "id": "red_blue_tickets",
-      "rule": "Red/blue findings become tickets; local allowlist only; strip secrets from red runtime."
+      "rule": "Red/blue findings become tickets; network egress denied by default; only an explicit local allowlist; strip secrets from red runtime."
     },
     {
       "id": "context_load",
-      "rule": "Load only ticket, contract, owned paths; use summaries/diffs; never whole repo."
+      "rule": "Load only ticket, contract, owned paths; summaries/diffs; never whole repo."
     },
     {
       "id": "no_secrets",

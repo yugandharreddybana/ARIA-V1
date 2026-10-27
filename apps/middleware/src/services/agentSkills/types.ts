@@ -3,6 +3,12 @@ export interface HardRule {
   rule: string;
 }
 
+export interface ContextCaps {
+  maxFiles: number;
+  maxBytes: number;
+  maxTokens: number;
+}
+
 export interface BaseSkill {
   id: '_base';
   version: string;
@@ -20,6 +26,8 @@ export interface RoleSkill {
   extends: '_base';
   modelTier: 'high' | 'low';
   maxOutputTokens: number;
+  hardRuleIds: string[];
+  contextCaps: ContextCaps;
   contextLoad: string[];
   inputs: string[];
   do: string[];

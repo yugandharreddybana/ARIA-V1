@@ -4,6 +4,21 @@
   "extends": "_base",
   "modelTier": "low",
   "maxOutputTokens": 1000,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "red_blue_tickets",
+    "dev_qa_evidence",
+    "code_ownership",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 12,
+    "maxBytes": 60000,
+    "maxTokens": 8000
+  },
   "contextLoad": [
     "ticket",
     "contract",
@@ -15,13 +30,14 @@
     "owned paths"
   ],
   "do": [
-    "Fix findings with tests",
-    "Harden detections",
+    "Fix findings with tests under local allowlist only",
+    "Harden detections; network egress denied by default",
     "Dev evidence; hand QA"
   ],
   "dont": [
     "Ignore severity",
-    "Merge"
+    "Merge",
+    "Any non-allowlisted network egress"
   ],
   "outputSchema": {
     "type": "object",

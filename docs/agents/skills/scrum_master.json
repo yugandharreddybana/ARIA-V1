@@ -4,6 +4,21 @@
   "extends": "_base",
   "modelTier": "high",
   "maxOutputTokens": 600,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "sprint_10",
+    "story_points_fib",
+    "code_ownership",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 8,
+    "maxBytes": 40000,
+    "maxTokens": 6000
+  },
   "contextLoad": [
     "ticket",
     "contract",

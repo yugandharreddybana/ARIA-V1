@@ -20,7 +20,7 @@ describe('generateCompany', () => {
     for (const agent of agents) {
       expect(agent.instructions.length).toBeGreaterThan(40);
       expect(agent.instructions).toContain('Extends: _base');
-      expect(agent.instructions).toContain('Do not merge');
+      expect(agent.instructions).toContain('Never merge');
       if (agents.length > 1) expect(agent.backupTempId).not.toBe(agent.tempId);
     }
   });

@@ -5,9 +5,8 @@
  * Later milestones attach to roleKey, enabled, backupAgentId, ownedFlowIds.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// catalogue.generated.cjs loads in both CJS (vitest/tsc) and strip-types ESM child.
+import { composeInstructions } from './agentSkills/catalogue.generated.cjs';
 
 export const ROLE_KEYS = [
   'ceo', 'cfo', 'cto', 'business', 'product_owner', 'scrum_master',
@@ -232,61 +231,8 @@ function scaleMix(mix: CompanyMix, slots: number): RoleKey[] {
   return out.slice(0, slots);
 }
 
-function skillDataDir(): string {
-  // Child: Node --experimental-strip-types ESM. Vitest: CJS __dirname.
-  // Function() hides import.meta from tsc under module:commonjs.
-  let fromMeta = '';
-  try {
-    const url = Function('return import.meta.url')() as string;
-    fromMeta = path.dirname(fileURLToPath(url));
-  } catch {
-    fromMeta = '';
-  }
-  const candidates = [
-    typeof __dirname !== 'undefined' ? path.join(__dirname, 'agentSkills/data') : '',
-    fromMeta ? path.join(fromMeta, 'agentSkills/data') : '',
-  ].filter(Boolean);
-  for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, '_base.json'))) return dir;
-  }
-  throw new Error('agent skill data missing');
-}
-
 function instructionsFor(seat: Seat, flowNames: string[]): string {
-  // ponytail: read lean JSON beside this file (no sibling .ts import — child ESM can't resolve it).
-  const dir = skillDataDir();
-  const base = JSON.parse(fs.readFileSync(path.join(dir, '_base.json'), 'utf8')) as {
-    hardRules: Array<{ id: string }>;
-    dont: string[];
-    neverLoad: string[];
-  };
-  const skill = JSON.parse(fs.readFileSync(path.join(dir, `${seat.roleKey}.json`), 'utf8')) as {
-    role: string;
-    roleKey: string;
-    modelTier: string;
-    maxOutputTokens: number;
-    extends: string;
-    inputs: string[];
-    do: string[];
-    dont: string[];
-    doneWhen: string[];
-    contextLoad: string[];
-  };
-  const flows = flowNames.length ? `Own flows: ${flowNames.join(', ')}.` : 'No flow assigned.';
-  return [
-    `Role: ${skill.role} (${skill.roleKey}).`,
-    `Tier: ${skill.modelTier}. Max out: ${skill.maxOutputTokens}.`,
-    `Extends: ${skill.extends}.`,
-    `Inputs: ${skill.inputs.join('; ')}.`,
-    `Do: ${skill.do.join('; ')}.`,
-    `Don't: ${[...skill.dont, ...base.dont].join('; ')}.`,
-    `Done-when: ${skill.doneWhen.join('; ')}.`,
-    `HardRules: ${base.hardRules.map((rule) => rule.id).join(',')}.`,
-    `Context: ${skill.contextLoad.join(',')}; never ${base.neverLoad.join(',')}.`,
-    flows,
-    'Do not merge. User approves every merge and every idea.',
-    'Output JSON matching role outputSchema only.',
-  ].join('\n');
+  return composeInstructions(seat.roleKey, flowNames);
 }
 
 function layerFor(flow: FlowRef): 'frontend' | 'backend' | 'fullstack' {

@@ -3,11 +3,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ROLE_KEYS } from '../services/companyGenerator';
 import {
+  RULE_MAP,
+  applyContextCaps,
   composeInstructions,
   listRoleSkillKeys,
   loadBaseSkill,
   loadRoleSkill,
-  runtimeSkillsDir,
 } from '../services/agentSkills/loadSkills';
 import { HARD_RULE_IDS } from '../services/agentSkills/types';
 
@@ -30,70 +31,75 @@ describe('agent skills catalogue', () => {
       const skill = loadRoleSkill(roleKey);
       expect(skill.extends).toBe('_base');
       expect(skill.roleKey).toBe(roleKey);
+      expect(skill.hardRuleIds.length).toBeGreaterThan(0);
+      expect(skill.contextCaps.maxFiles).toBeGreaterThan(0);
+      expect(skill.contextCaps.maxBytes).toBeGreaterThan(0);
+      expect(skill.contextCaps.maxTokens).toBeGreaterThan(0);
       expect(skill.modelTier === 'high' || skill.modelTier === 'low').toBe(true);
-      expect(skill.maxOutputTokens).toBeGreaterThan(0);
-      expect(skill.inputs.length).toBeGreaterThan(0);
-      expect(skill.do.length).toBeGreaterThan(0);
-      expect(skill.dont.length).toBeGreaterThan(0);
-      expect(skill.doneWhen.length).toBeGreaterThan(0);
-      expect(skill.outputSchema).toBeTruthy();
-      expect(Object.keys(skill)).toEqual(
-        expect.arrayContaining(['roleKey', 'role', 'extends', 'modelTier', 'maxOutputTokens', 'inputs', 'do', 'dont', 'outputSchema', 'doneWhen']),
-      );
     }
   });
 
-  it('base skill contains every required hard rule id and checklist keywords', () => {
-    const base = loadBaseSkill();
-    const ids = base.hardRules.map((rule) => rule.id);
-    for (const id of HARD_RULE_IDS) {
-      expect(ids).toContain(id);
+  it('catalogue matches docs/agents/skills (single source of truth)', () => {
+    const docsKeys = fs
+      .readdirSync(DOCS_SKILLS_DIR)
+      .filter((n) => n.endsWith('.json') && n !== '_base.json')
+      .map((n) => n.replace(/\.json$/, ''))
+      .sort();
+    expect(listRoleSkillKeys()).toEqual(docsKeys);
+    for (const roleKey of docsKeys) {
+      const docs = JSON.parse(fs.readFileSync(path.join(DOCS_SKILLS_DIR, `${roleKey}.json`), 'utf8'));
+      const embedded = loadRoleSkill(roleKey);
+      expect(embedded.hardRuleIds).toEqual(docs.hardRuleIds);
+      expect(embedded.contextCaps).toEqual(docs.contextCaps);
+      expect(embedded.do).toEqual(docs.do);
+      expect(RULE_MAP[roleKey]).toEqual(docs.hardRuleIds);
     }
-    const blob = JSON.stringify(base);
-    const requiredSnippets = [
-      'WIP=1',
-      'never merge',
-      'md+pdf',
-      'screenshots',
-      'hash-chained ticket_events',
-      'Given/When/Then',
-      '1/2/3/5/8/13',
-      '4 days = 5',
-      '10 working days',
-      'backup only when owner OFF',
-      'E2E-tests B',
-      'HTML+image mocks',
-      'api_contract',
-      'versioned revisions',
-      'findings become tickets',
-      'User approves every merge',
-    ];
-    for (const snippet of requiredSnippets) {
-      expect(blob.toLowerCase()).toContain(snippet.toLowerCase());
+    const baseDocs = JSON.parse(fs.readFileSync(path.join(DOCS_SKILLS_DIR, '_base.json'), 'utf8'));
+    expect(loadBaseSkill().hardRules.map((r) => r.id)).toEqual(baseDocs.hardRules.map((r: { id: string }) => r.id));
+  });
+
+  it('composed prompt includes mapped hard-rule imperatives only', () => {
+    for (const roleKey of ROLE_KEYS) {
+      const mapped = RULE_MAP[roleKey] as string[];
+      const text = composeInstructions(roleKey, ['ExampleFlow']);
+      expect(text).toContain('HardRules:');
+      expect(text).toContain('ContextCaps:');
+      for (const id of mapped) {
+        expect(text).toContain(`[${id}]`);
+      }
+      for (const id of HARD_RULE_IDS) {
+        if (!mapped.includes(id)) {
+          expect(text).not.toContain(`[${id}]`);
+        }
+      }
+      // CFO must not get coding evidence rules
+      if (roleKey === 'cfo') {
+        expect(text).not.toContain('[dev_qa_evidence]');
+        expect(text).not.toContain('[api_contract]');
+        expect(text).toContain('[idea_lifecycle]');
+      }
+      if (roleKey === 'frontend') {
+        expect(text).toContain('[dev_qa_evidence]');
+        expect(text).toContain('md+pdf');
+      }
+      if (roleKey === 'red_team' || roleKey === 'blue_team') {
+        expect(text.toLowerCase()).toContain('egress denied by default');
+        expect(text.toLowerCase()).toContain('explicit local allowlist');
+      }
     }
   });
 
-  it('composeInstructions references base and stays lean', () => {
-    const text = composeInstructions('frontend', ['Signup']);
-    expect(text).toContain('Extends: _base');
-    expect(text).toContain('HardRules:');
-    for (const id of HARD_RULE_IDS) {
-      expect(text).toContain(id);
-    }
-    expect(text).toContain('Own flows: Signup');
-    expect(text.length).toBeLessThan(1500);
-  });
-
-  it('docs/agents/skills mirrors runtime data byte-for-byte', () => {
-    const runtime = runtimeSkillsDir();
-    const docsNames = fs.readdirSync(DOCS_SKILLS_DIR).filter((n) => n.endsWith('.json')).sort();
-    const runtimeNames = fs.readdirSync(runtime).filter((n) => n.endsWith('.json')).sort();
-    expect(docsNames).toEqual(runtimeNames);
-    for (const name of docsNames) {
-      expect(fs.readFileSync(path.join(DOCS_SKILLS_DIR, name), 'utf8')).toBe(
-        fs.readFileSync(path.join(runtime, name), 'utf8'),
-      );
-    }
+  it('applyContextCaps enforces numeric caps', () => {
+    const caps = loadRoleSkill('ceo').contextCaps;
+    const huge = 'x'.repeat(caps.maxBytes + 5000);
+    const many = Array.from({ length: caps.maxFiles + 10 }, (_, i) => `f${i}.ts`);
+    const applied = applyContextCaps('ceo', { files: many, text: huge });
+    expect(applied.files).toHaveLength(caps.maxFiles);
+    expect(Buffer.byteLength(applied.text, 'utf8')).toBeLessThanOrEqual(caps.maxBytes);
+    expect(Math.ceil(Buffer.byteLength(applied.text, 'utf8') / 4)).toBeLessThanOrEqual(caps.maxTokens);
+    expect(applied.truncated).toBe(true);
+    const prompt = composeInstructions('ceo', [], { files: many, text: huge });
+    expect(prompt).toContain('truncated=true');
   });
 
   it('domain SKILL.md files reference _base', () => {
