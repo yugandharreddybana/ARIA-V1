@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { providerCredentials } from './provider-credentials';
 
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -25,6 +26,7 @@ export const workspaces = pgTable('workspaces', {
   jiraUserEmail:              varchar('jira_user_email', { length: 255 }),
 
   // ── LLM / model configuration (onboarding Step 2) ────────────────────────
+  // Legacy single-row fields stay for Hibernat/M1 compat; M3A prefers provider_credentials.
   llmProvider:                text('llm_provider').default('cursor'),
   llmBaseUrl:                 varchar('llm_base_url', { length: 500 }),
   llmApiKeyEncrypted:         text('llm_api_key_encrypted'),
@@ -33,6 +35,8 @@ export const workspaces = pgTable('workspaces', {
   llmModelCatalog:            jsonb('llm_model_catalog').notNull().default([]),
   llmCatalogRefreshedAt:      timestamp('llm_catalog_refreshed_at', { withTimezone: true }),
   githubPushTokenEncrypted:   text('github_push_token_encrypted'),
+  activePlanningCredentialId: uuid('active_planning_credential_id').references((): AnyPgColumn => providerCredentials.id, { onDelete: 'set null' }),
+  activeCodingCredentialId:   uuid('active_coding_credential_id').references((): AnyPgColumn => providerCredentials.id, { onDelete: 'set null' }),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

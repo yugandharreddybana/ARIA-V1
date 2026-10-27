@@ -2,8 +2,7 @@ import { validateEnv } from '../../config/env';
 import { getPgPool } from '../db.client';
 import { AppError } from '../../middleware/error.middleware';
 import { evidenceAllowsMerge } from '../evidence/reports';
-import { codeWorkerFor } from '../models/codeWorker';
-import { workspaceCursorKey } from '../models/cursorKey';
+import { codeWorkerForWorkspace } from '../providers/resolveWorker';
 import { enqueueOn, cancelForTicket, releaseHeldRuns, type HeldRun, type RunActivity, type RunRuntime } from '../runs/runQueue';
 import type { TicketStatusPatch } from '@aria/shared';
 import { emitProject } from '../runs/hub';
@@ -219,8 +218,7 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
     const cloud = held.filter((run) => run.external_agent_id && run.external_run_id);
     if (cloud.length) {
       try {
-        const apiKey = await workspaceCursorKey(ticket.workspace_id);
-        const worker = codeWorkerFor();
+        const { worker, apiKey } = await codeWorkerForWorkspace(ticket.workspace_id, ticket.project_id);
         for (const run of cloud) {
           await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
         }

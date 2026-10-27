@@ -17,8 +17,8 @@ import {
   readGithubToken,
 } from '../githubClient.service';
 import { diffHunkLines, diffTouchesUi, secretFindings, sensitivePaths } from '../github/diffGuards';
-import { codeWorkerFor, prNumberFromUrl, type CodeRunSnapshot } from '../models/codeWorker';
-import { workspaceCursorKey } from '../models/cursorKey';
+import { prNumberFromUrl, type CodeRunSnapshot } from '../models/codeWorker';
+import { codeWorkerForWorkspace } from '../providers/resolveWorker';
 import { reasoningFor } from '../models/reasoning';
 import { checkMidRun, estimateFor } from '../runs/budget';
 import { RunError } from '../runs/errors';
@@ -147,8 +147,7 @@ async function finishCloud(
   prompt: string,
   options: { autoCreatePR: boolean; workOnCurrentBranch: boolean; prUrl: string | null; kind: 'dev' | 'qa' | 'fix'; signal?: AbortSignal },
 ): Promise<CodeResult> {
-  const apiKey = await workspaceCursorKey(ticket.workspace_id);
-  const worker = codeWorkerFor();
+  const { worker, apiKey } = await codeWorkerForWorkspace(ticket.workspace_id, ticket.project_id);
   const cap = (await estimateFor(run.activity, run.workspace_id)).cap;
   const ref = await worker.start({
     run,

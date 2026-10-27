@@ -7,8 +7,7 @@ import { AppError } from '../middleware/error.middleware';
 import { getPgPool } from '../services/db.client';
 import { cancel, enqueue, getRun } from '../services/runs/runQueue';
 import { list as listLogs } from '../services/runs/runLogs';
-import { codeWorkerFor } from '../services/models/codeWorker';
-import { workspaceCursorKey } from '../services/models/cursorKey';
+import { codeWorkerForWorkspace } from '../services/providers/resolveWorker';
 import { assertOwnerInvariant, setOwners, type FlowLayer, type FlowRole } from '../services/flows/flowOwners';
 import { appendTicketEvent, eventsToMarkdown, listTicketEvents, verifyChain } from '../services/tickets/ticketEvents';
 import { evidenceAllowsMerge, latestReports, readReport } from '../services/evidence/reports';
@@ -275,8 +274,8 @@ runRouter.post('/:runId/cancel', async (req: AriaRequest, res, next) => {
     if (!run || run.workspace_id !== req.user!.workspaceId) throw new AppError('Run not found', 404, 'NOT_FOUND');
     if (run.external_agent_id && run.external_run_id) {
       try {
-        const apiKey = await workspaceCursorKey(run.workspace_id);
-        await codeWorkerFor().cancel({ agentId: run.external_agent_id, runId: run.external_run_id }, apiKey);
+        const { worker, apiKey } = await codeWorkerForWorkspace(run.workspace_id, run.project_id);
+        await worker.cancel({ agentId: run.external_agent_id, runId: run.external_run_id }, apiKey);
       } catch { /* already stopped */ }
     }
     res.json({ run: await cancel(run.id) });

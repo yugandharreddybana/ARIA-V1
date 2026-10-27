@@ -282,6 +282,19 @@ export function startStub({ port = 0 } = {}) {
       if (path === '/api/tags') {
         return send(res, 200, { models: [{ name: 'qwen2.5-coder:7b' }, { name: 'nomic-embed-text' }] });
       }
+      // M3A provider stubs — Claude Code / Anthropic, Codex / OpenAI, Antigravity / Gemini
+      if (path === '/anthropic/v1/models' || path === '/v1/anthropic/models') {
+        return send(res, 200, { data: [{ id: 'claude-opus-4-7' }, { id: 'claude-sonnet-4-6' }] });
+      }
+      if (path === '/openai/v1/models' || path === '/v1/openai/models') {
+        return send(res, 200, { data: [{ id: 'gpt-4.1' }, { id: 'gpt-4.1-mini' }] });
+      }
+      if (path === '/v1beta/models' || path === '/gemini/v1beta/models') {
+        return send(res, 200, { models: [{ name: 'models/gemini-2.5-pro' }, { name: 'models/gemini-2.5-flash' }] });
+      }
+      if (path === '/__stub/cli/claude' || path === '/__stub/cli/codex' || path === '/__stub/cli/agy') {
+        return send(res, 200, { ok: true, binary: path.split('/').pop(), status: 'ok' });
+      }
       if (path === '/__stub/violations') return send(res, 200, { violations });
       if (path === '/user/repos') {
         return send(res, 200, [{ full_name: 'acme/demo-app', private: false, default_branch: 'main', html_url: 'https://github.com/acme/demo-app' }]);

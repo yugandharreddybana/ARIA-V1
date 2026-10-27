@@ -9,9 +9,9 @@ import { loadWorkspaceLlm, providerId } from './guardedLlm.service';
 import { applyCompanyRoster } from './activities/companyApply';
 import { decorateFlows, ownersOf, setOwners, type FlowLayer } from './flows/flowOwners';
 import { enqueue, blockQueuedForAgent, cancelRunningForAgent, unblockQueuedForAgent } from './runs/runQueue';
-import { codeWorkerFor } from './models/codeWorker';
-import { workspaceCursorKey } from './models/cursorKey';
+import { codeWorkerForWorkspace } from './providers/resolveWorker';
 import { catalogModelIds, readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
+import { setupCredentialsReady } from './providers/credentials.service';
 
 export interface AgentView {
   id: string;
@@ -325,8 +325,7 @@ export async function updateAgent(projectId: string, workspaceId: string, agentI
     const cloud = running.filter((run) => run.external_agent_id && run.external_run_id);
     if (cloud.length) {
       try {
-        const apiKey = await workspaceCursorKey(workspaceId);
-        const worker = codeWorkerFor();
+        const { worker, apiKey } = await codeWorkerForWorkspace(workspaceId);
         for (const run of cloud) {
           await worker.cancel({ agentId: run.external_agent_id!, runId: run.external_run_id! }, apiKey);
         }
@@ -462,9 +461,22 @@ export async function getSetupState(workspaceId: string) {
     where: eq(projects.workspaceId, workspaceId),
     orderBy: [desc(projects.createdAt)],
   });
-  const llmConfigured = Boolean(workspace?.llmProvider && (workspace.llmApiKeyEncrypted || workspace.llmProvider === 'ollama'));
+  const ready = await setupCredentialsReady(workspaceId);
+  const legacyLlm = Boolean(workspace?.llmProvider && (workspace.llmApiKeyEncrypted || workspace.llmProvider === 'ollama'));
+  const llmConfigured = ready.ok || legacyLlm;
   if (!project) {
-    return { project: null, llmConfigured, repoCount: 0, knowledgeReady: false, summary: '', flows: [], jobs: [] };
+    return {
+      project: null,
+      llmConfigured,
+      credentialsReady: ready,
+      activePlanningCredentialId: workspace?.activePlanningCredentialId ?? null,
+      activeCodingCredentialId: workspace?.activeCodingCredentialId ?? null,
+      repoCount: 0,
+      knowledgeReady: false,
+      summary: '',
+      flows: [],
+      jobs: [],
+    };
   }
   const repos = await db.query.projectRepos.findMany({ where: eq(projectRepos.projectId, project.id) });
   const knowledge = await getKnowledge(project.id, workspaceId);
@@ -472,6 +484,9 @@ export async function getSetupState(workspaceId: string) {
   return {
     project: { id: project.id, name: project.name },
     llmConfigured,
+    credentialsReady: ready,
+    activePlanningCredentialId: workspace?.activePlanningCredentialId ?? null,
+    activeCodingCredentialId: workspace?.activeCodingCredentialId ?? null,
     repoCount: repos.length,
     knowledgeReady: Boolean(knowledge.map) && !active,
     knowledge: {

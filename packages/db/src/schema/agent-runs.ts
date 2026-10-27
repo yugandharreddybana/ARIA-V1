@@ -4,6 +4,7 @@ const bytea = customType<{ data: Buffer }>({
   dataType() { return 'bytea'; },
 });
 import { projects, projectRepos } from './projects';
+import { runtimeKinds } from './provider-credentials';
 import { skills } from './skills';
 import { tickets } from './tickets';
 import { workspaces } from './workspaces';
@@ -19,7 +20,7 @@ export const agentRuns = pgTable('agent_runs', {
   parentRunId: uuid('parent_run_id').references((): AnyPgColumn => agentRuns.id, { onDelete: 'set null' }),
   activity: text('activity').notNull(),
   taskType: text('task_type').notNull(),
-  runtime: text('runtime').notNull(),
+  runtime: text('runtime').notNull().references(() => runtimeKinds.id),
   status: text('status').notNull().default('queued'),
   blockedReason: text('blocked_reason'),
   priority: integer('priority').notNull().default(0),

@@ -10,6 +10,21 @@ export const llmConfigSchema = z.discriminatedUnion('provider', [
     apiKey: key,
   }),
   z.object({
+    provider: z.literal('claude_code'),
+    model: model.default('claude-sonnet-4-6'),
+    apiKey: key,
+  }),
+  z.object({
+    provider: z.literal('codex'),
+    model: model.default('gpt-4.1'),
+    apiKey: key,
+  }),
+  z.object({
+    provider: z.literal('antigravity'),
+    model: model.default('gemini-2.5-pro'),
+    apiKey: key,
+  }),
+  z.object({
     provider: z.literal('gemini'),
     model: model.default('gemini-2.0-flash'),
     apiKey: key,

@@ -30,12 +30,20 @@ import {
   updateAgent,
   updateModelTiers,
 } from '../services/company.service';
+import { completeSetup } from '../services/providers/credentials.service';
 
 const router = Router();
 
 router.get('/state', requireAuth, async (req: AriaRequest, res, next) => {
   try {
     res.json(await getSetupState(req.user!.workspaceId));
+  } catch (err) { next(err); }
+});
+
+router.post('/complete', requireAuth, async (req: AriaRequest, res, next) => {
+  try {
+    await completeSetup(req.user!.workspaceId);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

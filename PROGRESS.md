@@ -21,17 +21,25 @@ Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 
 
 ## Milestone 3B — Jira hierarchy + path ownership (this branch)
 
-Branch: `cursor/m3b-jira-ownership-49c8`. M3_PLAN.md rev 4 slice **M3B / V22** only (parallel with M3A V21 — providers untouched). Base: `main`.
+Branch: `cursor/m3b-jira-ownership-49c8`. M3_PLAN.md rev 4 slice **M3B / V22**. Merged `main` after M3A (#15 / V21).
 
 Shipped: Flyway V22 (epic/story/sub_task, G/W/T AC, sprints, path_owners, ownership_handoffs, extended ticket_events, nullable idea_card_id); shared Zod AC + owner-confirmed `daysToPoints`/`ceilFib` (1→1, 2→2, 3→3, 4→5, 5→5, 8→8); WIP=1; 10-working-day sprints; sprint/backlog/path-owner APIs; Board/Backlog/Sprint UI + story detail (AC, sub-tasks, owner); unit/integration/Playwright ×3; `docs/verification/m3b-jira-ownership.{md,pdf}`.
 
 ### Verified locally on 2026-10-27
 
 - M3B vitest: **14+ passed** (`m3b.test.ts` + `m3b.integration.test.ts`, incl. OFF/WIP backup and exact Fib 1/2/3/4/5/8).
-- Full middleware vitest: **30 files / 160 tests passed**.
+- Full middleware vitest: **30 files / 160 tests passed** (pre–M3A merge).
 - Schema drift: passed (V22 tip).
 - Playwright `milestone3b-jira.spec.ts`: **3 passed** (desktop / tablet / mobile).
-- Rebased onto main after #10; CI Playwright keeps M1 specs + M3B.
+- After #15: Flyway V21 then V22 from scratch; CI Playwright includes M1 + M2 + M3A + M3B.
+
+## Milestone 3A — providers (merged, PR #15)
+
+Branch: `cursor/m3a-providers-3ee9`. Slice **M3A / V21**: `provider_credentials`, active credential FKs, `runtime_kinds` FK, ProviderAdapter (Cursor / Claude Code / Codex / Antigravity / chat+Ollama), Test Connection activate gate, capability-filtered lists, setup/Settings UI, CI stubs. Report: `docs/verification/m3a-providers.md` (+ PDF).
+
+## Shadow-learning PR fallback (merged, PR #16)
+
+Prefer optional `SHADOW_LEARNING_PAT`, else push branch + compare link in `$GITHUB_STEP_SUMMARY` and exit 0; skip cleanly when there are no new lessons.
 
 ## Milestone 3 — plan (merged, PR #12)
 

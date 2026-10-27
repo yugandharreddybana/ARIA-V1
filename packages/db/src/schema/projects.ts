@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, timestamp, integer, bigint, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { agentRuns } from './agent-runs';
+import { providerCredentials } from './provider-credentials';
 import { workspaces } from './workspaces';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true });
@@ -20,6 +21,11 @@ export const projects = pgTable('projects', {
   codeRuntime: text('code_runtime').notNull().default('cursor_cloud'),
   tokenBudgetMonthly: bigint('token_budget_monthly', { mode: 'number' }),
   mergeGuardAckAt: tstz('merge_guard_ack_at'),
+  planningCredentialId: uuid('planning_credential_id').references((): AnyPgColumn => providerCredentials.id, { onDelete: 'set null' }),
+  codingCredentialId: uuid('coding_credential_id').references((): AnyPgColumn => providerCredentials.id, { onDelete: 'set null' }),
+  timezone: text('timezone').notNull().default('UTC'),
+  standupTime: text('standup_time').notNull().default('08:00'),
+  sprintWorkdays: integer('sprint_workdays').notNull().default(10),
   createdAt: tstz('created_at').notNull().defaultNow(),
   updatedAt: tstz('updated_at').notNull().defaultNow(),
 });

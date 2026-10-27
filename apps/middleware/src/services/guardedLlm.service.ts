@@ -17,6 +17,7 @@ import { mockModeEnabled, type ChatMessage, type LlmEndpoint, type LlmProviderId
 import { validateEnv } from '../config/env';
 import { monthlyBucketId } from './runs/budget';
 import { resolveModelRoute, taskTierMap, tierModelMap, type TaskType } from './modelTiers';
+import { resolveActiveCredential } from './providers/credentials.service';
 
 const sanitizer = new Sanitizer();
 
@@ -144,6 +145,9 @@ async function loadTierPolicy(workspaceId: string, projectId: string | undefined
 export function providerId(value: string | null | undefined): LlmProviderId {
   switch (value) {
     case 'cursor':
+    case 'claude_code':
+    case 'codex':
+    case 'antigravity':
     case 'gemini':
     case 'groq':
     case 'ollama':
@@ -159,6 +163,16 @@ export function providerId(value: string | null | undefined): LlmProviderId {
 }
 
 export async function loadWorkspaceLlm(workspaceId: string): Promise<LlmEndpoint | null> {
+  // Prefer active planning credential (M3A); fall back to legacy workspace llm_* columns.
+  const active = await resolveActiveCredential(workspaceId, 'planning');
+  if (active) {
+    return {
+      provider: providerId(active.provider),
+      baseUrl: active.baseUrl,
+      model: active.model,
+      apiKey: active.apiKey,
+    };
+  }
   const row = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) });
   if (!row?.llmProvider || !row.llmModel) return null;
   return {

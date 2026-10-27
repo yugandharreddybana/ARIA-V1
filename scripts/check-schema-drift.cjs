@@ -35,10 +35,11 @@ if (!/CREATE TABLE IF NOT EXISTS business_flows[\s\S]*UNIQUE \(project_id, flow_
   fail('Flyway is missing UNIQUE (project_id, flow_key)');
 }
 
-const required = ['agent_runs', 'flow_owners', 'ticket_events', 'ticket_reports', 'story_points'];
+const required = ['agent_runs', 'flow_owners', 'ticket_events', 'ticket_reports', 'story_points', 'provider_credentials', 'runtime_kinds'];
 for (const name of required) {
   if (!flyway.includes(name)) fail(`Flyway is missing ${name}`);
 }
+if (!/agent_runs_runtime_fk/.test(flyway)) fail('Flyway is missing agent_runs_runtime_fk');
 const agentRuns = fs.readFileSync(path.join(root, 'packages/db/src/schema/agent-runs.ts'), 'utf8');
 const flowOwners = fs.readFileSync(path.join(root, 'packages/db/src/schema/flow-owners.ts'), 'utf8');
 if (!agentRuns.includes("pgTable('agent_runs'") || !agentRuns.includes("pgTable('ticket_events'") || !agentRuns.includes("pgTable('ticket_reports'")) {

@@ -32,6 +32,7 @@ import onboardingRoutes from './routes/onboarding.routes';
 import setupRoutes, { githubConnectRouter, projectInsightRouter } from './routes/setup.routes';
 import { projectM2Router, runM2Router, ticketM2Router } from './routes/m2.routes';
 import { projectM3bRouter } from './routes/m3b.routes';
+import providersRoutes from './routes/providers.routes';
 
 export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   const app = express();
@@ -77,6 +78,7 @@ export function createApp(env: ValidatedEnv = validateEnv()): express.Express {
   app.use('/api/incidents',        incidentsRoutes);
   app.use('/api/fleet',            fleetRoutes);
   app.use('/api/workspace',        workspaceRoutes);
+  app.use('/api/providers',        providersRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

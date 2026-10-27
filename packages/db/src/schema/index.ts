@@ -13,5 +13,6 @@ export * from './onboarding-proposals';
 export * from './knowledge';
 export * from './flow-owners';
 export * from './agent-runs';
+export * from './provider-credentials';
 export * from './sprints';
 export * from './m3b-jira';
