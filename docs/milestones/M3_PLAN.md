@@ -1,10 +1,10 @@
 # Milestone 3 — Multi-provider coding company + real Jira workflow
 
-Status: plan only (this PR). No feature code. Author: lead architect, 2026-10-27 (rev 2 — owner decisions locked).
+Status: plan only (this PR). No feature code. Author: lead architect, 2026-10-27 (**rev 3** — owner decisions + PR #12 review must-fixes + persistent code ownership).
 Inputs: `docs/PRODUCT_SPEC.md` (wins on conflict), `docs/milestones/M2_PLAN.md`, `docs/CURSOR_PROVIDER.md`, `PROGRESS.md`.
-Base: current `main` with M2 backend (#9) and **M2 frontend (#11) merged**. Open PR #10 (M1 verification) is independent; rebase if it lands later. PR #6 closed (JWT already on main).
+Base: `main` with M2 backend (#9) and M2 frontend (#11). PR #6 closed (JWT on main). Open #10 independent.
 
-M3 turns the M2 Cursor-only coding pipeline into a **multi-provider** engineering company with a **real Jira-like board**, an **idea → proposal → approve** lifecycle, agent-to-agent dependency contracts, scrum ceremonies, a PR merge-order coordinator, documentation under `confluence/`, and a **full red/blue security loop** against the local stack. Planning uses any capable provider; coding lists only coding-capable agents. High-end models plan; low-end models code from clear instructions. UI mocks (HTML + every-state PNGs) gate any story that adds UI. Agents never merge.
+M3 turns the M2 Cursor-only coding pipeline into a **multi-provider** engineering company with a **Jira-like board**, **idea → proposal → approve** lifecycle, **persistent code/flow ownership** (CODEOWNERS-style path map from merged PRs), agent dependency contracts, scrum ceremonies, merge-order advice, `confluence/` docs, a **learning agent** (owner-approved skill/prompt updates), and a **full local red/blue** loop. Planning uses any `canPlan` provider; coding lists only `canCode` agents. Agents never merge. UI stays simple (#8/#11 primitives).
 
 ---
 
@@ -12,165 +12,126 @@ M3 turns the M2 Cursor-only coding pipeline into a **multi-provider** engineerin
 
 | # | Decision |
 |---|---|
-| 1 | **No product-default provider.** Setup lists options; the user picks and connects the agent(s) they want. That choice becomes the **project’s** default for each tier. Changeable anytime in Settings. |
-| 2 | **Capability-filtered lists.** Planning tier: any provider that can plan (incl. Ollama, OpenAI-compatible, Gemini, Claude, Codex, Cursor, Antigravity). Coding tier: **only** coding-capable agents (Claude Code, Cursor, Codex, Antigravity). If a local/model provider later gains `canCode=true`, show it in coding; otherwise **omit it from the coding list entirely** (never show-and-block). |
-| 3 | **Auth / Antigravity / CLIs.** Claude Code and Codex: **API key only** for now (no subscription/OAuth login). Antigravity: Google Gemini path — `agy` CLI + `GEMINI_API_KEY` for coding; Gemini API chat for planning. Assume CLIs are installed; still **detect the binary** and show install steps if missing; **never auto-install**. |
-| 4 | **Story points.** Fibonacci `1,2,3,5,8,13`. Estimated working days **round up** to the next Fibonacci (1→1, 2→3, 4→5, …). Due date = points as working days (M2 calendar: Sat/Sun off). |
-| 5 | **UI mocks.** HTML mock **plus** PNG images for **every state**: default, modals/dialogs, empty, error, loading, and interaction outcomes (what appears when each button is clicked). All attached to the story. |
-| 6 | **Sprint length.** **10 working days** (2 weeks, Sat/Sun off). |
-| 7 | **Standup time.** Configurable in Settings; default **08:00** in the **user’s timezone** (`ARIA_TIMEZONE` / project timezone). |
-| 8 | **Dependency gate is hard.** Requester agent A must test B’s entire implementation end-to-end and verify before B’s story can reach `awaiting_merge`. |
-| 9 | **Red/blue full scope in M3.** Security-review stage + scheduled **and** randomized red-team attacks against the **running local app** (auth bypass, IDOR, injection, XSS, SSRF, secrets/DB leakage, prompt injection). Each finding → ticket; blue team fixes via tickets with evidence. Sandboxed to local stack only. |
-| 10 | **Credentials.** Per-provider credential rows; **one active provider per tier** (`planning`, `coding`). |
-| 11 | **PR #6** closed — main already has the JWT PEM/`type: access` fix. |
+| 1 | **No product-default provider.** Setup: user picks and connects; that becomes the **project** default per tier. Changeable in Settings anytime. |
+| 2 | **Capability-filtered lists.** Planning = any `canPlan` (incl. Ollama / OpenAI-compatible / Gemini). Coding = **only** `canCode` (Claude Code, Cursor, Codex, Antigravity). Non-coders are **omitted** from the coding list (never show-and-block). |
+| 3 | Claude/Codex: **API key only**. Antigravity: `agy` + `GEMINI_API_KEY` (Gemini API for planning). Detect CLI binary; show install steps if missing; **never auto-install**. |
+| 4 | Fibonacci `1,2,3,5,8,13`. Estimated days **ceil to next Fib** (`ceilFib`). Due date = points as working days (Sat/Sun off). `ceilFib` only when converting a day estimate → points; stored points remain 1 pt = 1 working day for schedule math (M2 unchanged). |
+| 5 | UI mocks: HTML + PNG for **every** state (default, modals, empty, error, loading, click outcomes). |
+| 6 | Sprint = **10** working days. |
+| 7 | Standup time configurable; default **08:00** in project/user timezone. |
+| 8 | Dependency verify is **hard**: requester A E2E-tests B before B → `awaiting_merge`. |
+| 9 | Red/blue **full scope** in M3 against **local stack only** (see §11 lockdown). |
+| 10 | Per-provider credential rows; **several labeled keys per provider**; **one active credential per tier** (planning, coding). |
+| 11 | PR #6 closed. |
+| 12 | **Persistent code ownership.** The agent that builds a flow/path **owns** it thereafter. Future stories that touch those paths route to that owner. Backup only if owner OFF, over WIP, or user reassigns. Handoff logged in `ticket_events` + handover doc. |
 
-Config defaults that follow:
+Config keys:
 
-| Setting | Value |
+| Setting | Default |
 |---|---|
 | `ARIA_SPRINT_WORKDAYS` | `10` |
-| `ARIA_STANDUP_TIME` | `08:00` (project timezone) |
+| `ARIA_STANDUP_TIME` | `08:00` |
 | `ARIA_SECURITY_REVIEW` | `true` |
-| `ARIA_RED_BLUE_ENABLED` | `true` (local stack only) |
-| `ARIA_QA_BROWSER` | `true` for mock/interaction evidence capture in coding/QA runs (middleware still does not merge) |
-| Fibonacci round-up | `ceilFib(days)` helper shared by planner and API |
+| `ARIA_RED_BLUE_ENABLED` | `true` |
+| `ARIA_RED_BLUE_ALLOWLIST` | compose DNS + `localhost` + `ARIA_PUBLIC_URL` host |
+| `ARIA_RED_BLUE_MAX_ROUNDS` | `3` |
+| `ARIA_RED_BLUE_RATE_PER_HOUR` | `6` |
+| `ARIA_AGENT_WIP_LIMIT` | `1` (active tickets counted; `awaiting_merge` excluded unless config flips) |
+| `ARIA_QA_BROWSER` | `true` (evidence capture; middleware still never merges) |
+| `ARIA_KILL_SWITCH` | `false` (global pause) |
 
 ---
 
-## 1. Key design decisions (architect)
+## 1. Architect design locks
 
-| # | Decision | Why |
-|---|---|---|
-| D1 | Keep M2 **`ReasoningModel`** / **`CodeWorker`**; add **`ProviderAdapter`** registry + capability flags. | Multi-provider is a registry, not a rewrite. |
-| D2 | **Active provider per tier** (planning vs coding), not one global provider. Project inherits workspace actives; Settings overrides per project. | Decision 1 + 10. |
-| D3 | **Test Connection hard gate** before a credential row can become the active provider for a tier. Store `connection_status`, `last_tested_at`, `last_error`. Secrets `gcm:v2`; never returned. | M1 pattern extended to coding CLIs. |
-| D4 | CI stubs for every adapter (HTTP + CLI PATH shims). Live keys = owner smoke only. | Keyless CI. |
-| D5 | High tier = planning/design/split/ceremony/merge-order/security/idea review; low tier = code/tests/docs file edits/mocks from instructions. Resolution: agent pin → agent tier → project tier → active provider default. | Product + Decision 2. |
-| D6 | Jira hierarchy `epic` → `story` → `sub_task`; status adds `design` (mock pending) and keeps M2 states. | Minimal board change. |
-| D7 | UI mock hard gate: designer → PO+SM review → owner approve/comment loop → only then develop. | Decision 5 + idea flow. |
-| D8 | Docs agent → `confluence/`; scrum ceremonies as text; merge-order advice only; agents never merge. | Product 10–14. |
-| D9 | Dependency `contracts` + hard verify by requester A. | Decision 8. |
-| D10 | Idea lifecycle is first-class (§6): research → proposal versions → CEO/CFO/agent comments → owner Approve/Decline/Comment loop → planning split. | Owner NEW REQUIRED FLOW. |
-| D11 | FE↔BE **API contract** on the story; FE click-by-click evidence; BE persistence evidence; both in md+pdf reports. | Owner flow. |
-| D12 | Company readiness extras (§7): DoR/DoD, story readiness check, contract tests, rollback plan, release notes, approval notifications, SLA escalation. | Real-company gaps; simple UI. |
-| D13 | All comments, versions, approvals, agent messages → hash-chained `ticket_events` (+ idea_events where needed). | Proof log. |
-| D14 | Simple UI: reuse #8/#11 primitives; prefer tabs under Board / Ideas / Settings over sidebar sprawl. | Owner. |
+| # | Lock |
+|---|---|
+| D1 | Keep M2 `ReasoningModel` / `CodeWorker`; add `ProviderAdapter` registry + capabilities. |
+| D2 | Active **credential id** per tier (not only provider id). Multi-key UX: add / list / test / activate / retire. |
+| D3 | Test Connection (+ binary detect) hard gate before activate. Secrets `gcm:v2`; GET never returns ciphertext. |
+| D4 | CI stubs for every adapter. |
+| D5 | High tier = plan/design/split/ceremony/merge-order/security/ideas/learning proposals; low = code/tests/docs/mocks. |
+| D6 | Jira: epic → story → sub_task; status `design` for mock pending. |
+| D7 | UI mock gate: designer → PO+SM → owner approve/comment loop → develop. |
+| D8 | Live Ideas path is **`idea_cards` + `feature_specs`** (not baseline `ideas`). M3 evolves `idea_cards`. |
+| D9 | Hard dep verify; WIP=1 per agent enforced in dispatcher + unique running-run index. |
+| D10 | **Path ownership** table (CODEOWNERS-like) updated on owner merge; dispatcher routes by path ∩ flow_owners. |
+| D11 | Learning agent proposes versioned skill/prompt patches; **owner approves** before apply (no silent self-rewrite). |
+| D12 | Extend `evidenceAllowsMerge` (do not fork) for DoD + security_review + dep verify. |
+| D13 | Seed company roles must include **UI/UX designer**, **learning/coach**, **PR/merge coordinator**, red/blue, docs, research (ON/OFF by seat count as M1). |
+| D14 | Simple UI; notifications for pending owner approvals. |
+| D15 | Flyway: **strict contiguous versions per PR merge order** — no pre-claimed holes (§4, §14). |
 
-Non-goals: multi-tenant SaaS, agents merging, GitHub webhooks (keep polling), learning-agent self-rewrite, Horizon Scanner, Genesis, auto-install of CLIs, subscription OAuth for Claude/Codex.
+Non-goals (runtime): multi-tenant SaaS, agents merging, GitHub webhooks, subscription OAuth for Claude/Codex, auto-install CLIs, silent learning self-rewrite.
 
 ---
 
-## 2. Provider research (sources checked 2026-10-27)
+## 2. Providers
 
-### 2.1 Capability matrix (drives UI lists)
+### 2.1 Capability matrix → UI lists
 
-| Provider | Headless drive | Auth (M3) | `canPlan` | `canCode` | Shown in planning list | Shown in coding list | Runtime |
-|---|---|---|---|---|---|---|---|
-| **Cursor** | SDK plan + Cloud Agents REST | API key | yes | yes | yes | yes | `cursor_local` / `cursor_cloud` |
-| **Claude Code** | `claude -p --bare` / Agent SDK | `ANTHROPIC_API_KEY` only | yes | yes | yes | yes | `claude_cli` |
-| **Codex** | `codex exec` | API key (`CODEX_API_KEY` / OpenAI key); no ChatGPT login | yes | yes | yes | yes | `codex_cli` |
-| **Antigravity** | `agy -p` (+ Gemini chat for plan) | `GEMINI_API_KEY` | yes | yes (CLI) | yes | yes | `antigravity_cli` / `chat` |
-| **Gemini** (API only) | Chat completions | API key | yes | no | yes | **no** | `chat` |
-| **Ollama** | HTTP `/api/chat` or `/v1/chat/completions` | base URL | yes | no* | yes | **no*** | `chat` |
-| **OpenAI / Anthropic chat** | Chat Completions / Messages | API key | yes | no | yes | **no** | `chat` |
-| **OpenAI-compatible / custom** | Chat Completions | key + base URL | yes | no* | yes | **no*** | `chat` |
+| Provider | `canPlan` | `canCode` | Planning list | Coding list | Auth (M3) |
+|---|---|---|---|---|---|
+| Cursor | yes | yes | yes | yes | API key |
+| Claude Code | yes | yes | yes | yes | `ANTHROPIC_API_KEY` |
+| Codex | yes | yes | yes | yes | API key (`CODEX_API_KEY`) |
+| Antigravity | yes | yes (`agy`) | yes | yes | `GEMINI_API_KEY` |
+| Gemini / OpenAI / Anthropic chat | yes | no | yes | **omit** | API key |
+| Ollama / openai_compatible / custom | yes | no* | yes | **omit*** | base URL ± key |
 
-\*If a future adapter sets `canCode=true` (e.g. a local agent binary), it appears in the coding list automatically. Until then it is omitted, not disabled-in-place.
+\*If adapter later sets `canCode=true`, it appears in coding automatically.
 
-Sources: [Claude Code headless](https://code.claude.com/docs/en/headless), [auth](https://code.claude.com/docs/en/authentication), [Agent SDK TS](https://code.claude.com/docs/en/agent-sdk/typescript); [Codex non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode), [env vars](https://developers.openai.com/codex/environment-variables); [Antigravity headless](https://antigravity.google/docs/cli/headless/), [CLI reference](https://antigravity.google/docs/cli/reference/), [Gemini Antigravity agent](https://ai.google.dev/gemini-api/docs/antigravity-agent); [Ollama chat](https://docs.ollama.com/api/chat), [OpenAI compat](https://docs.ollama.com/api/openai-compatibility); Cursor — `docs/CURSOR_PROVIDER.md`.
+Sources (2026-10-27): [Claude headless](https://code.claude.com/docs/en/headless), [Codex exec](https://learn.chatgpt.com/docs/non-interactive-mode), [Antigravity headless](https://antigravity.google/docs/cli/headless/), [Ollama chat](https://docs.ollama.com/api/chat), `docs/CURSOR_PROVIDER.md`.
 
-**Antigravity path (locked):** coding = `agy` CLI in ARIA worktree with Gemini key; planning may use Gemini chat API. Do not use Google-hosted remote Antigravity sandbox as the develop worker for the user’s git repo. Binary missing → Setup/Settings shows install steps; coding activate fails until present.
+### 2.2 Multi-key UX (Decision 10)
 
-### 2.2 Adapter interface
+- Many rows per `(workspace, provider)` distinguished by `label` (e.g. `personal`, `work`).
+- `GET /providers` returns ids, labels, health, `last_tested_at`, binary status — **never** secrets.
+- Activate for a tier stores `workspaces.active_planning_credential_id` / `active_coding_credential_id` (FK to credential row). Project may override with its own FKs.
+- Retire: soft-delete / `retired_at`; cannot activate retired; last-ok credential can remain listed.
+- Setup stepper: **both** tiers must have an activated credential (coding requires binary ok) before “Continue” — API `POST /setup/complete` returns 409 if missing.
+
+### 2.3 Adapter sketch
 
 ```ts
-export type TierKind = 'planning' | 'coding';
-
-export interface ProviderCapabilities {
-  canPlan: boolean;
-  canCode: boolean;
-  canOpenPR: boolean;
-  headless: 'cli' | 'api' | 'sdk' | 'none';
-  needsBinary?: string;       // 'claude' | 'codex' | 'agy'
-  supportsUsage: boolean;
-  supportsCancel: boolean;
-}
-
-export interface ProviderAdapter {
-  id: string;
-  capabilities: ProviderCapabilities;
-  testConnection(creds: ProviderCredentials): Promise<ConnectionHealth>;
-  detectBinary(): Promise<{ ok: boolean; path?: string; installHint?: string }>;
-  reasoning(): ReasoningModel;  // require canPlan
-  codeWorker(): CodeWorker;     // require canCode
-  listModels(): Promise<CatalogEntry[]>;
-}
-
-/** UI/API helper — never returns canCode=false rows for coding tier. */
-export function providersForTier(tier: TierKind): ProviderAdapter[];
+providersForTier(tier: 'planning' | 'coding'): ProviderAdapter[]; // filters canPlan/canCode
 ```
 
-### 2.3 CI stubs
-
-Extend `scripts/provider-stub.mjs` + PATH shims `claude` / `codex` / `agy` honoring `[[stub:…]]` markers. Grep: no live CLI spawn when `ARIA_PROVIDER_STUB=1`.
+CLI adapters implement the same `CodeWorker.follow/cancel/usage` shape as Cursor (poll/stream shim from CLI stdout).
 
 ---
 
-## 3. Architecture
+## 3. Architecture (delta)
+
+Dispatcher routing order for a story:
+
+1. Explicit `assignee_agent_id` if set and agent eligible (ON, under WIP).
+2. Else **path owners** for files the story declares / knowledge map predicts.
+3. Else **flow_owners** (layer) for `tickets.flow_id`.
+4. Else scrum-master assignment from `story_split`.
+5. If primary owner OFF / at WIP → **backup** (flow or path); log `ownership_handoff` event + handover doc.
+6. User reassign → same handoff path.
 
 ```mermaid
-flowchart TB
-  subgraph Web["apps/web — simple shell"]
-    Setup[Setup / Settings providers]
-    Ideas[Ideas — approve / decline / comment]
-    Board[Board / Backlog / Epics / Sprint]
-    Story[Story detail — mock + contract + evidence]
-    Cer[Ceremonies]
-    Merge[Merge order]
-    Approvals[Pending approvals bell]
-  end
-  subgraph MW["apps/middleware"]
-    API[REST + Zod]
-    Q[(agent_runs)]
-    REG[ProviderAdapter registry]
-    IDEA[Idea lifecycle]
-    SM[Scrum / story_split]
-    DOC[Docs confluence]
-    DEP[Dependency verify]
-    RB[Red/blue sandbox]
-    MO[Merge-order]
-    EV[ticket_events + idea_events]
-    READY[DoR / DoD / readiness]
-  end
-  PG[(Postgres)]
-  LOCAL[(Local app under test)]
-  CLI[["claude / codex / agy"]]
-  CUR[(Cursor Cloud)]
-  LLM[(Chat HTTP)]
-
-  Web --> API --> Q
-  Q --> REG
-  IDEA --> Q
-  SM --> Q
-  DOC --> Q
-  DEP --> Q
-  RB --> LOCAL
-  RB --> Q
-  MO --> Q
-  REG --> CLI
-  REG --> CUR
-  REG --> LLM
-  EV --- PG
+flowchart LR
+  Story --> Paths[path_owners]
+  Story --> Flows[flow_owners]
+  Paths --> Pick[eligible owner]
+  Flows --> Pick
+  Pick -->|OFF or WIP| Backup[backup + handoff doc]
+  Pick -->|ok| Queue[agent_runs]
 ```
 
 ---
 
-## 4. Data model and Flyway (V21+)
+## 4. Data model — Flyway (strict order)
 
-### V21 — `provider_credentials` + per-tier actives
+**Rule (must-fix #1):** Each implementation PR claims the **next free** `Vnn` at merge time. Planned numbers below assume merge order **A → B → C → D → E → F → …**. No PR “owns a later V while another owns an earlier.” Activity/runtime CHECKs are altered (DROP/ADD like V19) in the **first** PR that needs new values (M3A for provider runtimes; later PRs extend again when adding activities).
+
+### V21 — M3A — providers + credentials
 
 ```sql
-CREATE TABLE IF NOT EXISTS provider_credentials (
+CREATE TABLE provider_credentials (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   provider TEXT NOT NULL,
@@ -182,8 +143,9 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
     CHECK (connection_status IN ('untested','ok','failed')),
   last_tested_at TIMESTAMPTZ,
   last_error TEXT,
-  binary_status TEXT NOT NULL DEFAULT 'unknown'
+  binary_status TEXT NOT NULL DEFAULT 'not_required'
     CHECK (binary_status IN ('unknown','ok','missing','not_required')),
+  retired_at TIMESTAMPTZ,
   catalog_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   catalog_refreshed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -191,21 +153,25 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
   UNIQUE (workspace_id, provider, label)
 );
 
--- One active provider per tier (workspace default; project may override)
 ALTER TABLE workspaces
-  ADD COLUMN IF NOT EXISTS active_planning_provider TEXT,
-  ADD COLUMN IF NOT EXISTS active_coding_provider TEXT;
+  ADD COLUMN IF NOT EXISTS active_planning_credential_id UUID REFERENCES provider_credentials(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS active_coding_credential_id UUID REFERENCES provider_credentials(id) ON DELETE SET NULL;
 ALTER TABLE projects
-  ADD COLUMN IF NOT EXISTS planning_provider TEXT,
-  ADD COLUMN IF NOT EXISTS coding_provider TEXT,
+  ADD COLUMN IF NOT EXISTS planning_credential_id UUID REFERENCES provider_credentials(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS coding_credential_id UUID REFERENCES provider_credentials(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC',
   ADD COLUMN IF NOT EXISTS standup_time TEXT NOT NULL DEFAULT '08:00',
   ADD COLUMN IF NOT EXISTS sprint_workdays INTEGER NOT NULL DEFAULT 10;
+
+-- runtime CHECK extend (V19 pattern)
+ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_runtime_check;
+ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_runtime_check
+  CHECK (runtime IN (
+    'cursor_local','cursor_cloud','local_worktree','chat',
+    'claude_cli','codex_cli','antigravity_cli'));
 ```
 
-Backfill existing workspace LLM row into `provider_credentials`; map prior single provider to both actives only if `canCode`, else planning only and leave coding unset until Setup completes.
-
-### V22 — Jira hierarchy, links, sprints, mocks, contracts
+### V22 — M3B — Jira hierarchy, AC schema, ownership paths, event types
 
 ```sql
 ALTER TABLE tickets
@@ -214,13 +180,14 @@ ALTER TABLE tickets
   ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES tickets(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS epic_id UUID REFERENCES tickets(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS acceptance_criteria JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Zod: [{ given: string, when: string, then: string }]  (min 1 for story/sub_task before ready)
   ADD COLUMN IF NOT EXISTS behaviour_notes TEXT,
   ADD COLUMN IF NOT EXISTS ui_affected BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS ui_mock_status TEXT NOT NULL DEFAULT 'not_required'
     CHECK (ui_mock_status IN (
       'not_required','pending_designer','pending_po_sm','pending_owner',
       'changes_requested','approved')),
-  ADD COLUMN IF NOT EXISTS api_contract JSONB,  -- request/response/validation/errors
+  ADD COLUMN IF NOT EXISTS api_contract JSONB,
   ADD COLUMN IF NOT EXISTS dor_checklist JSONB NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS dod_checklist JSONB NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS readiness_status TEXT NOT NULL DEFAULT 'not_ready'
@@ -228,77 +195,198 @@ ALTER TABLE tickets
   ADD COLUMN IF NOT EXISTS rollback_plan TEXT,
   ADD COLUMN IF NOT EXISTS sprint_id UUID,
   ADD COLUMN IF NOT EXISTS assignee_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS idea_id UUID;  -- FK after ideas_v2
+  ADD COLUMN IF NOT EXISTS predicted_paths JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS idea_card_id UUID;  -- FK added in V23 with idea_cards evolution
 
-CREATE TABLE IF NOT EXISTS ticket_links (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  from_ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  to_ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  link_type TEXT NOT NULL CHECK (link_type IN
-    ('blocks','is_blocked_by','relates','contracts','duplicates')),
-  contract_json JSONB,
-  verified_at TIMESTAMPTZ,
-  verified_by_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
-  verification_report TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (from_ticket_id, to_ticket_id, link_type)
-);
-
-CREATE TABLE IF NOT EXISTS sprints (
+CREATE TABLE ticket_links ( /* blocks|is_blocked_by|relates|contracts|duplicates + verify fields — as rev2 */ );
+CREATE TABLE sprints (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   goal TEXT,
   starts_on DATE NOT NULL,
-  ends_on DATE NOT NULL,          -- 10 working days from start
+  ends_on DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'planned'
     CHECK (status IN ('planned','active','closed')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-ALTER TABLE tickets
-  ADD CONSTRAINT tickets_sprint_fk FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL;
+ALTER TABLE tickets ADD CONSTRAINT tickets_sprint_fk
+  FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL;
 
-CREATE TABLE IF NOT EXISTS ticket_comments (
+CREATE TABLE ticket_comments ( /* owner|agent|system */ );
+CREATE TABLE ticket_attachments (
+  /* kind incl ui_mock_html|ui_mock_png|interaction_png; state_key required for mocks */
+);
+
+-- Persistent path ownership (CODEOWNERS-like)
+CREATE TABLE path_owners (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  author_type TEXT NOT NULL CHECK (author_type IN ('owner','agent','system')),
-  author_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
-  body TEXT NOT NULL,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  path_glob TEXT NOT NULL,              -- e.g. 'apps/web/src/app/(auth)/**'
+  layer TEXT NOT NULL CHECK (layer IN ('frontend','backend','fullstack','docs','other')),
+  owner_agent_id UUID NOT NULL REFERENCES skills(id) ON DELETE RESTRICT,
+  backup_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
+  source TEXT NOT NULL DEFAULT 'merged_pr'
+    CHECK (source IN ('merged_pr','manual','flow_seed')),
+  last_ticket_id UUID REFERENCES tickets(id) ON DELETE SET NULL,
+  last_pr_number INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (project_id, path_glob, layer)
+);
+CREATE INDEX path_owners_owner_idx ON path_owners(owner_agent_id);
+
+CREATE TABLE ownership_handoffs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  path_owner_id UUID REFERENCES path_owners(id) ON DELETE SET NULL,
+  flow_id UUID REFERENCES business_flows(id) ON DELETE SET NULL,
+  from_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
+  to_agent_id UUID NOT NULL REFERENCES skills(id) ON DELETE RESTRICT,
+  reason TEXT NOT NULL CHECK (reason IN ('owner_off','wip_exceeded','user_reassign','agent_deleted')),
+  handover_md TEXT NOT NULL,
+  ticket_id UUID REFERENCES tickets(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS ticket_attachments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN (
-    'ui_mock_html','ui_mock_png','interaction_png','doc','other')),
-  state_key TEXT,                 -- e.g. default|empty|error|loading|modal:confirm|click:save
-  path_in_repo TEXT,
-  content_type TEXT,
-  bytes BYTEA,
-  sha256 TEXT NOT NULL,
-  created_by_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Extend ticket_events.event_type (V17/V19 DROP/ADD pattern)
+ALTER TABLE ticket_events DROP CONSTRAINT IF EXISTS ticket_events_event_type_check;
+ALTER TABLE ticket_events ADD CONSTRAINT ticket_events_event_type_check
+  CHECK (event_type IN (
+    'status_change','agent_action','progress','communication','run_ref',
+    'owner_decision','schedule','evidence',
+    'mock_review','dep_verify','ceremony_ref','security_finding',
+    'agent_message','ownership_handoff','learning_proposal','readiness'));
 ```
 
-Points: keep Fibonacci CHECK; add shared `ceilFib(n)` for day→points. Due date from points × workday calendar (unchanged math, sprint default length 10).
+Given/When/Then Zod (shared):
 
-### V23 — ceremonies, merge order, notifications
+```ts
+const acceptanceCriterionZ = z.object({
+  given: z.string().min(1).max(2000),
+  when: z.string().min(1).max(2000),
+  then: z.string().min(1).max(2000),
+});
+const acceptanceCriteriaZ = z.array(acceptanceCriterionZ).min(1);
+```
+
+### V23 — M3C — idea_cards lifecycle (must-fix #2/#3)
+
+**Canonical table: `idea_cards`.** Baseline `ideas` / old `feature_specs.idea_id` remain for Hibernate compat where needed; middleware Ideas API already uses `idea_cards` — extend that path. Do **not** build §6 on baseline `ideas`.
 
 ```sql
-CREATE TABLE IF NOT EXISTS ceremony_sessions ( /* standup|planning|retro|strategy — as prior draft */ );
-CREATE TABLE IF NOT EXISTS ceremony_messages ( /* seq transcript */ );
-CREATE TABLE IF NOT EXISTS merge_order_snapshots ( /* advice_json */ );
+-- Backfill BEFORE tighter CHECKs (must-fix #3)
+UPDATE idea_cards SET status = 'researching'
+  WHERE status IN ('draft','ready_for_review');
+UPDATE idea_cards SET status = 'approved' WHERE status = 'approved'; -- no-op keep
+UPDATE idea_cards SET status = 'declined'
+  WHERE status IN ('rejected');
+UPDATE idea_cards SET status = 'planning'
+  WHERE status = 'in_development';
 
-CREATE TABLE IF NOT EXISTS user_notifications (
+ALTER TABLE idea_cards
+  ADD COLUMN IF NOT EXISTS idea_key TEXT,
+  ADD COLUMN IF NOT EXISTS current_version INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS cost_json JSONB,
+  ADD COLUMN IF NOT EXISTS risks_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'research_agent';
+
+-- Replace status constraint carefully: drop enum/check → set default → add check
+-- (idea_cards.status is TEXT with idea_status enum in Drizzle; migration aligns TEXT CHECK)
+ALTER TABLE idea_cards ALTER COLUMN status SET DEFAULT 'researching';
+-- After backfill:
+-- CHECK (status IN ('researching','proposal_draft','agent_review','awaiting_owner',
+--   'revising','approved','declined','planning','done'))
+
+CREATE UNIQUE INDEX idea_cards_project_key_uidx ON idea_cards(project_id, idea_key);
+
+CREATE TABLE idea_versions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  idea_card_id UUID NOT NULL REFERENCES idea_cards(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body_md TEXT NOT NULL,
+  path_in_repo TEXT,
+  content_hash TEXT NOT NULL,
+  diff_from_prev TEXT,
+  created_by_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (idea_card_id, version)
+);
+
+CREATE TABLE idea_comments ( /* same shape as rev2; FK idea_card_id */ );
+
+CREATE TABLE idea_events (
+  /* hash-chain mirror of ticket_events; UPDATE/DELETE raise; UNIQUE(idea_card_id, seq) */
+);
+
+ALTER TABLE tickets
+  ADD CONSTRAINT tickets_idea_card_fk
+  FOREIGN KEY (idea_card_id) REFERENCES idea_cards(id) ON DELETE SET NULL;
+
+-- feature_specs: prefer idea_card_id (already exists); stop writing baseline ideas.id for new work
+```
+
+`idea_id` column naming on tickets is **`idea_card_id` only**, added nullable in V22, FK in V23 (M3C depends on M3B).
+
+### V24 — M3D — activities used by orchestration (+ learning)
+
+```sql
+ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_activity_check;
+ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_activity_check
+  CHECK (activity IN (
+    'knowledge_map','company_generation','develop','review','fix','qa','story_points',
+    'docs_write','story_split','ui_mock','dep_request','dep_verify','implementation_design',
+    'idea_research','idea_revise','idea_agent_review','readiness_check','contract_test',
+    'learning_propose','sub_story_create'));
+```
+
+### V25 — M3E — ceremonies, merge-order, notifications (full DDL)
+
+```sql
+CREATE TABLE ceremony_sessions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('standup','planning','retro','strategy')),
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+  scheduled_for TIMESTAMPTZ NOT NULL,
+  agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+  transcript_md TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMPTZ
+);
+CREATE INDEX ceremony_sessions_project_idx ON ceremony_sessions(project_id, scheduled_for DESC);
+
+CREATE TABLE ceremony_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  session_id UUID NOT NULL REFERENCES ceremony_sessions(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  speaker_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
+  role TEXT NOT NULL CHECK (role IN ('scrum_master','agent','system')),
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (session_id, seq)
+);
+
+CREATE TABLE merge_order_snapshots (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+  advice_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE user_notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN (
     'idea_awaiting_owner','mock_awaiting_owner','approval_comment_reply',
-    'schedule_at_risk','schedule_overdue','security_finding','ceremony_ready')),
+    'schedule_at_risk','schedule_overdue','security_finding','ceremony_ready',
+    'learning_proposal','kill_switch','provider_unhealthy')),
   title TEXT NOT NULL,
   href TEXT,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -307,334 +395,290 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 );
 ```
 
-### V24 — activity / runtime enums
+Also extend activity CHECK for `ceremony`,`merge_order`,`release_notes` in this PR.
 
-`agent_runs.activity` adds: `docs_write`, `story_split`, `ui_mock`, `dep_request`, `dep_verify`, `ceremony`, `merge_order`, `security_review`, `implementation_design`, `idea_research`, `idea_revise`, `idea_agent_review`, `red_team_attack`, `blue_team_fix`, `readiness_check`, `contract_test`, `release_notes`.
-
-Runtimes add: `claude_cli`, `codex_cli`, `antigravity_cli`.
-
-### V25 — idea lifecycle (§6)
-
-See §6.2 for full DDL (`ideas` evolution, `idea_versions`, `idea_comments`, `idea_events`).
-
----
-
-## 5. API (middleware — Zod, IDOR, no secrets)
-
-### Providers / tiers
-
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/api/providers?tier=planning\|coding` | Capability-filtered catalog only. |
-| `GET/PUT` | `/api/workspaces/me/providers/:provider` | Upsert creds; includes `binary_status` + `installHint`. |
-| `POST` | `…/test` | Live Test Connection (+ binary detect). |
-| `POST` | `…/activate?tier=planning\|coding` | Requires `connection_status=ok` (and binary ok if `needsBinary`). Rejects activate-coding if `!canCode`. |
-| `PATCH` | `/api/projects/:id` | `planningProvider`, `codingProvider`, `timezone`, `standupTime`, tier model pins. |
-
-### Board / Jira
-
-Epics, backlog, sprints (10 workdays), tickets with AC/contract/DoR/DoD, sub-tasks, links, comments, attachments, mock submit / PO-SM review / owner approve|comment, readiness check, dependency verify — as prior draft, plus:
-
-| Method | Path | Notes |
-|---|---|---|
-| `POST` | `/api/tickets/:id/readiness/check` | Runs DoR; sets `readiness_status`. |
-| `POST` | `/api/tickets/:id/api-contract` | Upsert FE↔BE contract JSON. |
-| `POST` | `/api/tickets/:id/links/:linkId/verify` | Agent A E2E verify; required before B → `awaiting_merge`. |
-
-### Ideas, ceremonies, merge order, notifications, security
-
-| Method | Path | Notes |
-|---|---|---|
-| Ideas | see §6.3 | |
-| `GET/POST` | `/api/projects/:id/ceremonies` | Standup at `standup_time`. |
-| `POST/GET` | `/api/projects/:id/merge-order` | |
-| `GET` | `/api/notifications` | Pending owner approvals + SLA. |
-| `POST` | `/api/projects/:id/security/red-team/run` | Manual trigger; also scheduled/random. |
-| `GET` | `/api/projects/:id/security/findings` | |
-
----
-
-## 6. Idea lifecycle (NEW — full section)
-
-### 6.1 Flow
-
-```mermaid
-stateDiagram-v2
-  [*] --> researching: research agent opportunity
-  researching --> proposal_draft: proposal v1 written
-  proposal_draft --> agent_review: CEO, CFO, relevant agents comment
-  agent_review --> awaiting_owner: ready for user
-  awaiting_owner --> revising: user Comment
-  revising --> awaiting_owner: research replies per comment + new version
-  awaiting_owner --> approved: user Approve
-  awaiting_owner --> declined: user Decline
-  declined --> backlog_idea: parked
-  approved --> planning_split: PO + SM + devs create epics/stories
-  planning_split --> mock_cycle: ui_affected stories
-  planning_split --> ready_for_dev: no UI / mocks approved
-  mock_cycle --> ready_for_dev: owner approved mocks
-```
-
-1. **Discover.** Research agent (planning tier) mines app usage/results / knowledge map / prior tickets for opportunities; enqueues `idea_research`.
-2. **Propose.** Writes a clear proposal doc: problem, user benefit, business benefit, expected outcomes, metrics, **cost from CFO** (CFO planning run or embedded cost block), risks. Stored as `idea_versions` v1 under `confluence/ideas/<idea-key>/`.
-3. **Agent review.** CEO, CFO, and relevant role agents add comments (`idea_agent_review`). Not a substitute for the user.
-4. **Owner screen.** Simple list + detail: **Approve / Decline / Comment**. Notification created.
-5. **Comment loop.** Research agent reads each owner comment, researches/validates, replies per comment: accept+incorporate **or** evidence-backed rebuttal; produces **new version** (diffable); returns to awaiting_owner. Loop until Approve or Decline.
-6. **Decline** → idea status `declined` / backlog of ideas (not the sprint backlog).
-7. **Approve** → planning: PO + scrum master + affected devs read research docs; `story_split` creates epics/stories with AC; assign by flow ownership.
-8. **UI path.** If new UI: designer produces HTML + PNGs (every state) → PO + SM review → attach to ticket → owner Approve/Comment → designer reworks until approved → **only then** FE/BE develop may start.
-9. **Build.** FE builds UI with **click-by-click evidence**. FE and BE coordinate via **`api_contract`** on the story; FE verifies against real BE responses; BE validates persistence/backups; both evidence sections required in dev/QA md+pdf.
-10. **Proof.** Every comment, version, approval, and agent message appends to hash-chained events (`idea_events` and/or `ticket_events` once tickets exist).
-
-### 6.2 Data model (V25)
+### V26 — M3F — red/blue + security_review activities + findings
 
 ```sql
--- Evolve existing ideas table or replace; keep id stable if rows exist
-ALTER TABLE ideas
-  ADD COLUMN IF NOT EXISTS idea_key TEXT,
-  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'researching'
-    CHECK (status IN (
-      'researching','proposal_draft','agent_review','awaiting_owner',
-      'revising','approved','declined','planning','done')),
-  ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'research_agent',
-  ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  ADD COLUMN IF NOT EXISTS cost_json JSONB,          -- CFO block
-  ADD COLUMN IF NOT EXISTS risks_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-  ADD COLUMN IF NOT EXISTS current_version INTEGER NOT NULL DEFAULT 0;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ideas_idea_key_uidx ON ideas(idea_key);
-
-CREATE TABLE IF NOT EXISTS idea_versions (
+-- activity add: security_review, red_team_attack, blue_team_fix
+CREATE TABLE security_findings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  idea_id UUID NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
-  version INTEGER NOT NULL,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  ticket_id UUID REFERENCES tickets(id) ON DELETE SET NULL,
+  run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+  class TEXT NOT NULL,  -- auth_bypass|idor|injection|xss|ssrf|secrets_leak|prompt_injection|other
+  severity TEXT NOT NULL CHECK (severity IN ('low','medium','high','critical')),
   title TEXT NOT NULL,
-  body_md TEXT NOT NULL,              -- full proposal markdown
-  path_in_repo TEXT,                  -- confluence/ideas/...
-  content_hash TEXT NOT NULL,
-  diff_from_prev TEXT,                -- unified diff vs version-1
-  created_by_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (idea_id, version)
-);
-
-CREATE TABLE IF NOT EXISTS idea_comments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  idea_id UUID NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
-  version INTEGER,                    -- version being discussed
-  author_type TEXT NOT NULL CHECK (author_type IN ('owner','agent','system')),
-  author_agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,
-  parent_comment_id UUID REFERENCES idea_comments(id) ON DELETE CASCADE,
-  body TEXT NOT NULL,
-  disposition TEXT CHECK (disposition IN (
-    'open','accepted','rebutted','informational')),
-  evidence_md TEXT,                   -- research reply evidence
+  detail_md TEXT NOT NULL,
+  target_url TEXT NOT NULL,       -- must match allowlist host
+  redacted BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE TABLE IF NOT EXISTS idea_events (
-  -- same hash-chain pattern as ticket_events (seq, prev_hash, hash, type, detail)
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  idea_id UUID NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
-  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
-  event_type TEXT NOT NULL,
-  actor_type TEXT NOT NULL,
-  actor_agent_id UUID,
-  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
-  prev_hash TEXT,
-  hash TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (idea_id, seq)
-);
--- Triggers: append-only, hash continuity (mirror V17/V19 ticket_events).
-
-ALTER TABLE tickets
-  ADD CONSTRAINT tickets_idea_fk FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE SET NULL;
 ```
 
-### 6.3 API
+### V27 — M3I — learning proposals (can ship after M3E; see DAG)
 
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/api/projects/:id/ideas` | Filter by status. |
-| `GET` | `/api/ideas/:id` | Current version, comments, event chain verify flag. |
-| `GET` | `/api/ideas/:id/versions` | List; `GET …/versions/:n` body + diff. |
-| `POST` | `/api/ideas/:id/owner/approve` | Owner only → planning_split enqueue. |
-| `POST` | `/api/ideas/:id/owner/decline` | Owner only → declined. |
-| `POST` | `/api/ideas/:id/owner/comments` | Owner comment → `revising` + `idea_revise` run. |
-| `POST` | `/api/ideas/:id/agent-comments` | CEO/CFO/etc. during agent_review. |
-| `POST` | `/api/projects/:id/ideas/research` | Manual nudge; also scheduled. |
+```sql
+CREATE TABLE learning_proposals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  agent_id UUID REFERENCES skills(id) ON DELETE SET NULL,  -- target skill; null = shared EXPERIENCE
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  rationale_md TEXT NOT NULL,          -- from retros/failures; token-minimal
+  patch_md TEXT NOT NULL,             -- proposed SKILL.md / instructions / experience.yml diff
+  sources_json JSONB NOT NULL DEFAULT '[]'::jsonb,  -- ceremony ids, ticket ids
+  status TEXT NOT NULL DEFAULT 'pending_owner'
+    CHECK (status IN ('pending_owner','approved','rejected','applied')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_at TIMESTAMPTZ,
+  UNIQUE (project_id, agent_id, version)
+);
+```
 
-### 6.4 UI (simple)
+### V28 — M3J (ops slice) — kill switch, money budget, audit export metadata
 
-- Sidebar or Board tab: **Ideas**.
-- List: title, status badge, version, awaiting-you indicator.
-- Detail: rendered Markdown proposal, version picker + diff toggle, comment thread, three actions **Approve / Decline / Comment** (Comment opens a single textarea).
-- No dashboard chrome; pending count in a small notifications indicator (reuse Badge).
+```sql
+ALTER TABLE workspaces
+  ADD COLUMN IF NOT EXISTS kill_switch BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS kill_switch_reason TEXT,
+  ADD COLUMN IF NOT EXISTS monthly_spend_cap_usd NUMERIC(12,2),
+  ADD COLUMN IF NOT EXISTS spend_month_usd NUMERIC(12,2) NOT NULL DEFAULT 0;
 
-### 6.5 Tests
-
-- Unit: state machine illegal transitions; version hash; comment disposition.
-- Integration: approve → story_split creates tickets linked by `idea_id`; decline parks; comment → revise → new version + per-comment replies; idea_events chain verifies; foreign workspace 404.
-- Playwright ×3 viewports: owner comment loop, approve → stories appear, notification for awaiting_owner.
+CREATE TABLE audit_exports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('ticket_events','idea_events','full_proof_pack')),
+  sha256 TEXT NOT NULL,
+  bytes BYTEA,                       -- or path in ARIA_DATA_DIR for large packs
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
 
 ---
 
-## 7. Company extras (real IT company gaps)
+## 5. Persistent code ownership (Decision 12)
 
-Keep UI simple; most are checklists/fields + gates, not new products.
+### 5.1 Rules
 
-| Extra | Behavior |
+1. On **owner merge** of an agent PR (`prWatcher` merged path): compute changed paths; upsert `path_owners` for globs derived from top-level dirs / flow entrypoints (deterministic mapper); set `owner_agent_id` = developing agent; preserve existing owner if same agent; if different agent wrote in owned path without handoff → still record but flag `communication` for scrum master (should have been routed correctly).
+2. Also update `flow_owners` when the ticket has `flow_id` (builder becomes owner for that layer if vacant or same lineage).
+3. **Routing** — see §3. Path match uses longest-prefix / most specific glob wins.
+4. **Backup takeover** when owner `status=off` OR active WIP ≥ `ARIA_AGENT_WIP_LIMIT` OR user reassign.
+5. **Handoff:** write `ownership_handoffs.handover_md` (what/why/where/open risks), append `ticket_events` type `ownership_handoff`, store under `confluence/ownership/...` via docs allowlist optional.
+6. **UI:** flow detail and story card/detail show **Owner** + **Backup**; path list on Company → Ownership tab (simple table).
+
+### 5.2 API
+
+| Method | Path |
 |---|---|
-| **Definition of Ready (DoR)** | Checklist on story (AC present, assignee, points, contract if FE+BE, mock approved if UI, deps identified). `readiness_check` must pass before develop enqueue. |
-| **Definition of Done (DoD)** | Checklist: review pass, QA pass, evidence valid, security_review pass (if on), dep verify (if contracts), docs updated, release notes stub. Required before `awaiting_merge`. |
-| **Story readiness** | API + badge on card; dispatcher skips `not_ready`. |
-| **API contract tests** | From `api_contract` JSON generate/validate stub tests in QA/develop prompts; results in evidence. |
-| **Rollback plan** | Required text field before coding on risk_class above threshold (or all stories); shown on story + PR comment. |
-| **Release notes** | On sprint close / each merged epic: docs agent drafts `confluence/releases/…`; owner can edit. |
-| **Notifications** | `user_notifications` for idea/mock awaiting owner, overdue, security findings; socket `notify:new`; simple list in header. |
-| **SLA / overdue escalation** | Reuse M2 at-risk/overdue scanner; escalate to scrum master + CEO communication events; notify owner; optionally auto-spawn blocker review ceremony. |
-| **Interaction evidence** | FE evidence section: ordered steps `{action, trigger, response, screenshot_state_key}` matching mock `state_key`s. |
-| **Local-only red/blue** | Attacks only against compose/local URLs; never external targets. |
+| `GET` | `/api/projects/:id/path-owners` |
+| `POST` | `/api/projects/:id/path-owners/reassign` (owner only) |
+| `GET` | `/api/tickets/:id` includes resolved `ownerAgent`, `backupAgent`, `ownershipSource` |
+
+### 5.3 Tests
+
+- Merge stub PR → path_owners rows for touched globs.
+- Next ticket with those predicted_paths assigns same owner.
+- Owner OFF → backup + handoff event + handover_md.
+- WIP=1: second ticket stays queued / assigned backup only if policy says so (default: stay unassigned until WIP frees — backup only for OFF/reassign; **overload uses backup** per owner Decision 12).
+- User reassign logged.
 
 ---
 
-## 8. Agent orchestration (delta from M2)
+## 6. Idea lifecycle (on `idea_cards`)
 
-1. **Idea pipeline** — §6.
-2. **Approve implementation / approved idea** — docs_write → story_split (ceilFib points, flow owners) → mock cycles → readiness → develop.
-3. **UI mock** — designer → PO+SM → owner loop → approved.
-4. **Develop** — coding provider only; FE/BE honor `api_contract`; click-by-click + persistence evidence.
-5. **Dep verify** — hard gate by requester A before B `awaiting_merge`.
-6. **Ceremonies** — daily at `standup_time` in project timezone; planning/retro around 10-day sprints.
-7. **Merge-order** — advice only.
-8. **Security** — post-QA `security_review`; scheduled + randomized `red_team_attack` against local stack; findings → tickets; `blue_team_fix` with evidence; loop until clean or round cap (config).
-9. **Docs** — `confluence/` for flows, ideas, mocks, releases.
+Same state machine as rev2 (`researching` → … → `approved`/`declined`), but all FKs point at **`idea_cards`**. APIs keep `/api/projects/:id/ideas` mapping to `idea_cards`. Versioned proposals, CEO/CFO comments, owner Approve/Decline/Comment loop, research replies with evidence, then PO+SM+devs `story_split`, UI mock gate, FE/BE `api_contract`, click-by-click + persistence evidence, all events on `idea_events` / `ticket_events`.
+
+**Status backfill:** `draft|ready_for_review` → `researching`; `rejected` → `declined`; `in_development` → `planning`; default column → `researching` **before** CHECK (must-fix #3).
+
+**Keys:** `UNIQUE(project_id, idea_key)` not global.
+
+**Telemetry source for research:** knowledge map + ticket outcomes + local app metrics table if present; scheduled `idea_research` + standing “AI opportunity” job weekly (minimal tokens).
 
 ---
 
-## 9. UI screens (simple)
+## 7. Learning agent (M3 slice — was MISSING)
 
-| Screen | Role |
+- Role seeded: `learning_coach` (OFF if seats full).
+- Inputs: retro transcripts, failed runs, QA/security findings (ids only + short digests).
+- Output: `learning_proposals` versioned patch (SKILL.md / agent instructions / `.entiresystem/EXPERIENCE` entry).
+- **Owner Approve/Reject** in simple UI; on approve, apply patch + FIM re-sign if needed; event `learning_proposal`.
+- Token budget: one planning call per proposal; no full-repo rewrite.
+- Tests: propose → pending; approve applies; reject leaves skills unchanged; GET never exposes unrelated secrets.
+
+---
+
+## 8. Company extras + visual regression
+
+| Extra | M3 behavior |
 |---|---|
-| Setup / Settings → Providers | Tier tabs (Planning / Coding); filtered lists; Test Connection; binary missing hint; activate per tier. |
-| Settings → Schedule | Timezone, standup time (default 08:00), sprint length display (10). |
-| Ideas | §6.4 |
-| Board / Backlog / Epics / Sprint | Hierarchy, readiness badge, mock status, points, overdue. |
-| Story detail | AC, contract editor (read-only for owner mostly), mocks gallery by state_key, evidence, timeline, DoR/DoD. |
-| Ceremonies / Merge order | Transcripts; ordered PRs. |
-| Notifications | Plain list. |
-| Security | Findings list → tickets. |
+| DoR / DoD / readiness | Gates before develop / awaiting_merge |
+| G/W/T AC schema | Zod above; story_split must emit ≥1 |
+| `sub_story_create` activity | Agents may create sub_tasks under a story |
+| WIP=1 | Dispatcher + count of non-terminal assigned tickets (excl. awaiting_merge by default) |
+| Seed roles | UI/UX designer, learning, PR coordinator, red, blue, docs, research |
+| FE↔BE contract + contract_test | Required when both layers |
+| Interaction evidence | state_key steps in evidence |
+| **Visual regression** | M3H: Playwright screenshot baselines for web shell critical routes + story mock state_keys; plus pixel/hash compare helper used by QA gate when `ui_affected` |
+| QA prev-vs-current baseline | Store last-approved report screenshots hashed on ticket; QA must reference baseline ids |
+| Notifications | Pending approvals, overdue, learning, security, provider unhealthy |
+| Release notes / rollback | On sprint close / before coding |
 
-Primitives only from #8/#11 (+ `LogView`). No new design system.
+`evidenceAllowsMerge(ticketId, headSha)` **extended** in M3D/F to also require: DoD checklist complete, `security_review` succeeded (if flag), all `contracts` links `verified_at` set, readiness was `ready`. Single function — no fork.
 
 ---
 
-## 10. Gates (hard)
+## 9. Red/blue lockdown (must-fix #4)
 
-| Gate | Blocks |
+| Rule | Detail |
 |---|---|
-| Test Connection + binary (if needed) | Activating provider for a tier |
-| `canCode` filter | Coding list / activate coding |
-| Idea owner Approve | story_split from ideas |
-| UI mock owner Approve | develop on `ui_affected` |
-| DoR readiness | develop enqueue |
-| API contract present | FE+BE split stories develop |
-| Dependency verify by A | B → `awaiting_merge` |
-| DoD + evidence md+pdf + security_review | `awaiting_merge` |
-| Merge tripwire | Any GitHub merge by agents |
-| Red/blue scope | Non-local URLs |
+| Kill | `ARIA_RED_BLUE_ENABLED=false` or workspace `kill_switch` → no enqueue / cancel running red runs |
+| Egress | Deny-by-default. Resolver allows only hosts in `ARIA_RED_BLUE_ALLOWLIST` (compose service names, `127.0.0.1`, `localhost`, `ARIA_PUBLIC_URL` host). **No public DNS** for attack tools. |
+| SSRF class | Finding against **app** accepting attacker-controlled URLs; harness itself never fetches non-allowlisted URLs |
+| Secrets | Red-team runtime env **strips** provider credentials, GitHub tokens, JWT keys, `WORKSPACE_ENCRYPTION_KEY`. Findings scrubbed with existing log redaction before ticket insert |
+| Rate | `ARIA_RED_BLUE_RATE_PER_HOUR`; round cap `ARIA_RED_BLUE_MAX_ROUNDS` |
+| DB | Attacks use disposable compose profile `redteam` DB when available; never drop owner primary volume |
+| Tests | Unit: allowlist reject `evil.com`; integration: stub run without creds in env; finding ticket has no `gcm:` ciphertext |
 
 ---
 
-## 11. Security
+## 10. API / UI / gates (summary)
 
-- Secrets: `gcm:v2`, scrubbed CLI env, log redaction.
-- Prompt injection: Sanitizer on idea/ticket/AC/comment ingress.
-- Path allowlists: `confluence/**`, mocks, releases.
-- Red/blue: local stack only; findings never auto-exfiltrate; tickets + evidence; rate-limited attack scheduler.
-- IDOR/Zod/Helmet/rate limits on all new routes.
-- PR #6: closed.
+Providers multi-key activate; Ideas on idea_cards; board/sprint/story; path ownership; learning proposals; notifications; kill switch; merge-order; ceremonies; security findings — all Zod + IDOR.
 
----
+**Setup:** project create picks planning + coding credentials (filtered lists); Test Connection required; coding binary required; then continue.
 
-## 12. Token minimization
-
-- Planning provider for ideas, split, ceremonies, merge-order, security review, dep verify narrative.
-- Coding provider for develop/fix/qa/mocks/docs edits.
-- Idea revise: one research run per owner-comment batch, not per character.
-- Ceremony: OFF agents skipped; delta payloads.
-- Red team: deterministic probes first (Sprint 6 generator), LLM only for novel findings triage.
+**Gates:** Test Connection; canCode list omit; idea approve; mock approve; DoR; contract; dep verify; DoD+evidence+security; ownership handoff logged; merge tripwire; red egress; kill switch.
 
 ---
 
-## 13. Test plan
+## 11. Token minimization
 
-**Unit:** capability filter; ceilFib; idea/ticket state machines; mock state_key completeness checker; readiness DoR/DoD; dep verify gate; merge-order overlap; fib round-up due dates for 10-day sprints.
-
-**Integration:** provider activate per tier; idea comment→version loop + idea_events chain; approve→epics/stories; mock owner gate; contract required; red-team finding→ticket on stub local app; notification insert.
-
-**Playwright (desktop/tablet/mobile):** providers filtered lists; idea Approve/Decline/Comment; mock gallery + approve; board readiness; notifications; ceremonies; merge-order; security finding appears as ticket. No `it.skip`; anti-test-dodging on.
-
-**Smoke (owner):** `smoke:providers` for configured keys + binary detect.
+Unchanged spirit §12 rev2 + learning proposals batched; ownership mapper is deterministic (zero LLM); research uses digests not raw logs.
 
 ---
 
-## 14. Independently mergeable PRs
+## 12. Test plan (strengthened)
+
+**Unit:** `providersForTier` omits !canCode; multi-key activate; ceilFib vs due-date (1 pt = 1 day); G/W/T Zod; WIP=1; path glob specificity; handoff reasons; red allowlist; learning patch apply; idea status backfill map; GET serializers strip secrets.
+
+**Integration:** credential encrypt; idea_cards version loop + idea_events UPDATE/DELETE raise; approve→tickets with `idea_card_id`; mock gate; `evidenceAllowsMerge` new conjuncts; path_owners after merge; backup on OFF; kill_switch blocks queue; red run env has no API keys.
+
+**Playwright ×3:** multi-key Settings; filtered coding list; Setup blocks without coding activate; Ideas comment loop; ownership shown on story; learning approve; visual regression baselines; notifications; kill switch banner.
+
+**Anti-test-dodging** on all new specs.
+
+---
+
+## 13. PR split — executable DAG (post must-fix)
 
 ```mermaid
 flowchart LR
-  M3A[M3A providers]
-  M3B[M3B jira model]
-  M3C[M3C ideas]
-  M3D[M3D orchestration]
-  M3E[M3E ceremonies merge-order]
-  M3F[M3F red-blue]
-  M3G[M3G web UI]
-  M3H[M3H e2e docs]
+  A[M3A V21 providers]
+  B[M3B V22 jira+ownership]
+  C[M3C V23 idea_cards]
+  D[M3D V24 orchestration]
+  E[M3E V25 ceremonies]
+  F[M3F V26 red-blue]
+  I[M3I V27 learning]
+  J[M3J V28 ops DR kill money]
+  G[M3G web]
+  H[M3H e2e+visual]
 
-  M3A --> M3D
-  M3B --> M3D
-  M3C --> M3D
-  M3A --> M3E
-  M3B --> M3E
-  M3A --> M3F
-  M3B --> M3F
-  M3D --> M3G
-  M3E --> M3G
-  M3F --> M3G
-  M3C --> M3G
-  M3G --> M3H
+  A --> D
+  B --> C
+  C --> D
+  A --> E
+  B --> E
+  A --> F
+  B --> F
+  D --> G
+  E --> G
+  F --> G
+  I --> G
+  C --> I
+  E --> I
+  A --> J
+  D --> J
+  G --> H
+  J --> H
 ```
 
-| PR | Scope | Depends | Parallel with |
-|---|---|---|---|
-| **M3A** | V21 providers, adapters, stubs, Test Connection, per-tier activate, binary detect | main | **M3B**, **M3C** |
-| **M3B** | V22 Jira hierarchy, links, sprints (10d), AC, contracts, DoR/DoD, attachments, ceilFib | main | **M3A**, **M3C** |
-| **M3C** | V25 idea lifecycle schema/API/events/versions/comments | main | **M3A**, **M3B** |
-| **M3D** | docs_write, story_split, ui_mock loops, dep_verify, readiness, approve-idea→tickets | M3A+B+C | **M3E**, **M3F** |
-| **M3E** | V23 ceremonies, merge-order, notifications, SLA escalation hooks | M3A+B | **M3D**, **M3F** |
-| **M3F** | V24 security activities, red/blue scheduler+sandbox local, security_review stage | M3A+B | **M3D**, **M3E** |
-| **M3G** | Web: providers-by-tier, Ideas, board/sprint/story/mocks, notifications, security list | M3D+E+F+C | — |
-| **M3H** | Playwright m3-* ×3 viewports, `docs/PROVIDERS.md`, PROGRESS, smoke | M3G | — |
+| PR | Flyway | Scope | Depends | Parallel |
+|---|---|---|---|---|
+| **M3A** | V21 | Credentials multi-key, adapters, stubs, Test Connection, setup gate, runtime CHECK | main | **M3B** only |
+| **M3B** | V22 | Hierarchy, G/W/T, sprints 10d, path_owners, handoffs, ticket_events types, WIP helpers | main | **M3A** |
+| **M3C** | V23 | **idea_cards** lifecycle, versions, comments, events, status backfill, `tickets.idea_card_id` FK | **M3B** | after B; ∥ D’s prep only after C |
+| **M3D** | V24 | docs/split/mock/dep_verify/readiness/sub_story; extend `evidenceAllowsMerge`; ownership routing in dispatcher | M3A+C | **M3E**, **M3F** |
+| **M3E** | V25 | Full ceremony/merge-order/notifications DDL+runners; standup→events | M3A+B | **M3D**, **M3F** |
+| **M3F** | V26 | Red/blue lockdown + security_review + findings | M3A+B | **M3D**, **M3E** |
+| **M3I** | V27 | Learning proposals + owner approve apply | M3C+E | **M3J**, after D preferred |
+| **M3J** | V28 | Kill switch, $ caps, audit export, backup docs script | M3A+D | **M3I** |
+| **M3G** | — | Simple UI for all of the above + ownership + learning | D+E+F+I | after those |
+| **M3H** | — | Playwright + visual regression + PROVIDERS.md + PROGRESS | M3G+J | last |
 
-M3A owns activity/runtime enum extension (V24 slice) so B/C do not conflict; handlers land in D/E/F.
+**Not parallel:** M3C with M3B. **Not** “A owns V24 while E owns V23.”
 
 ---
 
-## 15. Ordered tasks (summary)
+## 14. Ranked gaps (owner-unmentioned) — slice or Later
 
-| # | Task | PR |
+| Rank | Gap | Disposition |
 |---|---|---|
-| A1–A8 | Credentials, registry, Cursor wrap, Claude, Codex, Antigravity, chat-only filters, activate APIs | M3A |
-| B1–B4 | Hierarchy, sprints 10d, ceilFib, contract/DoR/DoD/attachments APIs | M3B |
-| C1–C4 | Ideas DDL, version/comment/event APIs, state machine, research activity | M3C |
-| D1–D6 | docs, split, mocks, dep verify, readiness, idea→tickets | M3D |
-| E1–E3 | Ceremonies, merge-order, notifications/SLA | M3E |
-| F1–F3 | Security review, red attacks local, blue fix tickets | M3F |
-| G1–G5 | Providers UI, Ideas UI, board/story/mocks, notifications, security | M3G |
-| H1–H2 | E2E + docs | M3H |
+| 1 | DR/backup + audit export of proof chains | **M3J** — `audit_exports`, `scripts/aria-backup.sh` (Postgres dump + `.entiresystem` + key material instructions); restore runbook in docs; tests: export hash stable, foreign workspace 404 |
+| 2 | Global kill switch / pause all / freeze red-team / owner-away | **M3J** — `workspaces.kill_switch`; API + Settings toggle; worker refuses new claims; tests |
+| 3 | Eval harness for agent quality | **M3H** minimal: golden fixture tickets scored in vitest against stubs (develop/idea_revise JSON schema pass rate). Fuller SWE-bench gate → **Later (M4 / Sprint 14)** |
+| 4 | Money budgets ($ caps) + CFO dashboard | **M3J** — `monthly_spend_cap_usd` + provider price table config; hard stop + notify; simple Settings field (not a finance product). Full Stripe/procurement → **Later** |
+| 5 | Memory/learning loop | **M3I** (this milestone) |
+| 6 | Environment matrix / redteam DB profile | **M3F** — compose profile `redteam` + reset script; full stage/prod matrix → **Later** |
+| 7 | Incident / on-call path | **Later** — Sprint 9 incident commander exists unverified; wire UI in M4 |
+| 8 | Supply-chain / dependency policy | **M3D** light: `diffGuards` reject new deps without `owner_decision` ack flag on ticket; fuller license allowlist → **Later** |
+| 9 | a11y / i18n bars | **Later** — add AC template examples in docs only in M3; gates in M4 |
+| 10 | Multi-repo merge-order | **M3E** — advice groups by repoUrl; true cross-repo stacking → **Later** |
+| 11 | Provider outage failover | **M3A/J** — unhealthy active credential → notify + pause coding queue (no silent poison); auto-failover to second labeled key if `ok` → M3A |
+| 12 | PII redaction in events/confluence | **M3D** — run Sanitizer + PII scrubber on event summary/detail and docs_write; tests with fake email/PAN |
+
+---
+
+## 15. Requirements traceability
+
+| # | Owner requirement | Plan section | PR | Test |
+|---|---|---|---|---|
+| 1 | Signup | PRIOR M1 | — | existing auth e2e |
+| 2 | Create project | PRIOR + §2.2 setup credentials | M3A/G | setup blocks without tier activate |
+| 3 | Connect+test providers | §0 D1–3, §2 | M3A/G | Test Connection; binary missing |
+| 4 | Several keys per provider | §0 D10, §2.2 | M3A/G | multi-label activate/retire |
+| 5 | Capability-filtered tiers | §0 D2, §2.1 | M3A/G | coding list omits Ollama |
+| 6 | Knowledge map | PRIOR M1/M2 | — | — |
+| 7 | Full company roles incl. designer/learning/PR coord | §1 D13 | M3D seed | company fixture includes roles |
+| 8 | Org chart edit | PRIOR | — | — |
+| 9 | Agents ON/OFF | PRIOR + ownership backup | M3B/D | OFF → handoff |
+| 10 | Flow ownership + workers/backups | PRIOR flow_owners + §5 path_owners | M3B/D | path+flow routing |
+| 11 | One task / deps | §0 D8, WIP=1 | M3B/D | WIP second ticket |
+| 12 | Requester E2E verify | §0 D8, gates | M3D | verify gate |
+| 13 | User merges only | PRIOR tripwire | — | stub violations 0 |
+| 14 | Merge-order coordinator | §13 M3E | M3E/G | advice order fixture |
+| 15 | Standups 08:00 + planning/retro | §0 D7, V25 | M3E/G | ceremony transcript |
+| 16 | 10-day sprints | §0 D6 | M3B | sprint end date |
+| 17 | Fib points + deadlines | §0 D4 ceilFib | M3B | ceilFib + due_at |
+| 18 | Epics/stories/subtasks + G/W/T | V22 schema | M3B/D | Zod AC; sub_story_create |
+| 19 | UI mocks HTML+PNG all states | §0 D5 | M3D/G | state_key completeness |
+| 20 | FE/BE API contract | §8 | M3D | contract required |
+| 21 | Dev/QA md+pdf gate | PRIOR + evidenceAllowsMerge extend | M3D/F | gate conjuncts |
+| 22 | FE click-by-click evidence | §8 | M3D/H | evidence section |
+| 23 | Tamper-evident logs | PRIOR + new event types | M3B/C | chain verify; UPDATE raises |
+| 24 | Idea lifecycle | §6 on idea_cards | M3C/G | comment→version |
+| 25 | Docs → confluence/ | docs_write | M3D | path allowlist |
+| 26 | Red/blue | §9 | M3F | egress deny; no secrets in env |
+| 27 | Learning agent | §7 | M3I/G | propose/approve/apply |
+| 28 | Standing AI opportunity mission | §6 weekly idea_research | M3C/D | scheduled enqueue |
+| 29 | Exhaustive UI/regression | §8 visual regression | M3H | baselines ×3 viewports |
+| 30 | Minimal tokens | §11 | all | budget tests reuse M2 |
+| 31 | Simple UI | §1 D14 | M3G | anti-slop |
+| 32 | Single user local-first | non-goals | — | — |
+| 33 | **Persistent code ownership** | §0 D12, §5 | M3B/D/G | merge→route→handoff |
 
 ---
 
@@ -642,28 +686,39 @@ M3A owns activity/runtime enum extension (V24 slice) so B/C do not conflict; han
 
 | Risk | Mitigation |
 |---|---|
-| CLI flag drift | Stubs + documented min versions + binary detect |
-| Idea loop token cost | Batch comments; planning tier; version diffs not full re-send when possible |
-| Red/blue harming owner machine | Local URL allowlist; compose network; round caps; never agents merge |
-| Parallel DDL conflicts | M3A owns enum migration; M3C owns ideas; M3B owns tickets columns |
-| Mock completeness | Validator: required state_key set before pending_owner |
+| Flyway out-of-order | Contiguous Vnn by merge DAG (§13) |
+| idea_cards vs ideas fork | §6 / V23 canonical idea_cards |
+| Red exfil | §9 deny-by-default + stripped env |
+| Ownership thrash | Longest glob wins; handoff required for reassign |
+| Learning bad patches | Owner approve; versioned; reject path |
 
 ---
 
-## 17. PR #6
+## 17. Later (explicit deferrals)
 
-**Closed / superseded.** Main already verifies RS256 with PEM-or-base64 decode and `type: access`. Optional later chore: add `jwt-pem.test.ts` only.
+- Full chaos sandbox / WebArena / SWE-bench Verified weekly (Sprint 14)
+- Multi-tenant SaaS; GitHub webhooks
+- Subscription OAuth for Claude/Codex
+- Auto CLI install
+- Silent skill self-rewrite without owner
+- Full FinOps/Stripe procurement
+- a11y/i18n hard gates
+- Cross-repo stacked PRs
+- Incident Commander UI polish (code exists Sprint 9 unverified)
+- Worker pools under flow owners beyond backup
 
 ---
 
 ## 18. Definition of Done (M3)
 
-- [ ] M3A–M3H merged
-- [ ] No product-default provider; per-tier actives; coding list capability-filtered
-- [ ] Idea lifecycle with versioned proposals, owner Approve/Decline/Comment loop, proof log
-- [ ] Jira hierarchy, 10-day sprints, ceilFib points, UI mocks HTML+PNG every state, hard dep verify
-- [ ] FE↔BE contracts + click-by-click and persistence evidence in reports
-- [ ] Ceremonies, merge-order, notifications, DoR/DoD/readiness, release notes, rollback
-- [ ] Full local red/blue + security_review
-- [ ] Playwright m3 specs green on 3 viewports; anti-test-dodging clean
-- [ ] Agents never merge; PROGRESS + PROVIDERS docs updated
+- [ ] M3A–J, G, H merged in DAG order with contiguous Flyway
+- [ ] Multi-key providers; capability-filtered lists; setup gates
+- [ ] idea_cards lifecycle + backfill; no ideas-table fork
+- [ ] Persistent path+flow ownership with handoff + UI
+- [ ] WIP=1; G/W/T; mocks; dep verify; extended evidenceAllowsMerge
+- [ ] Learning proposals owner-approved
+- [ ] Red/blue lockdown proven by tests
+- [ ] Kill switch, audit export, $ cap basics (M3J)
+- [ ] Visual regression + Playwright ×3; anti-test-dodging clean
+- [ ] Traceability rows 1–33 satisfied or explicitly Later
+- [ ] Agents never merge

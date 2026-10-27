@@ -8,7 +8,7 @@
 
 ## Milestone 3 — plan (this branch)
 
-Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` (no feature code). Base: main with M2 backend (#9) and M2 frontend (#11) merged. Owner decisions locked in plan §0. Scope: multi-provider adapters (capability-filtered planning vs coding), Jira workflow, idea lifecycle, UI-mock gates, dependency verify, scrum ceremonies, merge-order, docs → `confluence/`, full red/blue in sandbox, company readiness extras. PR split M3A–M3H. PR #6 closed (JWT already on main).
+Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 3** (no feature code). Base: main with M2 backend (#9) and M2 frontend (#11). Owner decisions locked (§0). PR #12 review must-fixes applied: contiguous Flyway DAG, lifecycle on **`idea_cards`** (not baseline `ideas`) with status backfill, red/blue egress+secrets lockdown. WEAKs strengthened (multi-key UX, seeded designer/learning/PR-coord, WIP=1, G/W/T schema, visual regression). Learning-agent M3I slice. Persistent **path+flow ownership** with handoff. Ranked gaps → M3J or Later. Traceability table §15. PR split **M3A→B→C then D∥E∥F, I∥J, G, H**.
 
 ## Milestone 2 — frontend (merged, PR #11)
 
