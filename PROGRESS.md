@@ -27,10 +27,11 @@ Shipped: Flyway V22 (epic/story/sub_task, G/W/T AC, sprints, path_owners, owners
 
 ### Verified locally on 2026-10-27
 
-- M3B vitest: **13 passed** (`m3b.test.ts` + `m3b.integration.test.ts`).
-- Full middleware vitest: **30 files / 159 tests passed**.
+- M3B vitest: **14+ passed** (`m3b.test.ts` + `m3b.integration.test.ts`, incl. OFF/WIP backup and exact Fib 1/2/3/4/5/8).
+- Full middleware vitest: **30 files / 160 tests passed**.
 - Schema drift: passed (V22 tip).
 - Playwright `milestone3b-jira.spec.ts`: **3 passed** (desktop / tablet / mobile).
+- Rebased onto main after #10; CI Playwright keeps M1 specs + M3B.
 
 ## Milestone 3 — plan (merged, PR #12)
 
