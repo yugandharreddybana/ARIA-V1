@@ -22,13 +22,10 @@ Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 
 ## Milestone 3A — providers (this branch)
 
 Branch: `cursor/m3a-providers-3ee9`. Slice **M3A / V21**: `provider_credentials`, active credential FKs, `runtime_kinds` FK, ProviderAdapter (Cursor / Claude Code / Codex / Antigravity / chat+Ollama), Test Connection activate gate, capability-filtered lists, setup/Settings UI, CI stubs. Does **not** touch V22 (M3B). Review fixes: live CLI `follow()` waits on child exit/timeout with log capture; failover + `provider_unhealthy` tests; coding badge/coding-only e2e asserts; V21 drops `llm_provider` DEFAULT. Verified: middleware **31 files / 162 tests**; Playwright M1+M2+M3A ×3 viewports **9 passed**; drift check green. Report: `docs/verification/m3a-providers.md` (+ PDF).
-<<<<<<< HEAD
 
 ## Milestone 3 — plan (merged, PR #12)
 
 Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 4** (no feature code). Base: main (#9+#11). Rev 4 re-review: DAG **A∥B → C → D∥E∥F** (E/F depend on C); reserved V21–V28; **`activity_kinds` / `runtime_kinds` FK** seeded in C/A so D/E/F never rewrite activity CHECK. Prior rev 3: idea_cards, red/blue lockdown, ownership, learning M3I, traceability.
-=======
->>>>>>> 85bb700 (fix(m3a): track CLI child exit, failover tests, drop llm_provider default)
 
 ## Milestone 2 — frontend (merged, PR #11)
 
