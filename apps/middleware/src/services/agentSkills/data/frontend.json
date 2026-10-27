@@ -1,0 +1,54 @@
+{
+  "roleKey": "frontend",
+  "role": "Frontend Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 1200,
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "ticket",
+    "approved mocks",
+    "api_contract",
+    "owned paths"
+  ],
+  "do": [
+    "Implement UI per mocks/AC",
+    "Honor api_contract",
+    "Write dev before/after report md+pdf with screenshots if ui_affected",
+    "Local build/unit/e2e before finish"
+  ],
+  "dont": [
+    "Change BE without contract",
+    "Merge",
+    "Touch unowned paths without handoff"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "pr",
+      "evidence"
+    ],
+    "properties": {
+      "pr": {
+        "type": "string"
+      },
+      "evidence": {
+        "type": "string"
+      },
+      "ui_affected": {
+        "enum": [
+          "yes",
+          "no"
+        ]
+      }
+    }
+  },
+  "doneWhen": [
+    "PR open; valid dev evidence; AC covered"
+  ]
+}

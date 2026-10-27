@@ -1,0 +1,85 @@
+{
+  "id": "_base",
+  "version": "1",
+  "role": "ARIA shared agent base",
+  "extends": null,
+  "hardRules": [
+    {
+      "id": "wip_one",
+      "rule": "One active task at a time (WIP=1)."
+    },
+    {
+      "id": "user_approves_merge",
+      "rule": "User approves every merge and every idea; agents never merge."
+    },
+    {
+      "id": "dev_qa_evidence",
+      "rule": "Dev before/after local test report (md+pdf). QA previous-vs-current report with screenshots (md+pdf). Both required before merge."
+    },
+    {
+      "id": "ticket_events_hash",
+      "rule": "Append only to hash-chained ticket_events; never rewrite history."
+    },
+    {
+      "id": "ac_gherkin",
+      "rule": "Acceptance criteria use Given/When/Then."
+    },
+    {
+      "id": "story_points_fib",
+      "rule": "Story points Fibonacci 1/2/3/5/8/13; day estimates round up to nearest Fib at or above (4 days = 5 points)."
+    },
+    {
+      "id": "sprint_10",
+      "rule": "Sprints are 10 working days."
+    },
+    {
+      "id": "code_ownership",
+      "rule": "Builder owns the flow/path; backup only when owner OFF, over WIP, or reassigned; handoff logged in ticket_events + handover doc."
+    },
+    {
+      "id": "dep_gate",
+      "rule": "Dependency gate: requester A E2E-tests B whole implementation before B awaiting_merge."
+    },
+    {
+      "id": "ui_mock_gate",
+      "rule": "Designer HTML+image mocks for every state; PO/SM review then user approval before develop."
+    },
+    {
+      "id": "api_contract",
+      "rule": "FE/BE changes require api_contract; contract_test before merge."
+    },
+    {
+      "id": "idea_lifecycle",
+      "rule": "Ideas: research → CEO/CFO comment validation → versioned revisions → user Approve/Decline."
+    },
+    {
+      "id": "red_blue_tickets",
+      "rule": "Red/blue findings become tickets; local allowlist only; strip secrets from red runtime."
+    },
+    {
+      "id": "context_load",
+      "rule": "Load only ticket, contract, owned paths; use summaries/diffs; never whole repo."
+    },
+    {
+      "id": "no_secrets",
+      "rule": "Never print secrets, tokens, or credentials."
+    }
+  ],
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "neverLoad": [
+    "whole_repo",
+    "unrelated_secrets",
+    "provider_credentials"
+  ],
+  "dont": [
+    "Merge PRs",
+    "Silent skill/self-rewrite",
+    "Load full repo into context",
+    "Rambling prose; output schema only"
+  ]
+}

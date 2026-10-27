@@ -1,0 +1,51 @@
+{
+  "roleKey": "red_team",
+  "role": "Red Team Engineer",
+  "extends": "_base",
+  "modelTier": "high",
+  "maxOutputTokens": 800,
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "local stack endpoints allowlist",
+    "prior findings ids"
+  ],
+  "do": [
+    "Probe local allowlist only",
+    "Emit findings → tickets",
+    "Respect rate/round caps",
+    "Strip secrets from env"
+  ],
+  "dont": [
+    "Public DNS/egress",
+    "Touch primary DB volume",
+    "Keep provider credentials in runtime"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "findings"
+    ],
+    "properties": {
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "title",
+            "severity",
+            "repro"
+          ]
+        },
+        "maxItems": 10
+      }
+    }
+  },
+  "doneWhen": [
+    "Findings filed as tickets or clean report"
+  ]
+}

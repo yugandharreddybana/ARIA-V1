@@ -1,0 +1,51 @@
+{
+  "roleKey": "blue_team",
+  "role": "Blue Team Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 1000,
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "red finding tickets",
+    "owned paths"
+  ],
+  "do": [
+    "Fix findings with tests",
+    "Harden detections",
+    "Dev evidence; hand QA"
+  ],
+  "dont": [
+    "Ignore severity",
+    "Merge"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "pr",
+      "fixedFindingIds",
+      "evidence"
+    ],
+    "properties": {
+      "pr": {
+        "type": "string"
+      },
+      "fixedFindingIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "evidence": {
+        "type": "string"
+      }
+    }
+  },
+  "doneWhen": [
+    "Fixes PR + evidence for each finding"
+  ]
+}

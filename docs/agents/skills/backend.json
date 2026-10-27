@@ -1,0 +1,52 @@
+{
+  "roleKey": "backend",
+  "role": "Backend Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 1200,
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "ticket",
+    "api_contract",
+    "owned paths",
+    "schema digests"
+  ],
+  "do": [
+    "Implement APIs/data per AC+contract",
+    "Zod/IDOR at trust boundary",
+    "Dev before/after report md+pdf",
+    "Local tests before finish"
+  ],
+  "dont": [
+    "Skip contract_test when FE depends",
+    "Merge",
+    "Log secrets"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "pr",
+      "evidence",
+      "contractUpdated"
+    ],
+    "properties": {
+      "pr": {
+        "type": "string"
+      },
+      "evidence": {
+        "type": "string"
+      },
+      "contractUpdated": {
+        "type": "boolean"
+      }
+    }
+  },
+  "doneWhen": [
+    "PR open; valid dev evidence; contract current"
+  ]
+}

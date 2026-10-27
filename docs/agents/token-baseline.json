@@ -1,0 +1,81 @@
+{
+  "measuredAt": "2026-10-27T10:18:56.835Z",
+  "method": "ceil(utf8Bytes/4)",
+  "rows": [
+    {
+      "id": "companyGenerator.instructionsFor",
+      "tokens": 160,
+      "source": "apps/middleware/src/services/companyGenerator.ts"
+    },
+    {
+      "id": "activities/prompts.ts",
+      "tokens": 698,
+      "source": "apps/middleware/src/services/activities/prompts.ts"
+    },
+    {
+      "id": ".entiresystem/skills/backend-api-specialist",
+      "tokens": 494,
+      "source": ".entiresystem/skills/backend-api-specialist/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/compliance-auditor",
+      "tokens": 346,
+      "source": ".entiresystem/skills/compliance-auditor/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/db-specialist",
+      "tokens": 424,
+      "source": ".entiresystem/skills/db-specialist/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/devops-engineer",
+      "tokens": 362,
+      "source": ".entiresystem/skills/devops-engineer/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/finops-oracle",
+      "tokens": 376,
+      "source": ".entiresystem/skills/finops-oracle/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/frontend-web-specialist",
+      "tokens": 411,
+      "source": ".entiresystem/skills/frontend-web-specialist/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/historian",
+      "tokens": 441,
+      "source": ".entiresystem/skills/historian/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/integration-engineer",
+      "tokens": 382,
+      "source": ".entiresystem/skills/integration-engineer/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/knowledge-graph-architect",
+      "tokens": 419,
+      "source": ".entiresystem/skills/knowledge-graph-architect/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/qa-e2e",
+      "tokens": 405,
+      "source": ".entiresystem/skills/qa-e2e/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/security-engineer",
+      "tokens": 476,
+      "source": ".entiresystem/skills/security-engineer/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/skills/ux-defender",
+      "tokens": 377,
+      "source": ".entiresystem/skills/ux-defender/SKILL.md"
+    },
+    {
+      "id": ".entiresystem/SKILL.md",
+      "tokens": 217,
+      "source": ".entiresystem/SKILL.md"
+    }
+  ]
+}

@@ -1,0 +1,307 @@
+{
+  "measuredAt": "2026-10-27T10:32:52.891Z",
+  "method": "ceil(utf8Bytes/4)",
+  "rewriteExisting": {
+    "before": 5828,
+    "after": 2821,
+    "saved": 3007,
+    "percent": 51.6,
+    "rows": [
+      {
+        "id": "activities/prompts.ts",
+        "before": 698,
+        "after": 693,
+        "saved": 5
+      },
+      {
+        "id": ".entiresystem/skills/backend-api-specialist",
+        "before": 494,
+        "after": 166,
+        "saved": 328
+      },
+      {
+        "id": ".entiresystem/skills/compliance-auditor",
+        "before": 346,
+        "after": 172,
+        "saved": 174
+      },
+      {
+        "id": ".entiresystem/skills/db-specialist",
+        "before": 424,
+        "after": 164,
+        "saved": 260
+      },
+      {
+        "id": ".entiresystem/skills/devops-engineer",
+        "before": 362,
+        "after": 168,
+        "saved": 194
+      },
+      {
+        "id": ".entiresystem/skills/finops-oracle",
+        "before": 376,
+        "after": 157,
+        "saved": 219
+      },
+      {
+        "id": ".entiresystem/skills/frontend-web-specialist",
+        "before": 411,
+        "after": 174,
+        "saved": 237
+      },
+      {
+        "id": ".entiresystem/skills/historian",
+        "before": 441,
+        "after": 173,
+        "saved": 268
+      },
+      {
+        "id": ".entiresystem/skills/integration-engineer",
+        "before": 382,
+        "after": 170,
+        "saved": 212
+      },
+      {
+        "id": ".entiresystem/skills/knowledge-graph-architect",
+        "before": 419,
+        "after": 168,
+        "saved": 251
+      },
+      {
+        "id": ".entiresystem/skills/qa-e2e",
+        "before": 405,
+        "after": 160,
+        "saved": 245
+      },
+      {
+        "id": ".entiresystem/skills/security-engineer",
+        "before": 476,
+        "after": 171,
+        "saved": 305
+      },
+      {
+        "id": ".entiresystem/skills/ux-defender",
+        "before": 377,
+        "after": 172,
+        "saved": 205
+      },
+      {
+        "id": ".entiresystem/SKILL.md",
+        "before": 217,
+        "after": 113,
+        "saved": 104
+      }
+    ]
+  },
+  "runtimeComposedPrompt": {
+    "note": "Per invocation: one role composeInstructions (hard-rule ids, not full _base prose). Before ≈ old short template repeated.",
+    "beforeTemplateTokens": 160,
+    "beforeTotalApprox": 3360,
+    "afterTotalAllRoles": 4754,
+    "meanAfter": 226,
+    "maxAfter": 249,
+    "baseJsonTokens": 615,
+    "rows": [
+      {
+        "roleKey": "aiml",
+        "beforeApprox": 160,
+        "after": 211
+      },
+      {
+        "roleKey": "backend",
+        "beforeApprox": 160,
+        "after": 235
+      },
+      {
+        "roleKey": "blue_team",
+        "beforeApprox": 160,
+        "after": 207
+      },
+      {
+        "roleKey": "business",
+        "beforeApprox": 160,
+        "after": 209
+      },
+      {
+        "roleKey": "ceo",
+        "beforeApprox": 160,
+        "after": 228
+      },
+      {
+        "roleKey": "cfo",
+        "beforeApprox": 160,
+        "after": 222
+      },
+      {
+        "roleKey": "coach",
+        "beforeApprox": 160,
+        "after": 229
+      },
+      {
+        "roleKey": "cto",
+        "beforeApprox": 160,
+        "after": 223
+      },
+      {
+        "roleKey": "cybersecurity",
+        "beforeApprox": 160,
+        "after": 225
+      },
+      {
+        "roleKey": "devops",
+        "beforeApprox": 160,
+        "after": 214
+      },
+      {
+        "roleKey": "documentation",
+        "beforeApprox": 160,
+        "after": 228
+      },
+      {
+        "roleKey": "frontend",
+        "beforeApprox": 160,
+        "after": 245
+      },
+      {
+        "roleKey": "fullstack",
+        "beforeApprox": 160,
+        "after": 223
+      },
+      {
+        "roleKey": "junior",
+        "beforeApprox": 160,
+        "after": 221
+      },
+      {
+        "roleKey": "pr_coordinator",
+        "beforeApprox": 160,
+        "after": 220
+      },
+      {
+        "roleKey": "product_owner",
+        "beforeApprox": 160,
+        "after": 226
+      },
+      {
+        "roleKey": "qa",
+        "beforeApprox": 160,
+        "after": 244
+      },
+      {
+        "roleKey": "red_team",
+        "beforeApprox": 160,
+        "after": 236
+      },
+      {
+        "roleKey": "research",
+        "beforeApprox": 160,
+        "after": 225
+      },
+      {
+        "roleKey": "scrum_master",
+        "beforeApprox": 160,
+        "after": 234
+      },
+      {
+        "roleKey": "ui_ux_designer",
+        "beforeApprox": 160,
+        "after": 249
+      }
+    ]
+  },
+  "newCatalogue": {
+    "note": "Net-new lean role files. Hard rules live once in _base (referenced, not copied).",
+    "totalTokens": 6036,
+    "files": 22,
+    "rows": [
+      {
+        "id": "docs/agents/skills/_base.json",
+        "tokens": 615
+      },
+      {
+        "id": "docs/agents/skills/aiml.json",
+        "tokens": 213
+      },
+      {
+        "id": "docs/agents/skills/backend.json",
+        "tokens": 239
+      },
+      {
+        "id": "docs/agents/skills/blue_team.json",
+        "tokens": 219
+      },
+      {
+        "id": "docs/agents/skills/business.json",
+        "tokens": 216
+      },
+      {
+        "id": "docs/agents/skills/ceo.json",
+        "tokens": 262
+      },
+      {
+        "id": "docs/agents/skills/cfo.json",
+        "tokens": 256
+      },
+      {
+        "id": "docs/agents/skills/coach.json",
+        "tokens": 236
+      },
+      {
+        "id": "docs/agents/skills/cto.json",
+        "tokens": 267
+      },
+      {
+        "id": "docs/agents/skills/cybersecurity.json",
+        "tokens": 257
+      },
+      {
+        "id": "docs/agents/skills/devops.json",
+        "tokens": 218
+      },
+      {
+        "id": "docs/agents/skills/documentation.json",
+        "tokens": 235
+      },
+      {
+        "id": "docs/agents/skills/frontend.json",
+        "tokens": 250
+      },
+      {
+        "id": "docs/agents/skills/fullstack.json",
+        "tokens": 245
+      },
+      {
+        "id": "docs/agents/skills/junior.json",
+        "tokens": 240
+      },
+      {
+        "id": "docs/agents/skills/pr_coordinator.json",
+        "tokens": 254
+      },
+      {
+        "id": "docs/agents/skills/product_owner.json",
+        "tokens": 377
+      },
+      {
+        "id": "docs/agents/skills/qa.json",
+        "tokens": 286
+      },
+      {
+        "id": "docs/agents/skills/red_team.json",
+        "tokens": 246
+      },
+      {
+        "id": "docs/agents/skills/research.json",
+        "tokens": 302
+      },
+      {
+        "id": "docs/agents/skills/scrum_master.json",
+        "tokens": 280
+      },
+      {
+        "id": "docs/agents/skills/ui_ux_designer.json",
+        "tokens": 323
+      }
+    ]
+  }
+}
