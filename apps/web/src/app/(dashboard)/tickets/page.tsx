@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/contexts/auth.context';
 import { useAriaSocket } from '@/hooks/useAriaSocket';
 import Link from 'next/link';
@@ -18,7 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Ticket, TicketType, TicketStatus } from '@aria/shared';
+import { ticketFromSocket, safeHref, type Ticket, type TicketType, type TicketStatus } from '@aria/shared';
+import { PageErrorBoundary } from '@/components/ui/error-boundary';
+import { stageLabel, scheduleTone } from '@/lib/ticket-stage';
+import { rememberProject, rememberedProject } from '@/lib/project-selection';
 import { Zap } from 'lucide-react';
 
 // All 8 statuses from DB schema ticketStatusEnum — must be exhaustive
@@ -26,9 +29,11 @@ const COLUMNS: { key: TicketStatus; label: string; color: string }[] = [
   { key: 'backlog',           label: 'Backlog',          color: 'border-slate-500/30' },
   { key: 'ready_for_dev',     label: 'Ready for Dev',    color: 'border-blue-500/40' },
   { key: 'in_progress',       label: 'In Progress',      color: 'border-amber-500/40' },
-  { key: 'ready_for_qa',      label: 'Ready for QA',     color: 'border-purple-500/40' },
-  { key: 'in_qa',             label: 'In QA',            color: 'border-purple-500/60' },
   { key: 'ready_for_review',  label: 'Ready for Review', color: 'border-cyan-500/40' },
+  { key: 'in_qa',             label: 'In QA',            color: 'border-purple-500/60' },
+  { key: 'awaiting_merge',    label: 'Awaiting merge',   color: 'border-emerald-500/30' },
+  { key: 'blocked',           label: 'Blocked',          color: 'border-red-500/40' },
+  { key: 'ready_for_qa',      label: 'Ready for QA',     color: 'border-purple-500/40' },
   { key: 'done',              label: 'Done',             color: 'border-emerald-500/40' },
   { key: 'rejected',          label: 'Rejected',         color: 'border-red-500/30' },
 ];
@@ -43,13 +48,12 @@ const TYPE_COLORS: Record<TicketType, string> = {
 
 // Forward progression map — mirrors the Kanban flow
 const NEXT_STATUS: Partial<Record<TicketStatus, TicketStatus>> = {
-  backlog:          'ready_for_dev',
-  ready_for_dev:    'in_progress',
-  in_progress:      'ready_for_qa',
-  ready_for_qa:     'in_qa',
-  in_qa:            'ready_for_review',
-  ready_for_review: 'done',
+  backlog: 'ready_for_dev',
 };
+
+interface FlowOption { id: string; name: string; flowKey: string }
+interface AgentOption { id: string; realName: string }
+interface RunSignal { ticketId: string; prUrl: string | null; prNumber: number | null; live: boolean; blockedReason: string | null }
 
 interface CreateTicketModalProps {
   projectId: string;
@@ -57,10 +61,13 @@ interface CreateTicketModalProps {
   onClose: () => void;
 }
 
-function CreateTicketModal({ projectId, onCreated, onClose }: CreateTicketModalProps) {
+function CreateTicketModal({ projectId, flows, onCreated, onClose }: CreateTicketModalProps & { flows: FlowOption[] }) {
   const [title, setTitle]       = useState('');
   const [description, setDesc]  = useState('');
   const [type, setType]         = useState<TicketType>('feature');
+  const [flowId, setFlowId]     = useState('');
+  const [layer, setLayer]       = useState('');
+  const [points, setPoints]     = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
 
@@ -78,6 +85,9 @@ function CreateTicketModal({ projectId, onCreated, onClose }: CreateTicketModalP
           title:       title.trim(),
           description: description.trim(),
           type,
+          ...(flowId ? { flowId } : {}),
+          ...(layer ? { layer } : {}),
+          ...(points ? { storyPoints: Number(points) } : {}),
         }),
       });
       onCreated(data.ticket);
@@ -130,6 +140,31 @@ function CreateTicketModal({ projectId, onCreated, onClose }: CreateTicketModalP
                 </SelectContent>
               </Select>
             </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-flow">Flow</Label>
+                <select id="ticket-flow" data-testid="ticket-flow" className="field" value={flowId} onChange={(event) => setFlowId(event.target.value)}>
+                  <option value="">None</option>
+                  {flows.map((flow) => <option key={flow.id} value={flow.id}>{flow.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-layer">Layer</Label>
+                <select id="ticket-layer" data-testid="ticket-layer" className="field" value={layer} onChange={(event) => setLayer(event.target.value)}>
+                  <option value="">Any</option>
+                  <option value="frontend">Frontend</option>
+                  <option value="backend">Backend</option>
+                  <option value="fullstack">Full stack</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-points">Points</Label>
+                <select id="ticket-points" data-testid="ticket-points" className="field" value={points} onChange={(event) => setPoints(event.target.value)}>
+                  <option value="">Estimate</option>
+                  {[1, 2, 3, 5, 8, 13].map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+              </div>
+            </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
                 Cancel
@@ -146,13 +181,20 @@ function CreateTicketModal({ projectId, onCreated, onClose }: CreateTicketModalP
 
 interface TicketCardProps {
   ticket: Ticket;
+  agentName: string;
+  prUrl: string | null;
+  prNumber: number | null;
+  blockedReason: string | null;
+  live: boolean;
   onStatusChange: (id: string, status: TicketStatus) => void;
+  onAction: (id: string, action: 'approve' | 'unblock') => void;
 }
 
-function TicketCard({ ticket, onStatusChange }: TicketCardProps) {
+function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, onStatusChange, onAction }: TicketCardProps) {
   const typeColor = TYPE_COLORS[ticket.type as TicketType] ?? 'bg-muted text-muted-foreground';
   const next = NEXT_STATUS[ticket.status];
   const isAgentCreated = !!ticket.createdBySkillId;
+  const prText = prNumber ? `PR #${prNumber}` : 'PR';
 
   return (
     <div
@@ -161,45 +203,60 @@ function TicketCard({ ticket, onStatusChange }: TicketCardProps) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
+          {live && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" role="img" aria-label="Run in progress" />}
           {isAgentCreated && (
-            <Zap
-              className="h-3 w-3 text-primary shrink-0"
-              aria-label="Created by agent"
-            />
+            <Zap className="h-3 w-3 text-primary shrink-0" aria-label="Created by agent" />
           )}
-          <p className="text-sm font-medium leading-snug truncate">{ticket.title}</p>
+          <p className="text-sm font-medium leading-snug truncate">
+            <Link href={`/tickets/${ticket.id}`} className="hover:underline">{ticket.title}</Link>
+          </p>
         </div>
         <Badge className={typeColor}>{ticket.type.replace(/_/g, ' ')}</Badge>
       </div>
+      <div className="flex flex-wrap gap-1">
+        <Badge>{ticket.storyPoints ?? 1} pt</Badge>
+        <Badge tone={scheduleTone(ticket.scheduleState)}>{stageLabel(ticket.status)}</Badge>
+        {ticket.scheduleState === 'at_risk' && <Badge tone="warn">At risk</Badge>}
+        {ticket.scheduleState === 'overdue' && <Badge tone="warn">Overdue</Badge>}
+        {ticket.dueAt && <span className="text-xs text-muted-foreground">Due {new Date(ticket.dueAt).toLocaleDateString()}</span>}
+      </div>
+      <p className="text-xs text-muted-foreground">{agentName}</p>
+      {safeHref(prUrl) && <a className="text-xs text-primary" href={safeHref(prUrl) ?? undefined} target="_blank" rel="noreferrer">{prText}</a>}
+      {blockedReason && <p className="text-xs">{blockedReason}</p>}
       {ticket.description && (
         <p className="text-xs text-muted-foreground line-clamp-2">{ticket.description}</p>
       )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground font-mono">Risk {ticket.riskClass}</span>
-          {!ticket.humanApproved && isAgentCreated && (
-            <span className="text-xs px-1 py-0.5 rounded bg-amber-500/10 text-amber-400">
-              Pending approval
-            </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground font-mono">Risk {ticket.riskClass}</span>
+        <div className="flex flex-wrap justify-end gap-1">
+          {!ticket.humanApproved && ticket.status === 'backlog' && (
+            <Button size="sm" variant="outline" className="h-6 text-xs px-2" data-testid="approve-ticket" onClick={() => onAction(ticket.id, 'approve')}>
+              Approve
+            </Button>
+          )}
+          {ticket.status === 'blocked' && (
+            <Button size="sm" variant="outline" className="h-6 text-xs px-2" data-testid="unblock-ticket" onClick={() => onAction(ticket.id, 'unblock')}>
+              Unblock
+            </Button>
+          )}
+          {next && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs px-2"
+              onClick={() => onStatusChange(ticket.id, next)}
+              aria-label={`Move to ${next.replace(/_/g, ' ')}`}
+            >
+              → {next.replace(/_/g, ' ')}
+            </Button>
           )}
         </div>
-        {next && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 text-xs px-2"
-            onClick={() => onStatusChange(ticket.id, next)}
-            aria-label={`Move to ${next.replace(/_/g, ' ')}`}
-          >
-            → {next.replace(/_/g, ' ')}
-          </Button>
-        )}
       </div>
     </div>
   );
 }
 
-export default function TicketsPage() {
+function TicketsPage() {
   const { user }                     = useAuth();
   const [projects, setProjects]      = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId]    = useState('');
@@ -207,6 +264,10 @@ export default function TicketsPage() {
   const [loading,  setLoading]       = useState(false);
   const [error,    setError]         = useState('');
   const [showCreate, setShowCreate]  = useState(false);
+  const [flows, setFlows]            = useState<FlowOption[]>([]);
+  const [agents, setAgents]          = useState<AgentOption[]>([]);
+  const [signals, setSignals]        = useState<RunSignal[]>([]);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track which project room we're currently joined so we can leave cleanly
   const joinedProjectRef = useRef<string>('');
@@ -219,7 +280,12 @@ export default function TicketsPage() {
     api<{ projects: { id: string; name: string }[] }>('/projects')
       .then(d => {
         setProjects(d.projects);
-        if (d.projects.length > 0) setProjectId(d.projects[0].id);
+        const remembered = rememberedProject();
+        const next = d.projects.find((project) => project.id === remembered)?.id ?? d.projects[0]?.id ?? '';
+        if (next) {
+          setProjectId(next);
+          rememberProject(next);
+        }
       })
       .catch(() => setError('Failed to load projects'));
   }, []);
@@ -241,7 +307,14 @@ export default function TicketsPage() {
   }, []);
 
   useEffect(() => {
-    if (projectId) loadTickets(projectId);
+    if (!projectId) return;
+    loadTickets(projectId);
+    api<{ flows: FlowOption[]; agents: AgentOption[] }>(`/projects/${projectId}/company`)
+      .then((data) => { setFlows(data.flows); setAgents(data.agents); })
+      .catch(() => { setFlows([]); setAgents([]); });
+    api<{ signals: RunSignal[] }>(`/projects/${projectId}/run-signals`)
+      .then((data) => setSignals(data.signals))
+      .catch(() => setSignals([]));
   }, [projectId, loadTickets]);
 
   // ── Real-time WebSocket subscription for agent-created/updated tickets ──
@@ -265,23 +338,36 @@ export default function TicketsPage() {
 
   // ── Ticket event listeners (separate effect so they always use fresh state) ──
   useEffect(() => {
-    if (!lastEvent) return;
-
-    if ((lastEvent as { type: string }).type === 'ticket:created') {
-      const incoming = (lastEvent as unknown as { ticket: Ticket }).ticket;
-      if (incoming.projectId !== projectId) return;
-      setTickets(prev => {
-        if (prev.some(t => t.id === incoming.id)) return prev;
-        return [incoming, ...prev];
-      });
+    if (!lastEvent || !projectId) return;
+    try {
+      if (lastEvent.type === 'ticket:created' || lastEvent.type === 'ticket:updated') {
+        const incoming = ticketFromSocket(lastEvent);
+        if (!incoming) return;
+        if (incoming.projectId && incoming.projectId !== projectId) return;
+        setTickets((prev) => {
+          const index = prev.findIndex((ticket) => ticket.id === incoming.id);
+          if (incoming.ticket && index >= 0) {
+            return prev.map((ticket) => ticket.id === incoming.id ? { ...ticket, ...incoming.ticket, status: (incoming.status as TicketStatus | undefined) ?? ticket.status } : ticket);
+          }
+          if (incoming.ticket && lastEvent.type === 'ticket:created' && (!incoming.projectId || incoming.projectId === projectId)) {
+            return [{ ...incoming.ticket, id: incoming.id, projectId, status: (incoming.status as TicketStatus | undefined) ?? 'backlog' } as Ticket, ...prev];
+          }
+          if (index < 0) return prev;
+          if (!incoming.status) return prev;
+          return prev.map((ticket) => ticket.id === incoming.id ? { ...ticket, status: incoming.status as TicketStatus } : ticket);
+        });
+      }
+      if (lastEvent.type === 'run:updated') {
+        if (refreshTimer.current) clearTimeout(refreshTimer.current);
+        refreshTimer.current = setTimeout(() => {
+          void api<{ signals: RunSignal[] }>(`/projects/${projectId}/run-signals`).then((data) => setSignals(data.signals)).catch(() => undefined);
+          void loadTickets(projectId);
+        }, 300);
+      }
+    } catch {
+      // A bad socket payload must not blank the board. The route error boundary covers render throws.
     }
-
-    if ((lastEvent as { type: string }).type === 'ticket:updated') {
-      const incoming = (lastEvent as unknown as { ticket: Ticket }).ticket;
-      if (incoming.projectId !== projectId) return;
-      setTickets(prev => prev.map(t => t.id === incoming.id ? incoming : t));
-    }
-  }, [lastEvent, projectId]);
+  }, [lastEvent, projectId, loadTickets]);
 
   const handleStatusChange = async (id: string, status: TicketStatus) => {
     // Optimistic update
@@ -295,9 +381,22 @@ export default function TicketsPage() {
       );
       // Confirm with server response
       setTickets(prev => prev.map(t => t.id === id ? d.ticket : t));
-    } catch {
-      // Revert optimistic update on failure
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'That move was refused.');
       loadTickets(projectId);
+    }
+  };
+
+  const handleAction = async (id: string, action: 'approve' | 'unblock') => {
+    setError('');
+    try {
+      const d = await api<{ ticket: Ticket }>(`/tickets/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action }),
+      });
+      setTickets(prev => prev.map(t => t.id === id ? d.ticket : t));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'The ticket could not be updated.');
     }
   };
 
@@ -311,16 +410,15 @@ export default function TicketsPage() {
         action={(
           <>
             <Link href="/planning" className="self-center text-sm text-primary">Ideas</Link>
-            <Select value={projectId} onValueChange={setProjectId}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              className="field w-auto"
+              aria-label="Project"
+              value={projectId}
+              onChange={(event) => { setProjectId(event.target.value); rememberProject(event.target.value); }}
+            >
+              {projects.length === 0 && <option value="">No projects</option>}
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
             <Button
               onClick={() => setShowCreate(true)}
               disabled={!projectId}
@@ -343,7 +441,7 @@ export default function TicketsPage() {
             return (
               <div
                 key={col.key}
-                className={`flex flex-col gap-3 min-w-[220px] max-w-[260px] border-t-2 pt-3 ${col.color}`}
+                className={`flex w-[240px] shrink-0 flex-col gap-3 border-t-2 pt-3 ${col.color}`}
                 data-testid={`column-${col.key}`}
               >
                 <div className="flex items-center justify-between">
@@ -356,15 +454,24 @@ export default function TicketsPage() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {colTickets.length === 0 ? (
-                    <p className="text-xs text-muted-foreground/40 text-center py-6">Empty</p>
+                    <p className="pointer-events-none py-6 text-center text-xs text-muted-foreground/40">Empty</p>
                   ) : (
-                    colTickets.map(t => (
+                    colTickets.map(t => {
+                      const signal = signals.find((row) => row.ticketId === t.id);
+                      return (
                       <TicketCard
                         key={t.id}
                         ticket={t}
+                        agentName={agents.find(agent => agent.id === t.assignedSkillId)?.realName ?? 'Unassigned'}
+                        prUrl={signal?.prUrl ?? null}
+                        prNumber={signal?.prNumber ?? null}
+                        blockedReason={t.status === 'blocked' ? (signal?.blockedReason ?? t.statusReason ?? null) : null}
+                        live={Boolean(signal?.live)}
                         onStatusChange={handleStatusChange}
+                        onAction={handleAction}
                       />
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -377,6 +484,7 @@ export default function TicketsPage() {
       {showCreate && projectId && (
         <CreateTicketModal
           projectId={projectId}
+          flows={flows}
           onCreated={t => {
             setTickets(prev => [t, ...prev]);
             setShowCreate(false);
@@ -385,5 +493,13 @@ export default function TicketsPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function TicketsBoard() {
+  return (
+    <PageErrorBoundary>
+      <TicketsPage />
+    </PageErrorBoundary>
   );
 }

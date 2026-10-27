@@ -204,24 +204,42 @@ describe('planner output, pull watcher, budget, and claim race', () => {
     expect(instructions.rows[0].instructions).toContain('Do not merge');
     expect(instructions.rows[0].enabled).toBe(3);
 
-    const project2 = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Template Co' });
-    const fallbackId = project2.body.project.id as string;
-    const fallback = await enqueue({
+    const project2 = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Generated Co' });
+    const generatedId = project2.body.project.id as string;
+    const generated = await enqueue({
       workspaceId: owner.workspaceId,
-      projectId: fallbackId,
+      projectId: generatedId,
       activity: 'company_generation',
       taskType: 'company_generation',
       runtime: 'cursor_local',
-      idempotencyKey: `company-fb-${Date.now()}`,
+      idempotencyKey: `company-gen-${Date.now()}`,
       input: { size: 3, mix: zeroMix },
     });
-    await processRunById(fallback.id);
-    const templated = await getPgPool().query<{ company_source: string; slug: string }>(
+    await processRunById(generated.id);
+    const generatedRow = await getPgPool().query<{ company_source: string; slug: string }>(
       `SELECT p.company_source, s.slug FROM projects p JOIN skills s ON s.project_id = p.id WHERE p.id = $1 AND s.slug = 'ceo'`,
-      [fallbackId],
+      [generatedId],
+    );
+    expect(generatedRow.rows[0].company_source).toBe('ai');
+    expect(generatedRow.rows[0].slug).toBe('ceo');
+
+    const projectBad = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Bad Co' });
+    const badId = projectBad.body.project.id as string;
+    const bad = await enqueue({
+      workspaceId: owner.workspaceId,
+      projectId: badId,
+      activity: 'company_generation',
+      taskType: 'company_generation',
+      runtime: 'cursor_local',
+      idempotencyKey: `company-bad-${Date.now()}`,
+      input: { size: 3, mix: zeroMix, fixture: '[[stub:company-bad]]' },
+    });
+    await processRunById(bad.id);
+    const templated = await getPgPool().query<{ company_source: string }>(
+      `SELECT company_source FROM projects WHERE id = $1`,
+      [badId],
     );
     expect(templated.rows[0].company_source).toBe('template');
-    expect(templated.rows[0].slug).toBe('ceo');
 
     const project3 = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Cycle Co' });
     const cycleId = project3.body.project.id as string;

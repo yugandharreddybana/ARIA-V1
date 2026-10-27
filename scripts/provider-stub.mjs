@@ -57,13 +57,13 @@ function devReport(prompt) {
     'integration: pnpm -F @aria/middleware test',
     'e2e: playwright test',
     '## Before',
-    'unit failed on the missing guard',
+    '2026-10-25: middleware 26 files, 137 tests passed; Playwright 216 passed. A live ticket update shaped {id,status} crashed the board. Project budget counted workspace usage. Report download after token expiry did not refresh.',
     '## After',
-    'unit passed after the change',
+    '2026-10-27: middleware 28 files, 146 tests passed. milestone2-agents passed 3 consecutive runs on desktop, tablet, and mobile with retries 0. Project budget counts that project only. Report download refreshes once on 401.',
     '## Screenshots',
     ui ? `ui_affected: yes\n![before](${PNG})\n![after](${PNG})` : 'ui_affected: no\nNo UI was touched.',
     '## Logs',
-    'before: 1 failed. after: 0 failed.',
+    'before: board crash on ticket:updated and a 401 download with no refresh. after: 0 page errors in milestone2-agents, download retries with the refreshed token.',
     '## Summary',
     'The change closes the ticket. It was required so the gate can see a local before/after result.',
   ].join('\n');
@@ -232,7 +232,10 @@ function writeSse(res, agent) {
   ].join('\n');
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   if (agent.kind === 'slow') {
-    setTimeout(() => res.end(sse), 400);
+    const requested = Number(marker(agent.prompt, 'slow'));
+    // [[stub:slow]] stays at 400ms. [[stub:slow=8000]] holds the stream open.
+    const delay = Number.isFinite(requested) && requested > 1 ? requested : 400;
+    setTimeout(() => res.end(sse), delay);
     return;
   }
   res.end(sse);

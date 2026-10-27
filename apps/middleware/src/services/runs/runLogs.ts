@@ -79,12 +79,45 @@ async function write(runId: string, kind: string, message: string): Promise<void
   }
 }
 
-export async function list(runId: string, afterSeq = 0, limit = 500): Promise<Array<{ seq: number; kind: string; message: string; ts: string }>> {
-  const result = await getPgPool().query<{ seq: number; kind: string; message: string; created_at: Date }>(
+export async function list(
+  runId: string,
+  options: { afterSeq?: number; beforeSeq?: number; tail?: boolean; limit?: number } = {},
+): Promise<Array<{ seq: number; kind: string; message: string; ts: string }>> {
+  const cap = Math.min(Math.max(options.limit ?? 500, 1), 2000);
+  const pool = getPgPool();
+  if (options.beforeSeq != null) {
+    const result = await pool.query<{ seq: number; kind: string; message: string; created_at: Date }>(
+      `SELECT seq, kind, message, created_at FROM (
+         SELECT seq, kind, message, created_at FROM agent_run_logs
+          WHERE run_id = $1::uuid AND seq < $2
+          ORDER BY seq DESC
+          LIMIT $3
+       ) earlier ORDER BY seq ASC`,
+      [runId, options.beforeSeq, cap],
+    );
+    return result.rows.map(mapLine);
+  }
+  if (options.tail) {
+    const result = await pool.query<{ seq: number; kind: string; message: string; created_at: Date }>(
+      `SELECT seq, kind, message, created_at FROM (
+         SELECT seq, kind, message, created_at FROM agent_run_logs
+          WHERE run_id = $1::uuid
+          ORDER BY seq DESC
+          LIMIT $2
+       ) latest ORDER BY seq ASC`,
+      [runId, cap],
+    );
+    return result.rows.map(mapLine);
+  }
+  const result = await pool.query<{ seq: number; kind: string; message: string; created_at: Date }>(
     `SELECT seq, kind, message, created_at FROM agent_run_logs
       WHERE run_id = $1::uuid AND seq > $2
       ORDER BY seq LIMIT $3`,
-    [runId, afterSeq, Math.min(limit, 500)],
+    [runId, options.afterSeq ?? 0, cap],
   );
-  return result.rows.map((row) => ({ seq: row.seq, kind: row.kind, message: row.message, ts: new Date(row.created_at).toISOString() }));
+  return result.rows.map(mapLine);
+}
+
+function mapLine(row: { seq: number; kind: string; message: string; created_at: Date }): { seq: number; kind: string; message: string; ts: string } {
+  return { seq: row.seq, kind: row.kind, message: row.message, ts: new Date(row.created_at).toISOString() };
 }

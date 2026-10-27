@@ -68,7 +68,7 @@ async function refreshAccessToken(expectedToken: string, epoch: number): Promise
   return body.accessToken;
 }
 
-export async function api<T>(path: string, options?: RequestInit, retry = true): Promise<T> {
+async function authorizedFetch(path: string, options: RequestInit | undefined, retry: boolean): Promise<Response> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('aria_token') : null;
   const res = await fetch(`${BASE_URL}/api${path}`, {
     ...options,
@@ -89,24 +89,41 @@ export async function api<T>(path: string, options?: RequestInit, retry = true):
     const current = localStorage.getItem('aria_token');
     if (current && current !== token) {
       // A refresh finished after this request was sent — replay with the new token.
-      return api<T>(path, options, false);
+      return authorizedFetch(path, options, false);
     }
     if (current) {
       const epoch = authEpoch;
       refreshInFlight ??= refreshAccessToken(token, epoch).finally(() => { refreshInFlight = null; });
-      if (await refreshInFlight) return api<T>(path, options, false);
+      if (await refreshInFlight) return authorizedFetch(path, options, false);
     }
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: 'Request failed' }));
-    // Middleware sends { success, error, code } — prefer `error`, fall back to
-    // `message` for any legacy or third-party responses that still use that field.
-    throw new ApiError(
-      messageFromApiBody(body),
-      res.status,
-      body.details ?? [],
-    );
-  }
+  return res;
+}
+
+async function errorFrom(res: Response): Promise<ApiError> {
+  const body = await res.json().catch(() => ({ error: 'Request failed' }));
+  return new ApiError(messageFromApiBody(body), res.status, body.details ?? []);
+}
+
+export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await authorizedFetch(path, options, true);
+  if (!res.ok) throw await errorFrom(res);
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
+}
+
+export async function downloadApi(path: string, filename: string): Promise<void> {
+  const res = await authorizedFetch(path, undefined, true);
+  if (!res.ok) throw await errorFrom(res);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

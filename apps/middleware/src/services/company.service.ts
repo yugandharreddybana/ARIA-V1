@@ -109,6 +109,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
     projectId,
     companySize: project.companySize ?? null,
     companyMix: project.companyMix ?? null,
+    companySource: project.companySource,
     modelTiers: {
       planning: projectTaskTiers.planning ?? 'top',
       development: projectTaskTiers.development ?? 'auto',
@@ -117,6 +118,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
       provider: choice.provider,
       planningModel: companyRoute.planningModel,
       developmentModel: companyRoute.developmentModel,
+      catalog: choice.catalog,
     },
     agents: agents.map((row) => ({
       ...toView(row),
@@ -135,6 +137,7 @@ export async function getCompany(projectId: string, workspaceId: string) {
       flowKey: flow.flowKey,
       name: flow.name,
       kind: flow.kind,
+      layer: flow.layer,
       description: flow.description,
       entryPoints: flow.entryPoints,
     }))),

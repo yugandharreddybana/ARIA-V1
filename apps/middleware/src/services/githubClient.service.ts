@@ -97,6 +97,21 @@ export function parseRepoFullName(input: string): { owner: string; repo: string 
   return { owner, repo };
 }
 
+/** Setup stores the repo label as the last URL segment. GitHub calls need owner/name. */
+export function githubFullName(repoName: string, repoUrl?: string | null): string {
+  for (const candidate of [repoName, repoUrl ?? '']) {
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = parseRepoFullName(trimmed);
+      return `${parsed.owner}/${parsed.repo}`;
+    } catch {
+      continue;
+    }
+  }
+  return repoName.trim().split('/').pop()?.replace(/\.git$/, '') || repoName.trim();
+}
+
 export async function readRepository(token: string, fullName: string, branch: string): Promise<RepoSnapshot> {
   if (isMockToken(token)) return { paths: MOCK_REPO_PATHS, files: MOCK_REPO_FILES };
   const { owner, repo } = parseRepoFullName(fullName);

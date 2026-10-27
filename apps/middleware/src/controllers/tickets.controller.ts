@@ -2,6 +2,10 @@ import type { Response, NextFunction } from 'express';
 import type { AriaRequest } from '../middleware/auth.middleware';
 import * as svc from '../services/tickets.service';
 
+export async function getTicket(req: AriaRequest, res: Response, next: NextFunction) {
+  try { res.json({ ticket: await svc.getTicket(req.params.id, req.user!.workspaceId) }); } catch (e) { next(e); }
+}
+
 export async function listTickets(req: AriaRequest, res: Response, next: NextFunction) {
   try {
     const projectId = req.query.projectId as string;

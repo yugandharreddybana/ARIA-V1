@@ -35,6 +35,7 @@ interface SetupState {
   summary: string;
   flows: FlowRow[];
   jobs: JobRow[];
+  knowledge?: { enrichment?: 'pending' | 'ai' | 'template' };
 }
 
 const EMPTY_MIX = { business: 1, qa: 2, frontend: 1, backend: 1, fullstack: 1, junior: 1, aiml: 0, devops: 0, security: 0 };
@@ -82,6 +83,7 @@ export default function SetupPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [flows, setFlows] = useState<FlowRow[]>([]);
   const [summary, setSummary] = useState('');
+  const [enrichment, setEnrichment] = useState<'pending' | 'ai' | 'template'>('pending');
   const [size, setSize] = useState(10);
   const [mix, setMix] = useState(EMPTY_MIX);
   const [planningTier, setPlanningTier] = useState<'top' | 'auto'>('top');
@@ -187,9 +189,10 @@ export default function SetupPage() {
 
   async function pollKnowledge(id: string) {
     for (let attempt = 0; attempt < 45; attempt++) {
-      const data = await api<{ map: { summary: string } | null; flows: FlowRow[]; jobs: JobRow[] }>(`/projects/${id}/knowledge`);
+      const data = await api<{ map: { summary: string; source?: string } | null; flows: FlowRow[]; jobs: JobRow[] }>(`/projects/${id}/knowledge`);
       const active = data.jobs.some((job) => job.status === 'queued' || job.status === 'running');
       const failed = data.jobs.find((job) => job.status === 'failed');
+      setEnrichment(active ? 'pending' : data.map?.source === 'ai' ? 'ai' : 'template');
       if (data.map && !active) {
         setSummary(data.map.summary);
         setFlows(data.flows);
@@ -211,6 +214,7 @@ export default function SetupPage() {
       resumed.current = true;
       setProjectId(state.project.id);
       setProjectName(state.project.name);
+      if (state.knowledge?.enrichment) setEnrichment(state.knowledge.enrichment);
       if (state.knowledgeReady) {
         setSummary(state.summary);
         setFlows(state.flows);
@@ -357,6 +361,7 @@ export default function SetupPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p data-testid="knowledge-summary" className="text-sm">{summary || 'Reading the repository…'}</p>
+            <p data-testid="enrichment-status" className="text-sm text-muted-foreground">AI enrichment: {enrichment}. You can continue with the template company while a planning run is still going.</p>
             <ul className="space-y-2">
               {flows.map((flow) => (
                 <li key={flow.id} data-testid="knowledge-flow" className="text-sm border border-border rounded-md p-2">
@@ -420,7 +425,7 @@ export default function SetupPage() {
         <Card>
           <CardHeader>
             <CardTitle>Company is ready</CardTitle>
-            <CardDescription>Open the org chart to edit roles, add people, or turn agents off.</CardDescription>
+            <CardDescription>Open the org chart to edit roles, add people, or turn agents off. A generation run keeps going in the queue and does not block the chart.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-3">
             <Link href={`/projects/${projectId}/company`} data-testid="open-org-chart">
