@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorNote, LoadingState } from '@/components/ui/empty-state';
 import { AgentNode, type AgentNodeData } from '@/components/company/agent-node';
 import { rememberProject } from '@/lib/project-selection';
+import { useAriaSocket } from '@/hooks/useAriaSocket';
 
 interface Agent {
   id: string;
@@ -99,6 +100,7 @@ export default function CompanyPage() {
   const [instructions, setInstructions] = useState('Describe the work this person owns.');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [companySource, setCompanySource] = useState('template');
+  const { connected, subscribe, unsubscribe, onEvent } = useAriaSocket();
   const [recentRuns, setRecentRuns] = useState<Array<{ id: string; activity: string; status: string }>>([]);
 
   const load = useCallback(async () => {
@@ -118,6 +120,20 @@ export default function CompanyPage() {
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Could not load the company'))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (!connected || !params.id) return;
+    subscribe(`project:${params.id}`);
+    void load().catch(() => undefined);
+    return () => unsubscribe(`project:${params.id}`);
+  }, [connected, load, params.id, subscribe, unsubscribe]);
+
+  useEffect(() => onEvent((event) => {
+    if (event.type !== 'company:updated' && event.type !== 'knowledge:updated') return;
+    if (event.projectId !== params.id) return;
+    if (event.type === 'company:updated' && event.source) setCompanySource(event.source);
+    void load().catch(() => undefined);
+  }), [load, onEvent, params.id]);
 
   const current = agents.find((agent) => agent.id === selected) ?? null;
 

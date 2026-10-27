@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api, ApiError, downloadApi } from '@/lib/api';
+import { safeHref } from '@aria/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,7 +27,8 @@ interface TicketEvent {
   created_at: string;
   pr_url: string | null;
 }
-interface Chain { ok: boolean; brokenAt: number | null }
+interface Chain { ok: boolean; brokenAt: number | null; truncated?: boolean }
+type ChainState = 'loading' | 'error' | 'verified' | 'broken';
 interface Reports {
   dev: { valid: boolean } | null;
   qa: { valid: boolean } | null;
@@ -40,6 +42,7 @@ export default function TicketDetailPage() {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [events, setEvents] = useState<TicketEvent[]>([]);
   const [chain, setChain] = useState<Chain | null>(null);
+  const [chainState, setChainState] = useState<ChainState>('loading');
   const [reports, setReports] = useState<Reports | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [pr, setPr] = useState<RunRow | null>(null);
@@ -49,6 +52,7 @@ export default function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [reportError, setReportError] = useState('');
   const [more, setMore] = useState(false);
   const pointsDirty = useRef(false);
 
@@ -56,49 +60,46 @@ export default function TicketDetailPage() {
     const query = new URLSearchParams({ limit: String(PAGE), cursor: String(after) });
     if (type) query.set('type', type);
     if (agentId) query.set('agentId', agentId);
-    const data = await api<{ events: TicketEvent[]; chain: Chain }>(`/tickets/${params.id}/events?${query}`);
-    setChain(data.chain);
-    setEvents((current) => replace ? data.events : [...current, ...data.events]);
-    setMore(data.events.length === PAGE);
+    try {
+      const data = await api<{ events: TicketEvent[]; chain: Chain }>(`/tickets/${params.id}/events?${query}`);
+      setChain(data.chain);
+      setChainState(data.chain.ok ? 'verified' : 'broken');
+      setEvents((current) => replace ? data.events : [...current, ...data.events]);
+      setMore(data.events.length === PAGE);
+    } catch (err) {
+      if (replace) setChainState('error');
+      setError(err instanceof ApiError ? err.message : 'Could not load the activity.');
+    }
   }, [agentId, params.id, type]);
 
-  const load = useCallback(async () => {
+  const loadTicket = useCallback(async () => {
     setLoading(true);
     setError('');
+    setChainState('loading');
     try {
-      const projects = await api<{ projects: { id: string }[] }>('/projects');
-      let found: Ticket | null = null;
-      for (const project of projects.projects) {
-        const data = await api<{ tickets: Ticket[] }>(`/tickets?projectId=${project.id}`);
-        found = data.tickets.find((item) => item.id === params.id) ?? null;
-        if (found) {
-          const [company, runs, report] = await Promise.all([
-            api<{ agents: Agent[] }>(`/projects/${project.id}/company`).catch(() => ({ agents: [] as Agent[] })),
-            api<{ runs: RunRow[] }>(`/projects/${project.id}/runs?ticketId=${params.id}&limit=20`).catch(() => ({ runs: [] as RunRow[] })),
-            api<Reports>(`/tickets/${params.id}/reports`).catch(() => null),
-          ]);
-          setAgents(company.agents);
-          setPr(runs.runs.find((run) => run.pr_url) ?? null);
-          setReports(report);
-          break;
-        }
-      }
-      if (!found) {
-        setError('Ticket not found.');
-        setTicket(null);
-        return;
-      }
-      setTicket(found);
-      if (!pointsDirty.current) setPoints(String(found.storyPoints ?? 1));
-      await loadEvents(0, true);
+      const data = await api<{ ticket: Ticket }>(`/tickets/${params.id}`);
+      setTicket(data.ticket);
+      if (!pointsDirty.current) setPoints(String(data.ticket.storyPoints ?? 1));
+      const [company, signals, report] = await Promise.all([
+        api<{ agents: Agent[] }>(`/projects/${data.ticket.projectId}/company`).catch(() => ({ agents: [] as Agent[] })),
+        api<{ signals: Array<{ ticketId: string; prUrl: string | null; prNumber: number | null }> }>(`/projects/${data.ticket.projectId}/run-signals`).catch(() => ({ signals: [] })),
+        api<Reports>(`/tickets/${params.id}/reports`).catch(() => null),
+      ]);
+      setAgents(company.agents);
+      const mine = signals.signals.find((row) => row.ticketId === params.id);
+      setPr(mine?.prUrl ? { pr_url: mine.prUrl, pr_number: mine.prNumber, activity: '', status: '' } : null);
+      setReports(report);
     } catch (err) {
+      setTicket(null);
+      setChainState('error');
       setError(err instanceof ApiError ? err.message : 'Could not load this ticket.');
     } finally {
       setLoading(false);
     }
-  }, [loadEvents, params.id]);
+  }, [params.id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadTicket(); }, [loadTicket]);
+  useEffect(() => { void loadEvents(0, true); }, [loadEvents]);
 
   async function savePoints(event: React.FormEvent) {
     event.preventDefault();
@@ -120,7 +121,40 @@ export default function TicketDetailPage() {
 
   async function exportLog(format: 'markdown' | 'json') {
     const filename = format === 'markdown' ? `${ticket?.ticketKey || 'ticket'}.md` : `${ticket?.ticketKey || 'ticket'}.json`;
-    await downloadApi(`/tickets/${params.id}/events/export?format=${format === 'markdown' ? 'markdown' : 'json'}`, filename);
+    try {
+      setReportError('');
+      await downloadApi(`/tickets/${params.id}/events/export?format=${format === 'markdown' ? 'markdown' : 'json'}`, filename);
+    } catch (err) {
+      setReportError(err instanceof ApiError ? err.message : 'The activity export could not be downloaded.');
+    }
+  }
+
+  async function downloadReport(path: string, filename: string) {
+    try {
+      setReportError('');
+      await downloadApi(path, filename);
+    } catch (err) {
+      setReportError(err instanceof ApiError ? err.message : 'The report could not be downloaded.');
+    }
+  }
+
+  function gateCopy(gate: Reports['gate'] | undefined): string {
+    if (!gate) return 'Reports are not ready.';
+    if (gate.ok) return 'Gate passed. Both reports are valid.';
+    switch (gate.reason) {
+      case 'pull request head is unknown':
+        return 'The pull request head is not known yet, so the gate cannot pass.';
+      case 'developer evidence is missing or invalid for this pull request head':
+        return 'The developer report is missing or does not match this pull request.';
+      case 'qa evidence is missing or invalid for this pull request head':
+        return 'The QA report is missing or does not match this pull request.';
+      case 'qa verdict is not pass':
+        return 'QA did not pass this pull request.';
+      case 'evidence accepted':
+        return 'Gate passed. Both reports are valid.';
+      default:
+        return 'The merge gate is not open yet.';
+    }
   }
 
   const agentName = agents.find((agent) => agent.id === ticket?.assignedSkillId)?.realName ?? 'Unassigned';
@@ -150,9 +184,9 @@ export default function TicketDetailPage() {
                 {ticket.scheduleState === 'overdue' && <Badge tone="warn">Overdue</Badge>}
               </div>
               <p>{ticket.statusReason || 'No blocking message.'}</p>
-              {pr?.pr_url ? (
-                <a className="text-primary" data-testid="ticket-pr" href={pr.pr_url} target="_blank" rel="noreferrer">
-                  {pr.pr_number ? `PR #${pr.pr_number}` : 'Pull request'}
+              {safeHref(pr?.pr_url) ? (
+                <a className="text-primary" data-testid="ticket-pr" href={safeHref(pr?.pr_url) ?? undefined} target="_blank" rel="noreferrer">
+                  {pr?.pr_number ? `PR #${pr.pr_number}` : 'Pull request'}
                 </a>
               ) : <p>No pull request yet.</p>}
             </CardContent>
@@ -185,13 +219,14 @@ export default function TicketDetailPage() {
               <CardTitle className="text-base">Evidence</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <p data-testid="evidence-gate">{reports?.gate.ok ? 'Gate passed. Both reports are valid.' : (reports?.gate.reason ?? 'Reports are not ready.')}</p>
+              <p data-testid="evidence-gate">{gateCopy(reports?.gate)}</p>
               <p>Dev report: {reports?.dev ? (reports.dev.valid ? 'valid' : 'invalid') : 'missing'}. QA report: {reports?.qa ? (reports.qa.valid ? 'valid' : 'invalid') : 'missing'}.</p>
+              {reportError && <ErrorNote>{reportError}</ErrorNote>}
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" data-testid="download-dev-md" onClick={() => void downloadApi(`/tickets/${ticket.id}/reports/dev.md`, 'dev-report.md')}>Dev .md</Button>
-                <Button type="button" size="sm" variant="outline" data-testid="download-dev-pdf" onClick={() => void downloadApi(`/tickets/${ticket.id}/reports/dev.pdf`, 'dev-report.pdf')}>Dev .pdf</Button>
-                <Button type="button" size="sm" variant="outline" data-testid="download-qa-md" onClick={() => void downloadApi(`/tickets/${ticket.id}/reports/qa.md`, 'qa-report.md')}>QA .md</Button>
-                <Button type="button" size="sm" variant="outline" data-testid="download-qa-pdf" onClick={() => void downloadApi(`/tickets/${ticket.id}/reports/qa.pdf`, 'qa-report.pdf')}>QA .pdf</Button>
+                <Button type="button" size="sm" variant="outline" data-testid="download-dev-md" disabled={reports != null && !reports.dev} onClick={() => void downloadReport(`/tickets/${ticket.id}/reports/dev.md`, 'dev-report.md')}>Dev .md</Button>
+                <Button type="button" size="sm" variant="outline" data-testid="download-dev-pdf" disabled={reports != null && !reports.dev} onClick={() => void downloadReport(`/tickets/${ticket.id}/reports/dev.pdf`, 'dev-report.pdf')}>Dev .pdf</Button>
+                <Button type="button" size="sm" variant="outline" data-testid="download-qa-md" disabled={reports != null && !reports.qa} onClick={() => void downloadReport(`/tickets/${ticket.id}/reports/qa.md`, 'qa-report.md')}>QA .md</Button>
+                <Button type="button" size="sm" variant="outline" data-testid="download-qa-pdf" disabled={reports != null && !reports.qa} onClick={() => void downloadReport(`/tickets/${ticket.id}/reports/qa.pdf`, 'qa-report.pdf')}>QA .pdf</Button>
               </div>
             </CardContent>
           </Card>
@@ -202,8 +237,11 @@ export default function TicketDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={chain?.ok ? 'ok' : 'warn'} data-testid="chain-status">
-                  {chain?.ok ? 'Hash chain verified' : `Hash chain broken${chain?.brokenAt ? ` at ${chain.brokenAt}` : ''}`}
+                <Badge tone={chainState === 'verified' ? 'ok' : chainState === 'loading' ? 'neutral' : 'warn'} data-testid="chain-status">
+                  {chainState === 'loading' && 'Verifying hash chain'}
+                  {chainState === 'error' && 'Could not verify the hash chain'}
+                  {chainState === 'verified' && `Hash chain verified${chain?.truncated ? ' for the first 5000 events' : ''}`}
+                  {chainState === 'broken' && `Hash chain broken at ${chain?.brokenAt ?? 'unknown'}`}
                 </Badge>
                 <Button type="button" size="sm" variant="outline" data-testid="export-markdown" onClick={() => void exportLog('markdown')}>Export Markdown</Button>
                 <Button type="button" size="sm" variant="outline" data-testid="export-json" onClick={() => void exportLog('json')}>Export JSON</Button>

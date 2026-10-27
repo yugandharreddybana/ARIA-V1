@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/auth.context';
 import { api, ApiError } from '@/lib/api';
+import { parseMonthlyBudget } from '@aria/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorNote } from '@/components/ui/empty-state';
@@ -71,14 +72,19 @@ export default function SettingsPage() {
   async function saveBudget(event: React.FormEvent) {
     event.preventDefault();
     setNotice('');
+    const parsed = parseMonthlyBudget(budgetInput);
+    if (!parsed.ok) {
+      setError('Enter a positive whole number, such as 1000 or 1,000. Leave the field empty to use the workspace default.');
+      return;
+    }
     try {
       await api(`/projects/${projectId}/settings`, {
         method: 'PATCH',
-        body: JSON.stringify({ tokenBudgetMonthly: budgetInput.trim() ? Number(budgetInput) : null }),
+        body: JSON.stringify({ tokenBudgetMonthly: parsed.value }),
       });
       const next = await api<Budget>(`/projects/${projectId}/budget`);
       setBudget(next);
-      setNotice('Budget saved.');
+      setNotice(parsed.value == null ? 'Budget cleared. The workspace default applies.' : 'Budget saved.');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save the budget.');
     }

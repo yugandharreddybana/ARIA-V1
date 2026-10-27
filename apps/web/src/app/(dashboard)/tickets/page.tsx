@@ -18,7 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Ticket, TicketType, TicketStatus } from '@aria/shared';
+import { ticketFromSocket, safeHref, type Ticket, type TicketType, type TicketStatus } from '@aria/shared';
+import { PageErrorBoundary } from '@/components/ui/error-boundary';
 import { stageLabel, scheduleTone } from '@/lib/ticket-stage';
 import { rememberProject, rememberedProject } from '@/lib/project-selection';
 import { Zap } from 'lucide-react';
@@ -52,7 +53,7 @@ const NEXT_STATUS: Partial<Record<TicketStatus, TicketStatus>> = {
 
 interface FlowOption { id: string; name: string; flowKey: string }
 interface AgentOption { id: string; realName: string }
-interface RunHit { ticket_id: string | null; status: string; pr_url: string | null; pr_number: number | null; blocked_reason: string | null }
+interface RunSignal { ticketId: string; prUrl: string | null; prNumber: number | null; live: boolean; blockedReason: string | null }
 
 interface CreateTicketModalProps {
   projectId: string;
@@ -202,7 +203,7 @@ function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, o
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
-          {live && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Run in progress" />}
+          {live && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" role="img" aria-label="Run in progress" />}
           {isAgentCreated && (
             <Zap className="h-3 w-3 text-primary shrink-0" aria-label="Created by agent" />
           )}
@@ -220,8 +221,8 @@ function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, o
         {ticket.dueAt && <span className="text-xs text-muted-foreground">Due {new Date(ticket.dueAt).toLocaleDateString()}</span>}
       </div>
       <p className="text-xs text-muted-foreground">{agentName}</p>
-      {prUrl && <a className="text-xs text-primary" href={prUrl} target="_blank" rel="noreferrer">{prText}</a>}
-      {blockedReason && <p className="text-xs" role="status">{blockedReason}</p>}
+      {safeHref(prUrl) && <a className="text-xs text-primary" href={safeHref(prUrl) ?? undefined} target="_blank" rel="noreferrer">{prText}</a>}
+      {blockedReason && <p className="text-xs">{blockedReason}</p>}
       {ticket.description && (
         <p className="text-xs text-muted-foreground line-clamp-2">{ticket.description}</p>
       )}
@@ -255,7 +256,7 @@ function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, o
   );
 }
 
-export default function TicketsPage() {
+function TicketsPage() {
   const { user }                     = useAuth();
   const [projects, setProjects]      = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId]    = useState('');
@@ -265,7 +266,8 @@ export default function TicketsPage() {
   const [showCreate, setShowCreate]  = useState(false);
   const [flows, setFlows]            = useState<FlowOption[]>([]);
   const [agents, setAgents]          = useState<AgentOption[]>([]);
-  const [runs, setRuns]              = useState<RunHit[]>([]);
+  const [signals, setSignals]        = useState<RunSignal[]>([]);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track which project room we're currently joined so we can leave cleanly
   const joinedProjectRef = useRef<string>('');
@@ -310,9 +312,9 @@ export default function TicketsPage() {
     api<{ flows: FlowOption[]; agents: AgentOption[] }>(`/projects/${projectId}/company`)
       .then((data) => { setFlows(data.flows); setAgents(data.agents); })
       .catch(() => { setFlows([]); setAgents([]); });
-    api<{ runs: RunHit[] }>(`/projects/${projectId}/runs?limit=50`)
-      .then((data) => setRuns(data.runs))
-      .catch(() => setRuns([]));
+    api<{ signals: RunSignal[] }>(`/projects/${projectId}/run-signals`)
+      .then((data) => setSignals(data.signals))
+      .catch(() => setSignals([]));
   }, [projectId, loadTickets]);
 
   // ── Real-time WebSocket subscription for agent-created/updated tickets ──
@@ -336,25 +338,34 @@ export default function TicketsPage() {
 
   // ── Ticket event listeners (separate effect so they always use fresh state) ──
   useEffect(() => {
-    if (!lastEvent) return;
-
-    if ((lastEvent as { type: string }).type === 'ticket:created') {
-      const incoming = (lastEvent as unknown as { ticket: Ticket }).ticket;
-      if (incoming.projectId !== projectId) return;
-      setTickets(prev => {
-        if (prev.some(t => t.id === incoming.id)) return prev;
-        return [incoming, ...prev];
-      });
-    }
-
-    if ((lastEvent as { type: string }).type === 'ticket:updated') {
-      const incoming = (lastEvent as unknown as { ticket: Ticket }).ticket;
-      if (incoming.projectId !== projectId) return;
-      setTickets(prev => prev.map(t => t.id === incoming.id ? incoming : t));
-    }
-    if ((lastEvent as { type: string }).type === 'run:updated' && projectId) {
-      api<{ runs: RunHit[] }>(`/projects/${projectId}/runs?limit=50`).then((data) => setRuns(data.runs)).catch(() => undefined);
-      loadTickets(projectId);
+    if (!lastEvent || !projectId) return;
+    try {
+      if (lastEvent.type === 'ticket:created' || lastEvent.type === 'ticket:updated') {
+        const incoming = ticketFromSocket(lastEvent);
+        if (!incoming) return;
+        if (incoming.projectId && incoming.projectId !== projectId) return;
+        setTickets((prev) => {
+          const index = prev.findIndex((ticket) => ticket.id === incoming.id);
+          if (incoming.ticket && index >= 0) {
+            return prev.map((ticket) => ticket.id === incoming.id ? { ...ticket, ...incoming.ticket, status: (incoming.status as TicketStatus | undefined) ?? ticket.status } : ticket);
+          }
+          if (incoming.ticket && lastEvent.type === 'ticket:created' && (!incoming.projectId || incoming.projectId === projectId)) {
+            return [{ ...incoming.ticket, id: incoming.id, projectId, status: (incoming.status as TicketStatus | undefined) ?? 'backlog' } as Ticket, ...prev];
+          }
+          if (index < 0) return prev;
+          if (!incoming.status) return prev;
+          return prev.map((ticket) => ticket.id === incoming.id ? { ...ticket, status: incoming.status as TicketStatus } : ticket);
+        });
+      }
+      if (lastEvent.type === 'run:updated') {
+        if (refreshTimer.current) clearTimeout(refreshTimer.current);
+        refreshTimer.current = setTimeout(() => {
+          void api<{ signals: RunSignal[] }>(`/projects/${projectId}/run-signals`).then((data) => setSignals(data.signals)).catch(() => undefined);
+          void loadTickets(projectId);
+        }, 300);
+      }
+    } catch {
+      // A bad socket payload must not blank the board. The route error boundary covers render throws.
     }
   }, [lastEvent, projectId, loadTickets]);
 
@@ -446,18 +457,16 @@ export default function TicketsPage() {
                     <p className="pointer-events-none py-6 text-center text-xs text-muted-foreground/40">Empty</p>
                   ) : (
                     colTickets.map(t => {
-                      const related = runs.filter(run => run.ticket_id === t.id);
-                      const pr = related.find(run => run.pr_url);
-                      const blocked = related.find(run => run.status === 'blocked' && run.blocked_reason);
+                      const signal = signals.find((row) => row.ticketId === t.id);
                       return (
                       <TicketCard
                         key={t.id}
                         ticket={t}
                         agentName={agents.find(agent => agent.id === t.assignedSkillId)?.realName ?? 'Unassigned'}
-                        prUrl={pr?.pr_url ?? null}
-                        prNumber={pr?.pr_number ?? null}
-                        blockedReason={blocked?.blocked_reason ?? t.statusReason ?? null}
-                        live={related.some(run => run.status === 'running' || run.status === 'queued')}
+                        prUrl={signal?.prUrl ?? null}
+                        prNumber={signal?.prNumber ?? null}
+                        blockedReason={t.status === 'blocked' ? (signal?.blockedReason ?? t.statusReason ?? null) : null}
+                        live={Boolean(signal?.live)}
                         onStatusChange={handleStatusChange}
                         onAction={handleAction}
                       />
@@ -484,5 +493,13 @@ export default function TicketsPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function TicketsBoard() {
+  return (
+    <PageErrorBoundary>
+      <TicketsPage />
+    </PageErrorBoundary>
   );
 }

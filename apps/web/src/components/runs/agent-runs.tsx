@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
@@ -12,6 +12,7 @@ import { EmptyState, ErrorNote, LoadingState } from '@/components/ui/empty-state
 import { LogView, type LogLine } from '@/components/ui/log-view';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/table';
 import { rememberedProject, rememberProject } from '@/lib/project-selection';
+import { safeHref } from '@aria/shared';
 
 interface ProjectRow { id: string; name: string }
 interface AgentRow { id: string; realName: string }
@@ -61,6 +62,13 @@ function duration(run: RunRow): string {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+function mergeLines(current: LogLine[], incoming: LogLine[]): LogLine[] {
+  const map = new Map<number, LogLine>();
+  for (const line of current) map.set(line.seq, line);
+  for (const line of incoming) map.set(line.seq, line);
+  return [...map.values()].sort((a, b) => a.seq - b.seq);
+}
+
 function prLabel(url: string | null, number: number | null): string {
   if (number) return `PR #${number}`;
   if (!url) return '';
@@ -85,6 +93,8 @@ export function AgentRuns() {
   const [selected, setSelected] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [actionError, setActionError] = useState('');
+  const [historyDone, setHistoryDone] = useState(false);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     api<{ projects: ProjectRow[] }>('/projects')
@@ -126,32 +136,62 @@ export function AgentRuns() {
     return () => unsubscribe(`project:${projectId}`);
   }, [connected, projectId, subscribe, unsubscribe]);
 
+  const scheduleRefresh = useCallback((pid: string) => {
+    if (!pid) return;
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      void load(pid).catch(() => undefined);
+    }, 300);
+  }, [load]);
+
   useEffect(() => onEvent((event) => {
     if (event.type === 'budget:warn' && event.projectId === projectId) {
       setBudgetWarn(`Budget warning: ${event.used.toLocaleString()} of ${event.limit.toLocaleString()} tokens used this month.`);
+      setBudget((current) => current ? { ...current, used: event.used, limit: event.limit } : current);
     }
     if (event.type === 'run:updated') {
-      void load(projectId).catch(() => undefined);
+      setRuns((current) => {
+        const index = current.findIndex((run) => run.id === event.id);
+        if (index < 0) return current;
+        const next = current.slice();
+        next[index] = {
+          ...next[index],
+          status: event.status,
+          activity: event.activity || next[index].activity,
+          pr_url: event.prUrl ?? next[index].pr_url,
+          tokens_total: event.tokens ?? next[index].tokens_total,
+          error_code: event.error_code ?? next[index].error_code,
+        };
+        return next;
+      });
+      scheduleRefresh(projectId);
     }
     if (event.type === 'run:log' && event.runId === selected) {
-      setLogs((current) => {
-        const seen = new Set(current.map((line) => line.seq));
-        const next = event.lines.filter((line) => !seen.has(line.seq));
-        return next.length ? [...current, ...next].sort((a, b) => a.seq - b.seq) : current;
-      });
+      setLogs((current) => mergeLines(current, event.lines));
     }
-  }), [load, onEvent, projectId, selected]);
+  }), [onEvent, projectId, scheduleRefresh, selected]);
 
   const names = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.realName])), [agents]);
   const open = runs.find((run) => run.id === selected) ?? null;
   const children = open ? runs.filter((run) => run.parent_run_id === open.id) : [];
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      setLogs([]);
+      setHistoryDone(false);
+      return;
+    }
+    const runId = selected;
     setLogs([]);
-    api<LogResponse>(`/runs/${selected}/logs?afterSeq=0&limit=500`)
-      .then((data) => setLogs(data.lines))
-      .catch(() => setActionError('Could not load logs.'));
+    setHistoryDone(false);
+    let ignore = false;
+    api<LogResponse>(`/runs/${runId}/logs?tail=1&limit=500`)
+      .then((data) => {
+        if (ignore) return;
+        setLogs((current) => mergeLines(current, data.lines));
+      })
+      .catch(() => { if (!ignore) setActionError('Could not load logs.'); });
+    return () => { ignore = true; };
   }, [selected]);
 
   async function act(path: string) {
@@ -253,7 +293,7 @@ export function AgentRuns() {
                 }}
               >
                 <TD>
-                  <Badge tone={tone(run.status)}>{run.status}{run.blocked_reason ? ` · ${run.blocked_reason}` : ''}</Badge>
+                  <Badge data-testid="run-status" tone={tone(run.status)}>{run.status}{run.blocked_reason ? ` · ${run.blocked_reason}` : ''}</Badge>
                 </TD>
                 <TD>{run.activity}</TD>
                 <TD>{run.agent_id ? (names.get(run.agent_id) ?? 'Agent') : 'System'}</TD>
@@ -261,7 +301,7 @@ export function AgentRuns() {
                   {run.ticket_id ? <Link className="text-primary" href={`/tickets/${run.ticket_id}`} onClick={(event) => event.stopPropagation()}>Ticket</Link> : '—'}
                 </TD>
                 <TD>
-                  {run.pr_url ? <a className="text-primary" href={run.pr_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{prLabel(run.pr_url, run.pr_number)}</a> : '—'}
+                  {safeHref(run.pr_url) ? <a className="text-primary" href={safeHref(run.pr_url) ?? undefined} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{prLabel(run.pr_url, run.pr_number)}</a> : '—'}
                 </TD>
                 <TD>{run.model_id ?? '—'}</TD>
                 <TD>{run.tokens_total ?? '—'} / {run.tokens_reserved}</TD>
@@ -283,7 +323,7 @@ export function AgentRuns() {
             <div className="space-y-4" data-testid="run-detail">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={tone(open.status)}>{open.status}{open.error_code ? ` · ${open.error_code}` : ''}</Badge>
-                {open.external_url && <a className="text-sm text-primary" href={open.external_url} target="_blank" rel="noreferrer">Open in Cursor</a>}
+                {safeHref(open.external_url) && <a className="text-sm text-primary" href={safeHref(open.external_url) ?? undefined} target="_blank" rel="noreferrer">Open in Cursor</a>}
                 {(open.status === 'queued' || open.status === 'running') && (
                   <Button type="button" size="sm" variant="outline" data-testid="cancel-run" onClick={() => void act(`/runs/${open.id}/cancel`)}>Cancel</Button>
                 )}
@@ -295,7 +335,7 @@ export function AgentRuns() {
               <p className="text-sm">
                 Ticket {open.ticket_id ? <Link className="text-primary" href={`/tickets/${open.ticket_id}`}>open</Link> : '—'}
                 {' · '}Run <span className="font-mono">{open.id.slice(0, 8)}</span>
-                {' · '}{open.pr_url ? <a className="text-primary" href={open.pr_url} target="_blank" rel="noreferrer">{prLabel(open.pr_url, open.pr_number)}</a> : 'No pull request'}
+                {' · '}{safeHref(open.pr_url) ? <a className="text-primary" href={safeHref(open.pr_url) ?? undefined} target="_blank" rel="noreferrer">{prLabel(open.pr_url, open.pr_number)}</a> : 'No pull request'}
               </p>
               <p className="text-sm">Model {open.model_id ?? 'not chosen yet'}. Tokens {open.tokens_total ?? '—'} actual / {open.tokens_reserved} reserved.</p>
               {children.length > 0 && (
@@ -307,8 +347,13 @@ export function AgentRuns() {
                   ))}
                 </ul>
               )}
-              <LogView lines={logs} canLoadEarlier={logs.length > 0 && logs[0].seq > 1} onLoadEarlier={() => {
-                void api<LogResponse>(`/runs/${open.id}/logs?afterSeq=0&limit=500`).then((data) => setLogs(data.lines));
+              <LogView lines={logs} canLoadEarlier={!historyDone && logs.length > 0 && logs.length < 2000 && logs[0].seq > 1} onLoadEarlier={() => {
+                const first = logs[0];
+                if (!first || logs.length >= 2000) return;
+                void api<LogResponse>(`/runs/${open.id}/logs?beforeSeq=${first.seq}&limit=500`).then((data) => {
+                  if (data.lines.length === 0) setHistoryDone(true);
+                  setLogs((current) => mergeLines(data.lines, current).slice(0, 2000));
+                }).catch(() => setActionError('Could not load earlier logs.'));
               }} />
             </div>
           </DialogContent>

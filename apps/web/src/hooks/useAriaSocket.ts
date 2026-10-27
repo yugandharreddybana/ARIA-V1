@@ -20,8 +20,8 @@ export type AriaSocketEvent =
   | { type: 'token.warn'; sessionId: string; projected: number; warnLimit: number }
   | { type: 'token.hard_stop'; sessionId: string; projected: number; hardLimit: number }
   | { type: 'queue.depth'; data: { totalQueueDepth: number; acceptingRequests: boolean } }
-  | { type: 'ticket:created'; ticket: Record<string, unknown> }
-  | { type: 'ticket:updated'; ticket: Record<string, unknown> }
+  | { type: 'ticket:created'; ticket?: Record<string, unknown>; id?: string; status?: string; projectId?: string }
+  | { type: 'ticket:updated'; ticket?: Record<string, unknown>; id?: string; status?: string; projectId?: string }
   | { type: 'run:updated'; id: string; status: string; activity: string; agentId?: string | null; ticketId?: string | null; prUrl?: string | null; tokens?: number | null; error_code?: string | null }
   | { type: 'run:log'; runId: string; lines: Array<{ seq: number; kind: string; message: string; ts: string }> }
   | { type: 'budget:warn'; projectId: string; used: number; limit: number }

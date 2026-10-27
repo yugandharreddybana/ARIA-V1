@@ -101,6 +101,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [archiving, setArchiving] = useState<Project | null>(null);
@@ -149,7 +150,7 @@ export default function ProjectsPage() {
                 <p className="text-xs text-muted-foreground">{(p as { repos?: unknown[] }).repos?.length ?? 0} repositories</p>
                 <div className="flex gap-2">
                   <Button type="button" size="sm" variant="outline" data-testid="rename-project" onClick={() => setRenaming(p)}>Rename</Button>
-                  <Button type="button" size="sm" variant="ghost" data-testid="archive-project" disabled={p.status === 'archived'} onClick={() => setArchiving(p)}>Archive</Button>
+                  <Button type="button" size="sm" variant="ghost" data-testid="archive-project" disabled={p.status === 'archived'} onClick={() => { setArchiveError(''); setArchiving(p); }}>Archive</Button>
                 </div>
               </CardContent>
             </Card>
@@ -175,6 +176,7 @@ export default function ProjectsPage() {
       {archiving && (
         <Dialog open onOpenChange={(open) => { if (!open) setArchiving(null); }}>
           <DialogContent title="Archive project" description={`${archiving.name} stays in the database and drops off active work.`}>
+            {archiveError && <ErrorNote>{archiveError}</ErrorNote>}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setArchiving(null)}>Cancel</Button>
               <Button
@@ -187,7 +189,7 @@ export default function ProjectsPage() {
                       setProjects((current) => current.map((item) => item.id === id ? { ...item, status: 'archived' } : item));
                       setArchiving(null);
                     })
-                    .catch(() => setError('Could not archive the project.'));
+                    .catch(() => setArchiveError('Could not archive the project.'));
                 }}
               >
                 Archive
