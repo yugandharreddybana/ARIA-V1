@@ -482,9 +482,8 @@ async function uiSuite() {
           `docs=${docsText} pr=${prText}`,
         );
 
+        await page.getByTestId('org-agent-picker').selectOption({ label: /Chief Executive Officer/ });
         const ceo = page.locator('[data-testid^="agent-ceo"]').first();
-        await ceo.scrollIntoViewIfNeeded();
-        await ceo.click({ force: true });
         await page.getByTestId('agent-instructions').fill('Own the company priorities.');
         await page.getByTestId('save-agent').click();
         await page.getByText('Own the company priorities.').waitFor({ timeout: 10000 }).catch(() => undefined);
