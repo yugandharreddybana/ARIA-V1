@@ -28,16 +28,23 @@ const cal: WorkCalendar = {
 };
 
 describe('daysToPoints and sprint working days', () => {
-  it('maps day estimates through the single daysToPoints function', () => {
-    expect(daysToPoints(0.5)).toBe(1);
+  it('rounds up to the nearest Fibonacci at or above (owner-confirmed)', () => {
+    // Exact cases the owner named: 1, 2, 3, 4, 5, 8
     expect(daysToPoints(1)).toBe(1);
-    expect(daysToPoints(1.1)).toBe(2);
+    expect(daysToPoints(2)).toBe(2);
+    expect(daysToPoints(3)).toBe(3);
     expect(daysToPoints(4)).toBe(5);
+    expect(daysToPoints(5)).toBe(5);
     expect(daysToPoints(8)).toBe(8);
-    expect(daysToPoints(9)).toBe(13);
-    expect(daysToPoints(20)).toBe(13);
     expect(isStoryPoint(daysToPoints(3))).toBe(true);
     expect(ceilFib(4)).toBe(daysToPoints(4));
+  });
+
+  it('still ceils fractional and out-of-band day estimates', () => {
+    expect(daysToPoints(0.5)).toBe(1);
+    expect(daysToPoints(1.1)).toBe(2);
+    expect(daysToPoints(9)).toBe(13);
+    expect(daysToPoints(20)).toBe(13);
   });
 
   it('keeps due dates as 1 point = 1 working day after daysToPoints', () => {

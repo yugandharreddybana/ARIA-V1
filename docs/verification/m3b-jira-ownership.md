@@ -62,4 +62,4 @@ M3B delivers Flyway **V22** + Drizzle mirrors for epic/story/sub-task hierarchy,
 1. Project timezone / `sprint_workdays` columns remain M3A V21; M3B uses env `ARIA_SPRINT_WORKDAYS=10` and `ARIA_AGENT_WIP_LIMIT=1`.
 2. No dedicated Ownership settings tab / git-diff path inference UI (M3D/G); ownership is established via merge predicted paths + path-owner APIs.
 3. Mobile sprint form uses column layout so the create button is not covered by field hit-targets under the mobile chrome.
-4. Day→points mapping held at current ceilFib behavior inside `daysToPoints` pending owner confirmation of alternate Fib rules.
+4. Day→points uses owner-confirmed ceilFib inside `daysToPoints` (1→1, 2→2, 3→3, 4→5, 5→5, 8→8).

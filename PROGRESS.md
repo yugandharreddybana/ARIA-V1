@@ -23,7 +23,7 @@ Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 
 
 Branch: `cursor/m3b-jira-ownership-49c8`. M3_PLAN.md rev 4 slice **M3B / V22** only (parallel with M3A V21 — providers untouched). Base: `main`.
 
-Shipped: Flyway V22 (epic/story/sub_task, G/W/T AC, sprints, path_owners, ownership_handoffs, extended ticket_events, nullable idea_card_id); shared Zod AC + `ceilFib`; WIP=1; 10-working-day sprints; sprint/backlog/path-owner APIs; Board/Backlog/Sprint UI + story detail (AC, sub-tasks, owner); unit/integration/Playwright ×3; `docs/verification/m3b-jira-ownership.{md,pdf}`.
+Shipped: Flyway V22 (epic/story/sub_task, G/W/T AC, sprints, path_owners, ownership_handoffs, extended ticket_events, nullable idea_card_id); shared Zod AC + owner-confirmed `daysToPoints`/`ceilFib` (1→1, 2→2, 3→3, 4→5, 5→5, 8→8); WIP=1; 10-working-day sprints; sprint/backlog/path-owner APIs; Board/Backlog/Sprint UI + story detail (AC, sub-tasks, owner); unit/integration/Playwright ×3; `docs/verification/m3b-jira-ownership.{md,pdf}`.
 
 ### Verified locally on 2026-10-27
 

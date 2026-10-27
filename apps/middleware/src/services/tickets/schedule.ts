@@ -28,7 +28,8 @@ export function splitSuggested(points: number): boolean {
 }
 
 /**
- * Single day→points mapping. Change this body when the owner confirms a different rule.
+ * Single day→points mapping (owner-confirmed): round up to the nearest Fibonacci
+ * at or above — 1→1, 2→2, 3→3, 4→5, 5→5, 8→8 (and 9+→13, capped at 13).
  * Stored points stay 1 pt = 1 working day for schedule math.
  */
 export function daysToPoints(days: number): StoryPoint {
@@ -39,7 +40,7 @@ export function daysToPoints(days: number): StoryPoint {
   return 13;
 }
 
-/** @deprecated Prefer `daysToPoints` — kept as the ceilFib alias from M3_PLAN. */
+/** M3_PLAN name for `daysToPoints` (same mapping). */
 export function ceilFib(days: number): StoryPoint {
   return daysToPoints(days);
 }
