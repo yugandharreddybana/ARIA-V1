@@ -482,7 +482,8 @@ async function uiSuite() {
           `docs=${docsText} pr=${prText}`,
         );
 
-        await page.getByTestId('org-agent-picker').selectOption({ label: /Chief Executive Officer/ });
+        const ceoOption = page.locator('[data-testid="org-agent-picker"] option').filter({ hasText: 'Chief Executive Officer' });
+        await page.getByTestId('org-agent-picker').selectOption({ value: await ceoOption.getAttribute('value') });
         const ceo = page.locator('[data-testid^="agent-ceo"]').first();
         await page.getByTestId('agent-instructions').fill('Own the company priorities.');
         await page.getByTestId('save-agent').click();

@@ -32,7 +32,8 @@ test('signup through org chart with mock providers', async ({ page }) => {
 
   await expect(page.getByTestId('org-chart')).toBeVisible();
   // Prefer picker: denser D13 charts push nodes off-screen on tablet/mobile.
-  await page.getByTestId('org-agent-picker').selectOption({ label: /Chief Executive Officer/ });
+  const ceoOption = page.locator('[data-testid="org-agent-picker"] option').filter({ hasText: 'Chief Executive Officer' });
+  await page.getByTestId('org-agent-picker').selectOption({ value: await ceoOption.getAttribute('value') as string });
   const ceo = page.locator('[data-testid^="agent-ceo"]').first();
   await page.getByTestId('agent-instructions').fill('Own the company priorities. Stay off when disabled.');
   const save = page.waitForResponse((res) => res.url().includes('/agents/') && res.request().method() === 'PATCH' && res.ok());
