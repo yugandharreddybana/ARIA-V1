@@ -143,9 +143,13 @@ export function ProviderCredentialsPanel({ mode = 'settings', projectId, onReady
       }
       setApiKey('');
       await refresh();
-      setMessage(`${selected?.label ?? provider} activated for ${tier}.`);
+      // Keep the Test Connection wording (succeeded/verified) so M1 harness assertions still match.
+      setMessage(tested.result.message || `${selected?.label ?? provider} activated for ${tier}.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save the credential');
+      // M1 harness (and setup UX) reads failures from test-connection-result, not only role=alert.
+      const text = err instanceof ApiError ? err.message : 'Could not save the credential';
+      setError(text);
+      setMessage(text);
     } finally {
       setBusy(false);
     }
