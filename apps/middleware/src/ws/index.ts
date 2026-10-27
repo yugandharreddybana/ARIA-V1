@@ -17,8 +17,10 @@ import jwt from 'jsonwebtoken';
 import { getJwtPublicKeyPem } from '../config/jwt';
 import { validateEnv } from '../config/env';
 import { getTokenGateway } from '../services/tokenGateway.factory';
+import { z } from 'zod';
 import { db, projects } from '@aria/db';
 import { and, eq } from 'drizzle-orm';
+import { getPgPool } from '../services/db.client';
 
 export interface AriaSocketUser {
   userId: string;
@@ -85,10 +87,25 @@ export function createWsServer(httpServer: HttpServer): IOServer {
     // ── Legacy subscribe / unsubscribe (session.*, agent.*, system.health) ──
     socket.on('subscribe', (payload: { room: string }) => {
       if (!payload?.room) return;
-      if (!payload.room.startsWith('session.') &&
-          !payload.room.startsWith('agent.')   &&
-          payload.room !== 'system.health') return;
-      socket.join(payload.room);
+      if (payload.room === 'system.health') {
+        socket.join(payload.room);
+        return;
+      }
+      const session = /^session\.([0-9a-f-]{36})$/i.exec(payload.room);
+      const agent = /^agent\.([0-9a-f-]{36})$/i.exec(payload.room);
+      if (!session && !agent) return;
+      const id = (session ?? agent)![1];
+      if (!z.string().uuid().safeParse(id).success) return;
+      const sql = session
+        ? `SELECT 1 FROM sessions s
+             LEFT JOIN projects p ON p.id = s.project_id
+            WHERE s.id = $1::uuid AND (s.workspace_id = $2::uuid OR p.workspace_id = $2::uuid)`
+        : `SELECT 1 FROM skills s
+             JOIN projects p ON p.id = s.project_id
+            WHERE s.id = $1::uuid AND p.workspace_id = $2::uuid`;
+      void getPgPool().query(sql, [id, user.workspaceId]).then((result) => {
+        if (result.rowCount) socket.join(payload.room);
+      }).catch(() => undefined);
     });
 
     socket.on('unsubscribe', (payload: { room: string }) => {

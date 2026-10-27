@@ -519,4 +519,55 @@ describe('review acceptance', () => {
     getIO().close();
     await new Promise<void>((resolve) => http.close(() => resolve()));
   });
+
+  it('does not join another workspace session or agent room', async () => {
+    const owner = await signup(`acc-room-${Date.now()}@aria.dev`);
+    const other = await signup(`acc-room-other-${Date.now()}@aria.dev`);
+    const project = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Rooms' });
+    const projectId = project.body.project.id as string;
+    const skill = await getPgPool().query<{ id: string }>(
+      `INSERT INTO skills (project_id, slug, real_name, role_title, name, role)
+       VALUES ($1, 'ceo', 'Ada Lovelace', 'CEO', 'Ada Lovelace', 'CEO') RETURNING id`,
+      [projectId],
+    );
+    const session = await getPgPool().query<{ id: string }>(
+      `INSERT INTO sessions (project_id, workspace_id) VALUES ($1, $2) RETURNING id`,
+      [projectId, owner.workspaceId],
+    );
+    const http: Server = createServer();
+    createWsServer(http);
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', () => resolve()));
+    const port = (http.address() as AddressInfo).port;
+    const connect = (token: string) => new Promise<Socket>((resolve, reject) => {
+      const socket = ioClient(`http://127.0.0.1:${port}`, { path: '/ws', auth: { token }, transports: ['websocket'] });
+      socket.once('hello', () => resolve(socket));
+      socket.once('connect_error', reject);
+    });
+    const own = await connect(owner.token);
+    const foreign = await connect(other.token);
+    own.emit('subscribe', { room: `session.${session.rows[0].id}` });
+    own.emit('subscribe', { room: `agent.${skill.rows[0].id}` });
+    own.emit('subscribe', { room: 'session.not-a-uuid' });
+    foreign.emit('subscribe', { room: `session.${session.rows[0].id}` });
+    foreign.emit('subscribe', { room: `agent.${skill.rows[0].id}` });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const saw = (socket: Socket, event: string) => new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), 400);
+      socket.once(event, () => { clearTimeout(timer); resolve(true); });
+    });
+    const ownSession = saw(own, 'session.update');
+    const foreignSession = saw(foreign, 'session.update');
+    const ownAgent = saw(own, 'agent.status');
+    const foreignAgent = saw(foreign, 'agent.status');
+    getIO().to(`session.${session.rows[0].id}`).emit('session.update', { sessionId: session.rows[0].id });
+    getIO().to(`agent.${skill.rows[0].id}`).emit('agent.status', { agentId: skill.rows[0].id });
+    expect(await ownSession).toBe(true);
+    expect(await ownAgent).toBe(true);
+    expect(await foreignSession).toBe(false);
+    expect(await foreignAgent).toBe(false);
+    own.close();
+    foreign.close();
+    getIO().close();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+  });
 });

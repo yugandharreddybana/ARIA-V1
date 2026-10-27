@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { db } from '@aria/db';
 import { tickets, projects } from '@aria/db';
 import { eq, and } from 'drizzle-orm';
@@ -15,6 +16,19 @@ import { workspaceCursorKey } from './models/cursorKey';
 
 function sanitise(s: string, max: number): string {
   return s.trim().slice(0, max);
+}
+
+export async function getTicket(ticketId: string, workspaceId: string) {
+  if (!z.string().uuid().safeParse(ticketId).success) {
+    throw new AppError('id must be a uuid', 400, 'VALIDATION_ERROR');
+  }
+  const existing = await db.query.tickets.findFirst({ where: eq(tickets.id, ticketId) });
+  if (!existing) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+  const project = await db.query.projects.findFirst({
+    where: and(eq(projects.id, existing.projectId), eq(projects.workspaceId, workspaceId)),
+  });
+  if (!project) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+  return existing;
 }
 
 export async function listTickets(projectId: string, workspaceId: string) {

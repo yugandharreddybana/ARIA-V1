@@ -11,6 +11,11 @@ export async function getProject(req: AriaRequest, res: Response, next: NextFunc
 export async function createProject(req: AriaRequest, res: Response, next: NextFunction) {
   try { res.status(201).json({ project: await svc.createProject(req.user!.workspaceId, req.body.name, req.body.description) }); } catch (e) { next(e); }
 }
+export async function updateProject(req: AriaRequest, res: Response, next: NextFunction) {
+  try {
+    res.json({ project: await svc.updateProject(req.params.id, req.user!.workspaceId, req.body) });
+  } catch (e) { next(e); }
+}
 export async function archiveProject(req: AriaRequest, res: Response, next: NextFunction) {
   try { await svc.archiveProject(req.params.id, req.user!.workspaceId); res.status(204).send(); } catch (e) { next(e); }
 }

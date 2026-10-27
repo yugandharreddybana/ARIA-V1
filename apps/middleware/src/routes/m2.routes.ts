@@ -10,13 +10,24 @@ import { list as listLogs } from '../services/runs/runLogs';
 import { codeWorkerFor } from '../services/models/codeWorker';
 import { workspaceCursorKey } from '../services/models/cursorKey';
 import { assertOwnerInvariant, setOwners, type FlowLayer, type FlowRole } from '../services/flows/flowOwners';
-import { appendTicketEvent, eventsToMarkdown, listTicketEvents } from '../services/tickets/ticketEvents';
-import { readReport } from '../services/evidence/reports';
-import { getBranch, readGithubToken } from '../services/githubClient.service';
+import { appendTicketEvent, eventsToMarkdown, listTicketEvents, verifyChain } from '../services/tickets/ticketEvents';
+import { evidenceAllowsMerge, latestReports, readReport } from '../services/evidence/reports';
+import { scopedMonthUsage } from '../services/runs/budget';
+import { validateEnv } from '../config/env';
+import { getBranch, githubFullName, readGithubToken } from '../services/githubClient.service';
 import { db, projects } from '@aria/db';
 import { and, eq } from 'drizzle-orm';
 
+const uuidSchema = z.string().uuid();
+
+function requireUuid(value: string | undefined, name: string): string {
+  const parsed = uuidSchema.safeParse(value);
+  if (!parsed.success) throw new AppError(`${name} must be a uuid`, 400, 'VALIDATION_ERROR');
+  return parsed.data;
+}
+
 async function ownedProject(projectId: string, workspaceId: string) {
+  requireUuid(projectId, 'projectId');
   const project = await db.query.projects.findFirst({
     where: and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)),
   });
@@ -25,6 +36,7 @@ async function ownedProject(projectId: string, workspaceId: string) {
 }
 
 async function ticketInWorkspace(ticketId: string, workspaceId: string) {
+  requireUuid(ticketId, 'id');
   const result = await getPgPool().query<{ id: string; project_id: string; ticket_key: string }>(
     `SELECT t.id, t.project_id, t.ticket_key
        FROM tickets t JOIN projects p ON p.id = t.project_id
@@ -37,11 +49,10 @@ async function ticketInWorkspace(ticketId: string, workspaceId: string) {
 
 const runsRouter = Router();
 runsRouter.use(requireAuth);
-const limitSchema = z.coerce.number().int().positive().max(100);
 const uuidQuery = z.string().uuid();
 
 function queryLimit(value: unknown, fallback: number, max = 100): number {
-  const parsed = limitSchema.max(max).safeParse(value ?? fallback);
+  const parsed = z.coerce.number().int().positive().max(max).safeParse(value ?? fallback);
   if (!parsed.success) throw new AppError('limit must be a positive integer', 400, 'VALIDATION_ERROR');
   return parsed.data;
 }
@@ -72,11 +83,64 @@ runsRouter.get('/:projectId/runs', async (req: AriaRequest, res, next) => {
     }
     params.push(limit);
     const rows = await getPgPool().query(
-      `SELECT id, status, activity, agent_id, ticket_id, pr_url, error_code, created_at
+      `SELECT id, status, activity, agent_id, ticket_id, parent_run_id, pr_url, pr_number, model_id,
+              tokens_reserved::int AS tokens_reserved, tokens_total::int AS tokens_total,
+              error_code, blocked_reason, external_url, started_at, finished_at, created_at
          FROM agent_runs WHERE ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
       params,
     );
     res.json({ runs: rows.rows });
+  } catch (err) { next(err); }
+});
+
+runsRouter.get('/:projectId/budget', async (req: AriaRequest, res, next) => {
+  try {
+    const project = await ownedProject(req.params.projectId, req.user!.workspaceId);
+    const env = validateEnv();
+    const projectScoped = project.tokenBudgetMonthly != null;
+    const usage = await scopedMonthUsage(req.user!.workspaceId, project.id, projectScoped);
+    const limit = project.tokenBudgetMonthly ?? env.ARIA_MONTHLY_TOKEN_BUDGET;
+    res.json({
+      limit,
+      projectLimit: project.tokenBudgetMonthly,
+      used: usage.used,
+      reserved: usage.reserved,
+      warnAt: Math.floor(limit * env.TOKEN_BUDGET_WARN_RATIO),
+    });
+  } catch (err) { next(err); }
+});
+
+runsRouter.get('/:projectId/run-signals', async (req: AriaRequest, res, next) => {
+  try {
+    await ownedProject(req.params.projectId, req.user!.workspaceId);
+    const rows = await getPgPool().query<{
+      ticket_id: string;
+      pr_url: string | null;
+      pr_number: number | null;
+      live: boolean;
+      latest_status: string | null;
+      latest_reason: string | null;
+    }>(
+      `SELECT ticket_id,
+              (ARRAY_AGG(pr_url ORDER BY created_at DESC) FILTER (WHERE pr_url IS NOT NULL))[1] AS pr_url,
+              (ARRAY_AGG(pr_number ORDER BY created_at DESC) FILTER (WHERE pr_url IS NOT NULL))[1] AS pr_number,
+              BOOL_OR(status IN ('queued', 'running')) AS live,
+              (ARRAY_AGG(status ORDER BY created_at DESC))[1] AS latest_status,
+              (ARRAY_AGG(blocked_reason ORDER BY created_at DESC))[1] AS latest_reason
+         FROM agent_runs
+        WHERE project_id = $1::uuid AND ticket_id IS NOT NULL
+        GROUP BY ticket_id`,
+      [req.params.projectId],
+    );
+    res.json({
+      signals: rows.rows.map((row) => ({
+        ticketId: row.ticket_id,
+        prUrl: row.pr_url,
+        prNumber: row.pr_number,
+        live: Boolean(row.live),
+        blockedReason: row.latest_status === 'blocked' ? row.latest_reason : null,
+      })),
+    });
   } catch (err) { next(err); }
 });
 
@@ -99,11 +163,11 @@ runsRouter.get('/:projectId/github-guard', async (req: AriaRequest, res, next) =
     let branch = { name: 'main', protected: true };
     try {
       const token = await readGithubToken(req.user!.workspaceId);
-      const repo = await getPgPool().query<{ repo_name: string }>(
-        `SELECT repo_name FROM project_repos WHERE project_id = $1::uuid LIMIT 1`,
+      const repo = await getPgPool().query<{ repo_name: string; repo_url: string }>(
+        `SELECT repo_name, repo_url FROM project_repos WHERE project_id = $1::uuid LIMIT 1`,
         [project.id],
       );
-      if (repo.rows[0]) branch = await getBranch(token, repo.rows[0].repo_name);
+      if (repo.rows[0]) branch = await getBranch(token, githubFullName(repo.rows[0].repo_name, repo.rows[0].repo_url));
     } catch {
       branch = { name: 'main', protected: false };
     }
@@ -161,6 +225,7 @@ const ownersSchema = z.object({
 runsRouter.put('/:projectId/flows/:flowId/owners', validate(ownersSchema), async (req: AriaRequest, res, next) => {
   try {
     await ownedProject(req.params.projectId, req.user!.workspaceId);
+    requireUuid(req.params.flowId, 'flowId');
     const flow = await getPgPool().query(`SELECT id FROM business_flows WHERE id = $1::uuid AND project_id = $2::uuid`, [req.params.flowId, req.params.projectId]);
     if (!flow.rows[0]) throw new AppError('Flow not found', 404, 'NOT_FOUND');
     const owners = req.body.owners as Array<{ agentId: string; layer: FlowLayer; role: FlowRole }>;
@@ -174,6 +239,7 @@ const runRouter = Router();
 runRouter.use(requireAuth);
 runRouter.get('/:runId', async (req: AriaRequest, res, next) => {
   try {
+    requireUuid(req.params.runId, 'runId');
     const run = await getRun(req.params.runId);
     if (!run || run.workspace_id !== req.user!.workspaceId) throw new AppError('Run not found', 404, 'NOT_FOUND');
     res.json({ run });
@@ -181,16 +247,30 @@ runRouter.get('/:runId', async (req: AriaRequest, res, next) => {
 });
 runRouter.get('/:runId/logs', async (req: AriaRequest, res, next) => {
   try {
+    requireUuid(req.params.runId, 'runId');
     const run = await getRun(req.params.runId);
     if (!run || run.workspace_id !== req.user!.workspaceId) throw new AppError('Run not found', 404, 'NOT_FOUND');
     const after = z.coerce.number().int().nonnegative().safeParse(req.query.afterSeq ?? 0);
     if (!after.success) throw new AppError('afterSeq must be a non-negative integer', 400, 'VALIDATION_ERROR');
-    const lines = await listLogs(run.id, after.data, queryLimit(req.query.limit, 200, 500));
+    let beforeSeq: number | undefined;
+    if (req.query.beforeSeq != null) {
+      const before = z.coerce.number().int().positive().safeParse(req.query.beforeSeq);
+      if (!before.success) throw new AppError('beforeSeq must be a positive integer', 400, 'VALIDATION_ERROR');
+      beforeSeq = before.data;
+    }
+    const tail = req.query.tail === '1' || req.query.tail === 'true';
+    const lines = await listLogs(run.id, {
+      afterSeq: after.data,
+      beforeSeq,
+      tail,
+      limit: queryLimit(req.query.limit, tail || beforeSeq != null ? 500 : 200, 2000),
+    });
     res.json({ lines });
   } catch (err) { next(err); }
 });
 runRouter.post('/:runId/cancel', async (req: AriaRequest, res, next) => {
   try {
+    requireUuid(req.params.runId, 'runId');
     const run = await getRun(req.params.runId);
     if (!run || run.workspace_id !== req.user!.workspaceId) throw new AppError('Run not found', 404, 'NOT_FOUND');
     if (run.external_agent_id && run.external_run_id) {
@@ -204,6 +284,7 @@ runRouter.post('/:runId/cancel', async (req: AriaRequest, res, next) => {
 });
 runRouter.post('/:runId/retry', async (req: AriaRequest, res, next) => {
   try {
+    requireUuid(req.params.runId, 'runId');
     const run = await getRun(req.params.runId);
     if (!run || run.workspace_id !== req.user!.workspaceId) throw new AppError('Run not found', 404, 'NOT_FOUND');
     if (run.status !== 'failed' && run.status !== 'cancelled' && run.status !== 'blocked') {
@@ -267,7 +348,9 @@ ticketExtra.get('/:id/events', async (req: AriaRequest, res, next) => {
       afterSeq: cursor.data,
       limit: queryLimit(req.query.limit, 100, 500),
     });
-    res.json({ events });
+    const chainRows = await listTicketEvents(req.params.id, { limit: 5000 });
+    const checked = verifyChain(chainRows);
+    res.json({ events, chain: { ...checked, truncated: chainRows.length >= 5000 } });
   } catch (err) { next(err); }
 });
 ticketExtra.get('/:id/events/export', async (req: AriaRequest, res, next) => {
@@ -301,6 +384,18 @@ ticketExtra.post('/:id/events', validate(eventSchema), async (req: AriaRequest, 
       detail: { ...(req.body.detail ?? {}), userId: req.user!.userId },
     });
     res.status(201).json({ event });
+  } catch (err) { next(err); }
+});
+ticketExtra.get('/:id/reports', async (req: AriaRequest, res, next) => {
+  try {
+    const ticket = await ticketInWorkspace(req.params.id, req.user!.workspaceId);
+    const latest = await latestReports(ticket.id);
+    const gate = await evidenceAllowsMerge(ticket.id);
+    res.json({
+      dev: latest.dev ? { valid: latest.dev.valid } : null,
+      qa: latest.qa ? { valid: latest.qa.valid } : null,
+      gate,
+    });
   } catch (err) { next(err); }
 });
 ticketExtra.get('/:id/reports/:file', async (req: AriaRequest, res, next) => {
