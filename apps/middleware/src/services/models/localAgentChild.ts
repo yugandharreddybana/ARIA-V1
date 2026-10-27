@@ -27,6 +27,7 @@ function stubText(prompt: string): string {
   if (prompt.includes('[[stub:env]]')) return JSON.stringify({ envKeys: Object.keys(process.env).sort() });
   if (prompt.includes('[[stub:points-bad]]')) return 'not json';
   if (prompt.includes('Estimate story points')) return '{"storyPoints":5}';
+  if (prompt.includes('[[stub:company-bad]]')) return 'not json';
   if (prompt.includes('[[stub:company-ok]]')) return COMPANY_OK;
   if (prompt.includes('[[stub:company-cycle]]')) {
     return JSON.stringify({ agents: [{ roleKey: 'ceo', realName: 'A', roleTitle: 'CEO', department: 'Leadership', managerIndex: 1, backupIndex: null, description: 'x', instructions: 'y', skills: [], flows: [] }, { roleKey: 'cto', realName: 'B', roleTitle: 'CTO', department: 'Engineering', managerIndex: 0, backupIndex: null, description: 'x', instructions: 'y', skills: [], flows: [] }] });
@@ -56,12 +57,61 @@ function stubText(prompt: string): string {
   return `stub planning\n${prompt.slice(0, 180)}`;
 }
 
+async function companyRoster(prompt: string): Promise<string | null> {
+  if (!prompt.includes('Return a company roster as JSON')) return null;
+  if (prompt.includes('[[stub:company-ok]]') || prompt.includes('[[stub:company-cycle]]') || prompt.includes('[[stub:company-bad]]')) return null;
+  const sizeMatch = /Seat count must be (\d+)/.exec(prompt);
+  const mixMatch = /Mix (\{.*?\})\./.exec(prompt);
+  if (!sizeMatch || !mixMatch) return null;
+  const tsSpecifier = '../companyGenerator.ts';
+  const jsSpecifier = '../companyGenerator.js';
+  let generate: typeof import('../companyGenerator').generateCompany;
+  try {
+    generate = (await import(tsSpecifier)).generateCompany;
+  } catch {
+    try {
+      generate = (await import(jsSpecifier)).generateCompany;
+    } catch {
+      return null;
+    }
+  }
+  let planned: ReturnType<typeof generate>;
+  try {
+    planned = generate({ size: Number(sizeMatch[1]), mix: JSON.parse(mixMatch[1]), seed: 'stub-roster' });
+  } catch {
+    return null;
+  }
+  const enabled = planned.agents.filter((agent) => agent.enabled);
+  const indexOf = (tempId: string | null) => (tempId == null ? -1 : enabled.findIndex((agent) => agent.tempId === tempId));
+  const ceo = enabled.findIndex((agent) => agent.roleKey === 'ceo');
+  const agents = enabled.map((agent, index) => {
+    let managerIndex = agent.roleKey === 'ceo' ? -1 : indexOf(agent.managerTempId);
+    if (agent.roleKey !== 'ceo' && managerIndex < 0) managerIndex = ceo;
+    let backupIndex = indexOf(agent.backupTempId);
+    if (backupIndex === index || backupIndex < 0) backupIndex = enabled.findIndex((_, other) => other !== index);
+    return {
+      roleKey: agent.roleKey,
+      realName: agent.realName,
+      roleTitle: agent.roleTitle,
+      department: agent.department,
+      managerIndex: managerIndex < 0 ? null : managerIndex,
+      backupIndex: backupIndex < 0 ? null : backupIndex,
+      description: agent.description,
+      instructions: agent.instructions,
+      skills: agent.skills,
+      flows: [] as Array<{ flowKey: string; layer: string; role: string }>,
+    };
+  });
+  return JSON.stringify({ agents });
+}
+
 async function handle(message: StartMessage): Promise<void> {
   if (!message || message.type !== 'start') return;
   const envKeys = Object.keys(process.env).sort();
   try {
     if (message.stub) {
-      reply({ type: 'result', text: stubText(message.prompt), envKeys });
+      const company = await companyRoster(message.prompt);
+      reply({ type: 'result', text: company ?? stubText(message.prompt), envKeys });
       return;
     }
     const jsSpecifier = './cursorSdkPlanner.js';

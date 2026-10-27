@@ -5,6 +5,7 @@ import { evidenceAllowsMerge } from '../evidence/reports';
 import { codeWorkerFor } from '../models/codeWorker';
 import { workspaceCursorKey } from '../models/cursorKey';
 import { enqueueOn, cancelForTicket, releaseHeldRuns, type HeldRun, type RunActivity, type RunRuntime } from '../runs/runQueue';
+import type { TicketStatusPatch } from '@aria/shared';
 import { emitProject } from '../runs/hub';
 import { routeTicket } from '../flows/flowOwners';
 import { appendTicketEvent } from './ticketEvents';
@@ -206,7 +207,8 @@ export async function applyTransition(ticketId: string, event: PipelineEvent, ex
         // The database row is already cancelled if the provider is unreachable.
       }
     }
-    emitProject(ticket.project_id, 'ticket:updated', { id: ticketId, status: next.status });
+    const patch: TicketStatusPatch = { id: ticketId, status: next.status, projectId: ticket.project_id };
+    emitProject(ticket.project_id, 'ticket:updated', patch);
     return { status: next.status };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* already closed */ }

@@ -12,6 +12,10 @@ export class AppError extends Error {
   }
 }
 
+function isInvalidUuid(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && 'code' in err && (err as { code: unknown }).code === '22P02');
+}
+
 /**
  * Central Express error handler.
  * Stack traces are stripped in production to prevent information leakage.
@@ -30,6 +34,15 @@ export function errorHandler(
       error: 'Validation failed',
       code: 'VALIDATION_ERROR',
       details: err.issues.map((issue) => ({ field: issue.path.join('.'), message: issue.message })),
+    });
+    return;
+  }
+
+  if (isInvalidUuid(err)) {
+    res.status(400).json({
+      success: false,
+      error: 'id must be a uuid',
+      code: 'VALIDATION_ERROR',
     });
     return;
   }

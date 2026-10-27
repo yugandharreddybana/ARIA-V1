@@ -11,7 +11,7 @@ import { decorateFlows, ownersOf, setOwners, type FlowLayer } from './flows/flow
 import { enqueue, blockQueuedForAgent, cancelRunningForAgent, unblockQueuedForAgent } from './runs/runQueue';
 import { codeWorkerFor } from './models/codeWorker';
 import { workspaceCursorKey } from './models/cursorKey';
-import { readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
+import { catalogModelIds, readTier, resolveModelRoute, taskTierMap, tierModelMap, type ModelTier, type TaskTierMap, type TierModelMap } from './modelTiers';
 
 export interface AgentView {
   id: string;
@@ -69,7 +69,7 @@ async function workspaceChoice(workspaceId: string) {
     provider: providerId(row?.llmProvider),
     model: row?.llmModel ?? null,
     tierModels: tierModelMap(row?.llmTierModels),
-    catalog: catalogIds(row?.llmModelCatalog),
+    catalog: catalogModelIds(row?.llmModelCatalog),
   };
 }
 
@@ -142,15 +142,6 @@ export async function getCompany(projectId: string, workspaceId: string) {
       entryPoints: flow.entryPoints,
     }))),
   };
-}
-
-function catalogIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item) => {
-    if (typeof item === 'string' && item.trim()) return [item];
-    if (item && typeof item === 'object' && 'id' in item && typeof item.id === 'string' && item.id.trim()) return [item.id];
-    return [];
-  });
 }
 
 export async function getKnowledge(projectId: string, workspaceId: string) {

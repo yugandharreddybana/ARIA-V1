@@ -129,7 +129,7 @@ export async function reserveRun(input: {
   } finally {
     client.release();
   }
-  await noteBudget(input.workspaceId, input.projectId ?? null, limit);
+  await noteBudget(input.workspaceId, input.projectId ?? null, limit, projectScoped);
   return { ok: true, reserved: estimate.reserve };
 }
 
@@ -143,19 +143,18 @@ export async function checkMidRun(spent: number, cap: number, workspaceRemaining
   }
 }
 
-export async function noteBudget(workspaceId: string, projectId: string | null, limit: number): Promise<void> {
-  if (!projectId || limit <= 0) return;
-  const ratio = validateEnv().TOKEN_BUDGET_WARN_RATIO;
-  const used = await usageOf(monthlyBucketId(workspaceId));
-  if (used / limit >= ratio) emitProject(projectId, 'budget:warn', { projectId, used, limit });
-}
-
-export async function workspaceMonthUsage(workspaceId: string): Promise<{ used: number; reserved: number }> {
+export async function scopedMonthUsage(
+  workspaceId: string,
+  projectId: string | null,
+  projectScoped: boolean,
+): Promise<{ used: number; reserved: number }> {
+  const backend = projectScoped && projectId ? `project:${projectId}` : null;
   const result = await getPgPool().query<{ used: string; reserved: string }>(
     `SELECT COALESCE(SUM(tokens_used), 0)::text AS used,
             COALESCE(SUM(tokens_reserved), 0)::text AS reserved
-       FROM token_ledger WHERE session_id = $1::uuid`,
-    [monthlyBucketId(workspaceId)],
+       FROM token_ledger
+      WHERE session_id = $1::uuid AND ($2::text IS NULL OR backend_id = $2)`,
+    [monthlyBucketId(workspaceId), backend],
   );
   return {
     used: Number(result.rows[0]?.used ?? 0),
@@ -163,13 +162,21 @@ export async function workspaceMonthUsage(workspaceId: string): Promise<{ used: 
   };
 }
 
-async function usageOf(sessionId: string): Promise<number> {
-  const result = await getPgPool().query<{ projected: string }>(
-    `SELECT COALESCE(SUM(tokens_used + tokens_reserved), 0)::text AS projected
-       FROM token_ledger WHERE session_id = $1::uuid`,
-    [sessionId],
-  );
-  return Number(result.rows[0]?.projected ?? 0);
+export async function noteBudget(
+  workspaceId: string,
+  projectId: string | null,
+  limit: number,
+  projectScoped = false,
+): Promise<void> {
+  if (!projectId || limit <= 0) return;
+  const ratio = validateEnv().TOKEN_BUDGET_WARN_RATIO;
+  const usage = await scopedMonthUsage(workspaceId, projectId, projectScoped);
+  const used = usage.used + usage.reserved;
+  if (used / limit >= ratio) emitProject(projectId, 'budget:warn', { projectId, used, limit });
+}
+
+export async function workspaceMonthUsage(workspaceId: string): Promise<{ used: number; reserved: number }> {
+  return scopedMonthUsage(workspaceId, null, false);
 }
 
 function runtimeBackend(activity: string): string {
@@ -207,7 +214,7 @@ export async function settleRun(input: {
       [monthlyBucketId(input.agentId), runtimeBackend(input.activity), input.actual, input.reserved],
     );
   }
-  if (input.projectId && input.limit) await noteBudget(input.workspaceId, input.projectId, input.limit);
+  if (input.projectId && input.limit) await noteBudget(input.workspaceId, input.projectId, input.limit, scoped);
 }
 
 export async function releaseRun(workspaceId: string, activity: string, reserved: number, agentId?: string | null, projectId?: string | null, projectScoped = false): Promise<void> {

@@ -140,6 +140,27 @@ export interface CatalogEntry {
   aliases?: string[];
 }
 
+/** Ids a caller may pin. Accepts the string list from Test Connection and the `{ id, aliases }` list stored after a catalog refresh. */
+export function catalogModelIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids: string[] = [];
+  for (const row of value) {
+    if (typeof row === 'string') {
+      const id = row.trim();
+      if (id) ids.push(id);
+      continue;
+    }
+    if (!row || typeof row !== 'object') continue;
+    const record = row as { id?: unknown; aliases?: unknown };
+    if (typeof record.id === 'string' && record.id.trim()) ids.push(record.id.trim());
+    if (!Array.isArray(record.aliases)) continue;
+    for (const alias of record.aliases) {
+      if (typeof alias === 'string' && alias.trim()) ids.push(alias.trim());
+    }
+  }
+  return ids;
+}
+
 const CURSOR_TOP_PREFERENCE = [
   'claude-opus-5',
   'gpt-5.5',
