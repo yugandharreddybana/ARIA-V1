@@ -27,6 +27,42 @@ export function splitSuggested(points: number): boolean {
   return points > 8;
 }
 
+/**
+ * Ceil a day estimate to the next Fibonacci story point.
+ * Only for day→points conversion; stored points stay 1 pt = 1 working day.
+ */
+export function ceilFib(days: number): StoryPoint {
+  if (!Number.isFinite(days) || days <= 0) return 1;
+  for (const point of STORY_POINTS) {
+    if (days <= point) return point;
+  }
+  return 13;
+}
+
+/** Add N working days (Sat/Sun off by default via cal.workdays). Returns YYYY-MM-DD in cal timezone. */
+export function addWorkingDays(startIsoDate: string, workingDays: number, cal: WorkCalendar): string {
+  if (!Number.isInteger(workingDays) || workingDays < 1) throw new Error('working days must be a positive integer');
+  const [y, m, d] = startIsoDate.split('-').map(Number);
+  let cursor = zonedDateTime(y, m, d, 12, 0, cal.timeZone);
+  let remaining = workingDays;
+  for (let guard = 0; guard < 4000 && remaining > 0; guard++) {
+    const parts = zonedParts(cursor, cal.timeZone);
+    if (cal.workdays.includes(parts.isoWeekday)) {
+      remaining -= 1;
+      if (remaining === 0) {
+        return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+      }
+    }
+    cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
+  }
+  throw new Error('could not place sprint end date');
+}
+
+/** Sprint length in working days (default 10). ends_on is the Nth working day from starts_on inclusive. */
+export function sprintEndsOn(startsOn: string, workdays: number, cal: WorkCalendar): string {
+  return addWorkingDays(startsOn, workdays, cal);
+}
+
 /** Length buckets. The planning agent replaces this when it creates the ticket. */
 export function estimatePoints(title: string, description: string): StoryPoint {
   const len = title.trim().length + description.trim().length;

@@ -2,7 +2,7 @@ import type { Response, NextFunction } from 'express';
 import type { AriaRequest } from '../middleware/auth.middleware';
 import { agentCreateTicket, agentUpdateTicketStatus } from '../services/agentTicket.service';
 import { getIO } from '../ws';
-import type { TicketStatus } from '@aria/shared';
+import type { AcceptanceCriterion, IssueType, TicketStatus, TicketType } from '@aria/shared';
 
 /**
  * POST /api/agent/tickets
@@ -26,6 +26,13 @@ export async function agentCreateTicketHandler(
       riskClass,
       affectedDomains,
       promptBlock,
+      issueType,
+      parentId,
+      epicId,
+      acceptanceCriteria,
+      predictedPaths,
+      storyPoints,
+      estimatedDays,
     } = req.body as {
       sessionId: string;
       skillId: string;
@@ -36,6 +43,13 @@ export async function agentCreateTicketHandler(
       riskClass?: 'A' | 'B' | 'C';
       affectedDomains?: string[];
       promptBlock?: unknown;
+      issueType?: IssueType;
+      parentId?: string | null;
+      epicId?: string | null;
+      acceptanceCriteria?: AcceptanceCriterion[];
+      predictedPaths?: string[];
+      storyPoints?: number;
+      estimatedDays?: number;
     };
 
     const ticket = await agentCreateTicket({
@@ -45,13 +59,19 @@ export async function agentCreateTicketHandler(
       projectId,
       title,
       description,
-      type: type as import('@aria/shared').TicketType,
+      type: type as TicketType,
       riskClass,
       affectedDomains,
       promptBlock,
+      issueType,
+      parentId,
+      epicId,
+      acceptanceCriteria,
+      predictedPaths,
+      storyPoints,
+      estimatedDays,
     });
 
-    // Real-time broadcast — both rooms may have listeners
     try {
       const io = getIO();
       io.to(`session.${sessionId}`).emit('ticket:created', { ticket });

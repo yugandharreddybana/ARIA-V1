@@ -2,7 +2,10 @@ import { db } from '@aria/db';
 import { tickets, projects, skills } from '@aria/db';
 import { eq, and } from 'drizzle-orm';
 import { AppError } from '../middleware/error.middleware';
-import type { TicketType, TicketStatus } from '@aria/shared';
+import type { AcceptanceCriterion, IssueType, TicketType, TicketStatus } from '@aria/shared';
+import { ceilFib, estimatePoints, splitSuggested } from './tickets/schedule';
+import { appendTicketEvent } from './tickets/ticketEvents';
+import { getPgPool } from './db.client';
 
 function sanitise(s: string, max: number): string {
   return s.trim().slice(0, max);
@@ -19,6 +22,13 @@ export interface AgentCreateTicketParams {
   riskClass?: 'A' | 'B' | 'C';
   affectedDomains?: string[];
   promptBlock?: unknown;
+  issueType?: IssueType;
+  parentId?: string | null;
+  epicId?: string | null;
+  acceptanceCriteria?: AcceptanceCriterion[];
+  predictedPaths?: string[];
+  storyPoints?: number;
+  estimatedDays?: number;
 }
 
 /**
@@ -46,6 +56,24 @@ export async function agentCreateTicket(params: AgentCreateTicketParams) {
   if (!params.description?.trim()) throw new AppError('description required', 400, 'VALIDATION_ERROR');
   if (!params.type)                throw new AppError('type required', 400, 'VALIDATION_ERROR');
 
+  const issueType: IssueType = params.issueType ?? (params.parentId ? 'sub_task' : 'story');
+  let parentId = params.parentId ?? null;
+  let epicId = params.epicId ?? null;
+  if (issueType === 'sub_task') {
+    if (!parentId) throw new AppError('sub_task requires parentId', 422, 'HIERARCHY');
+    const parent = await getPgPool().query<{ issue_type: string; epic_id: string | null; project_id: string }>(
+      `SELECT issue_type, epic_id, project_id FROM tickets WHERE id = $1::uuid`,
+      [parentId],
+    );
+    const row = parent.rows[0];
+    if (!row || row.project_id !== projectId) throw new AppError('Parent ticket not found', 404, 'NOT_FOUND');
+    if (row.issue_type !== 'story') throw new AppError('sub_task parent must be a story', 422, 'HIERARCHY');
+    if (!epicId) epicId = row.epic_id;
+  }
+
+  const points = params.storyPoints
+    ?? (params.estimatedDays != null ? ceilFib(params.estimatedDays) : estimatePoints(params.title, params.description));
+
   const [ticket] = await db
     .insert(tickets)
     .values({
@@ -60,8 +88,28 @@ export async function agentCreateTicket(params: AgentCreateTicketParams) {
       promptBlock: params.promptBlock ?? null,
       humanApproved: false,
       status: 'backlog' as TicketStatus,
+      issueType,
+      parentId,
+      epicId,
+      acceptanceCriteria: params.acceptanceCriteria ?? [],
+      predictedPaths: params.predictedPaths ?? [],
+      storyPoints: points,
+      splitSuggested: splitSuggested(points),
     })
     .returning();
+
+  if (ticket) {
+    await appendTicketEvent({
+      workspaceId,
+      projectId,
+      ticketId: ticket.id,
+      eventType: 'agent_action',
+      actorKind: 'agent',
+      agentId: skillId,
+      summary: issueType === 'sub_task' ? 'Agent created sub-task' : 'Agent created ticket',
+      detail: { issueType, parentId, epicId, storyPoints: points },
+    });
+  }
 
   return ticket;
 }

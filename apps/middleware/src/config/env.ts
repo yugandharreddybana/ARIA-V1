@@ -89,6 +89,10 @@ const envSchema = z.object({
   ARIA_LOCAL_FALLBACK: z.enum(['off', 'on']).default('off'),
   /** awaiting_merge does not count as an agent's one active task unless this is true. */
   ARIA_AWAITING_MERGE_COUNTS_ACTIVE: envFlag(false),
+  /** Active tickets per agent (excl. awaiting_merge unless ARIA_AWAITING_MERGE_COUNTS_ACTIVE). */
+  ARIA_AGENT_WIP_LIMIT: z.coerce.number().int().positive().default(1),
+  /** Working days in a sprint (Sat/Sun off via ARIA_WORKDAYS). */
+  ARIA_SPRINT_WORKDAYS: z.coerce.number().int().positive().default(10),
   /** ARIA-side Playwright capture. The coding/QA prompts always require before/after shots. */
   ARIA_QA_BROWSER: envFlag(false),
   /** Full LLM security-review stage. Off until M3. Secret and path guards still run. */

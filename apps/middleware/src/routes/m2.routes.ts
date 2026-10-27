@@ -338,7 +338,10 @@ ticketExtra.get('/:id/events', async (req: AriaRequest, res, next) => {
     }
     let eventType: string | undefined;
     if (typeof req.query.type === 'string' && req.query.type) {
-      const parsedType = z.enum(['status_change', 'agent_action', 'progress', 'communication', 'run_ref', 'owner_decision', 'schedule', 'evidence']).safeParse(req.query.type);
+      const parsedType = z.enum([
+        'status_change', 'agent_action', 'progress', 'communication', 'run_ref', 'owner_decision', 'schedule', 'evidence',
+        'mock_review', 'dep_verify', 'ceremony_ref', 'security_finding', 'agent_message', 'ownership_handoff', 'learning_proposal', 'readiness',
+      ]).safeParse(req.query.type);
       if (!parsedType.success) throw new AppError('type is not a ticket event', 400, 'VALIDATION_ERROR');
       eventType = parsedType.data;
     }
