@@ -354,7 +354,12 @@ async function uiSuite() {
 
         await page.goto(`${WEB}/projects`);
         await page.getByText('No projects yet').waitFor({ timeout: 10000 });
-        record('Projects', `empty state (${tag})`, true ? 'pass' : 'fail', await shot(page, `projects-empty-${tag}`));
+        record(
+          'Projects',
+          `empty state (${tag})`,
+          await page.getByText('No projects yet').isVisible() ? 'pass' : 'fail',
+          await shot(page, `projects-empty-${tag}`),
+        );
 
         await page.route('**/api/projects', async (route) => {
           try {
@@ -375,12 +380,22 @@ async function uiSuite() {
         await page.route('**/api/projects', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) }));
         await page.goto(`${WEB}/projects`);
         await page.getByText('Failed to load projects').waitFor({ timeout: 10000 });
-        record('Projects', `error state (${tag})`, true ? 'pass' : 'fail', await shot(page, `projects-error-${tag}`));
+        record(
+          'Projects',
+          `error state (${tag})`,
+          await page.getByText('Failed to load projects').isVisible() ? 'pass' : 'fail',
+          await shot(page, `projects-error-${tag}`),
+        );
         await page.unroute('**/api/projects');
 
         await page.goto(`${WEB}/projects`);
         await page.getByTestId('start-setup').click();
-        record('Setup', `projects page offers setup (${tag})`, true ? 'pass' : 'fail', await shot(page, `dashboard-empty-${tag}`));
+        record(
+          'Setup',
+          `projects page offers setup (${tag})`,
+          page.url().includes('/setup') || await page.getByTestId('setup-project-name').isVisible() ? 'pass' : 'fail',
+          await shot(page, `dashboard-empty-${tag}`),
+        );
         await page.getByTestId('setup-project-name').fill(`Setup ${tag}`);
         await page.getByRole('button', { name: 'Continue', exact: true }).click();
         await page.getByTestId('provider-cursor').waitFor();
