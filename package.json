@@ -25,7 +25,9 @@
     "knowledge-review": "pnpm -F @aria/middleware exec tsx ../../scripts/knowledge-review.ts",
     "model-transfer": "pnpm -F @aria/middleware exec tsx ../../scripts/model-transfer.ts",
     "anti-slop": "pnpm -F @aria/middleware exec tsx ../../tools/anti-slop-gate.ts",
-    "anti-test-dodging": "pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts"
+    "anti-test-dodging": "pnpm -F @aria/middleware exec tsx ../../tools/anti-test-dodging.ts",
+    "skills:sync": "node scripts/sync-agent-skills.mjs",
+    "skills:tokens": "node scripts/count-skill-tokens.mjs"
   },
   "devDependencies": {
     "turbo": "^2.0.4",

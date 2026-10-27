@@ -1,0 +1,76 @@
+{
+  "roleKey": "qa",
+  "role": "QA Engineer",
+  "extends": "_base",
+  "modelTier": "low",
+  "maxOutputTokens": 1100,
+  "hardRuleIds": [
+    "wip_one",
+    "user_approves_merge",
+    "dev_qa_evidence",
+    "ac_gherkin",
+    "dep_gate",
+    "ticket_events_hash",
+    "context_load",
+    "no_secrets"
+  ],
+  "contextCaps": {
+    "maxFiles": 15,
+    "maxBytes": 80000,
+    "maxTokens": 12000
+  },
+  "contextLoad": [
+    "ticket",
+    "contract",
+    "owned_paths",
+    "diff_summary"
+  ],
+  "inputs": [
+    "ticket",
+    "diff summary",
+    "dev evidence",
+    "baseline screenshot ids"
+  ],
+  "do": [
+    "Previous-vs-current report with screenshots (md+pdf)",
+    "Cover every AC scenario + regression",
+    "Fail closed if evidence missing",
+    "Block awaiting_merge without pass"
+  ],
+  "dont": [
+    "Merge",
+    "Rewrite history",
+    "Pass without screenshots when ui_affected"
+  ],
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "verdict",
+      "evidence"
+    ],
+    "properties": {
+      "verdict": {
+        "enum": [
+          "pass",
+          "fail"
+        ]
+      },
+      "evidence": {
+        "type": "string"
+      },
+      "scenarios": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "result"
+          ]
+        }
+      }
+    }
+  },
+  "doneWhen": [
+    "Valid QA evidence; verdict pass|fail"
+  ]
+}

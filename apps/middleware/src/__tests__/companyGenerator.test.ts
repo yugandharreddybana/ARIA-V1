@@ -8,20 +8,30 @@ describe('generateCompany', () => {
     const { agents } = generateCompany({ size: 10, mix, seed: 'project-a', flows: [] });
     const seated = agents.filter((agent) => agent.enabled);
     expect(seated).toHaveLength(10);
-    expect(agents.filter((agent) => !agent.enabled).map((agent) => agent.roleKey).sort()).toEqual(['documentation', 'pr_coordinator']);
+    const disabled = agents.filter((agent) => !agent.enabled).map((agent) => agent.roleKey).sort();
+    for (const role of ['ui_ux_designer', 'documentation', 'pr_coordinator', 'research', 'coach']) {
+      expect(disabled).toContain(role);
+    }
+    expect(agents.some((agent) => agent.roleKey === 'red_team')).toBe(true);
+    expect(agents.some((agent) => agent.roleKey === 'blue_team')).toBe(true);
     expect(agents.some((agent) => agent.roleKey === 'ceo' && agent.managerTempId === null)).toBe(true);
     expect(new Set(agents.map((agent) => agent.realName)).size).toBe(agents.length);
     expect(new Set(agents.map((agent) => agent.slug)).size).toBe(agents.length);
     for (const agent of agents) {
       expect(agent.instructions.length).toBeGreaterThan(40);
+      expect(agent.instructions).toContain('Extends: _base');
+      expect(agent.instructions).toContain('Never merge');
       if (agents.length > 1) expect(agent.backupTempId).not.toBe(agent.tempId);
     }
   });
 
-  it('keeps documentation and the PR coordinator on when the company has seats for them', () => {
+  it('keeps D13 seed extras on when the company has seats for them', () => {
     const { agents } = generateCompany({ size: 12, mix, seed: 'large', flows: [] });
-    expect(agents).toHaveLength(12);
-    expect(agents.filter((agent) => agent.roleKey === 'documentation' || agent.roleKey === 'pr_coordinator').every((agent) => agent.enabled)).toBe(true);
+    expect(agents.filter((agent) => agent.enabled)).toHaveLength(12);
+    const extras = ['ui_ux_designer', 'documentation', 'pr_coordinator', 'research', 'coach'] as const;
+    expect(agents.filter((agent) => extras.includes(agent.roleKey as typeof extras[number])).every((agent) => agent.enabled)).toBe(true);
+    expect(agents.some((agent) => agent.roleKey === 'red_team')).toBe(true);
+    expect(agents.some((agent) => agent.roleKey === 'blue_team')).toBe(true);
   });
 
   it('is deterministic for the same seed and assigns UI flows to a frontend owner', () => {

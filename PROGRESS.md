@@ -37,13 +37,17 @@ Shipped: Flyway V22 (epic/story/sub_task, G/W/T AC, sprints, path_owners, owners
 
 Branch: `cursor/m3a-providers-3ee9`. Slice **M3A / V21**: `provider_credentials`, active credential FKs, `runtime_kinds` FK, ProviderAdapter (Cursor / Claude Code / Codex / Antigravity / chat+Ollama), Test Connection activate gate, capability-filtered lists, setup/Settings UI, CI stubs. Report: `docs/verification/m3a-providers.md` (+ PDF).
 
+## Agent skills lean rewrite (this branch)
+
+Branch: `cursor/agent-skills-lean-97c8`. Lean role skills in `docs/agents/skills/` + `catalogue.generated.cjs`. Shared `_base` hard rules with role-mapped imperatives; `ui_ux_designer` added (M3 D13). `skills:sync --check` in CI. Verification: `docs/verification/agent-skills-rewrite.{md,pdf}`. Avoids #13/#15 migrations/services.
+
 ## Shadow-learning PR fallback (merged, PR #16)
 
 Prefer optional `SHADOW_LEARNING_PAT`, else push branch + compare link in `$GITHUB_STEP_SUMMARY` and exit 0; skip cleanly when there are no new lessons.
 
 ## Milestone 3 — plan (merged, PR #12)
 
-Branch: `cursor/m3-plan-b334`. Plan only: `docs/milestones/M3_PLAN.md` **rev 4** (no feature code). Base: main (#9+#11). Rev 4 re-review: DAG **A∥B → C → D∥E∥F** (E/F depend on C); reserved V21–V28; **`activity_kinds` / `runtime_kinds` FK** seeded in C/A so D/E/F never rewrite activity CHECK. Prior rev 3: idea_cards, red/blue lockdown, ownership, learning M3I, traceability.
+Plan: `docs/milestones/M3_PLAN.md` **rev 4**. Open feature PRs: #15 (M3A/V21), #13 (M3B/V22).
 
 ## Milestone 2 — frontend (merged, PR #11)
 

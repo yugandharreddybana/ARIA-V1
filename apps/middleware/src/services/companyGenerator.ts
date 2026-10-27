@@ -1,13 +1,16 @@
 /**
  * Single company generator for ARIA.
- * Produces a sized org of real-role agents. Instructions are templates so
- * generation works when the selected provider has no chat API (Cursor).
- * Later milestones (PRs, ceremonies, proposals, learning) attach to roleKey,
- * enabled, backupAgentId, and ownedFlowIds — they do not need a new table.
+ * Produces a sized org of real-role agents. Instructions come from lean
+ * docs/agents/skills/*.json (extends _base) so generation works without a chat API.
+ * Later milestones attach to roleKey, enabled, backupAgentId, ownedFlowIds.
  */
+
+// catalogue.generated.cjs loads in both CJS (vitest/tsc) and strip-types ESM child.
+import { composeInstructions } from './agentSkills/catalogue.generated.cjs';
 
 export const ROLE_KEYS = [
   'ceo', 'cfo', 'cto', 'business', 'product_owner', 'scrum_master',
+  'ui_ux_designer',
   'frontend', 'backend', 'fullstack', 'junior', 'aiml', 'qa', 'devops',
   'cybersecurity', 'red_team', 'blue_team', 'research', 'coach',
   'documentation', 'pr_coordinator',
@@ -140,6 +143,8 @@ function seatFor(roleKey: RoleKey, index: number): Seat {
       return { roleKey, roleTitle: 'Product Owner', department: 'Product', hierarchyLevel: 3, managerRole: 'ceo', skills: ['backlog', 'acceptance criteria', 'user value'] };
     case 'scrum_master':
       return { roleKey, roleTitle: 'Scrum Master', department: 'Delivery', hierarchyLevel: 3, managerRole: 'product_owner', skills: ['flow', 'blockers', 'ceremonies'] };
+    case 'ui_ux_designer':
+      return { roleKey, roleTitle: 'UI/UX Designer', department: 'Product', hierarchyLevel: 4, managerRole: 'product_owner', skills: ['html mocks', 'state coverage', 'design review'] };
     case 'frontend':
       return { roleKey, roleTitle: `Frontend Engineer${n}`, department: 'Engineering', hierarchyLevel: 5, managerRole: 'cto', skills: ['ui', 'accessibility', 'client state'] };
     case 'backend':
@@ -179,7 +184,10 @@ function leadershipFor(size: number): RoleKey[] {
   if (size >= 3) roles.push('product_owner');
   if (size >= 5) roles.push('scrum_master');
   if (size >= 8) roles.push('cfo');
-  if (size >= 12) roles.push('documentation', 'research', 'coach', 'pr_coordinator');
+  // M3 D13 seed extras when seats allow (ON); otherwise ALWAYS_PRESENT keeps them OFF.
+  if (size >= 12) {
+    roles.push('ui_ux_designer', 'documentation', 'research', 'coach', 'pr_coordinator');
+  }
   return roles.slice(0, size);
 }
 
@@ -224,15 +232,7 @@ function scaleMix(mix: CompanyMix, slots: number): RoleKey[] {
 }
 
 function instructionsFor(seat: Seat, flowNames: string[]): string {
-  const flows = flowNames.length ? `You own these flows: ${flowNames.join(', ')}.` : 'No business flow is assigned yet.';
-  return [
-    `You are ${seat.roleTitle} in this product company.`,
-    `Department: ${seat.department}. Skills: ${seat.skills.join(', ')}.`,
-    flows,
-    'When you are OFF you are never invoked and you consume zero tokens.',
-    'You do not merge pull requests. The user approves every merge and every major proposal.',
-    'Write the smallest change that preserves existing behavior, and hand QA a concrete way to verify it.',
-  ].join(' ');
+  return composeInstructions(seat.roleKey, flowNames);
 }
 
 function layerFor(flow: FlowRef): 'frontend' | 'backend' | 'fullstack' {
@@ -273,7 +273,16 @@ export function assignFlowRows(agents: GeneratedAgent[], flows: FlowRef[]): { ow
   return { owners, assignments };
 }
 
-const ALWAYS_PRESENT: RoleKey[] = ['documentation', 'pr_coordinator'];
+/** M3 D13: always seeded; OFF when seats are full. */
+const ALWAYS_PRESENT: RoleKey[] = [
+  'ui_ux_designer',
+  'documentation',
+  'pr_coordinator',
+  'research',
+  'coach',
+  'red_team',
+  'blue_team',
+];
 
 export function generateCompany(input: GenerateCompanyInput): {
   agents: GeneratedAgent[];

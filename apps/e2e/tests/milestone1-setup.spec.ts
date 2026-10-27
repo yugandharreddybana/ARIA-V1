@@ -31,9 +31,10 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await page.getByTestId('open-org-chart').click();
 
   await expect(page.getByTestId('org-chart')).toBeVisible();
-  const ceo = page.locator('[data-testid^="agent-ceo"]');
-  await expect(ceo).toBeVisible();
-  await ceo.click();
+  // Prefer picker: denser D13 charts push nodes off-screen on tablet/mobile.
+  const ceoOption = page.locator('[data-testid="org-agent-picker"] option').filter({ hasText: 'Chief Executive Officer' });
+  await page.getByTestId('org-agent-picker').selectOption({ value: await ceoOption.getAttribute('value') as string });
+  const ceo = page.locator('[data-testid^="agent-ceo"]').first();
   await page.getByTestId('agent-instructions').fill('Own the company priorities. Stay off when disabled.');
   const save = page.waitForResponse((res) => res.url().includes('/agents/') && res.request().method() === 'PATCH' && res.ok());
   await page.getByTestId('save-agent').click();
@@ -52,7 +53,8 @@ test('signup through org chart with mock providers', async ({ page }) => {
   await added;
   const nora = page.getByRole('button', { name: /Nora Analyst/ });
   await expect(nora).toBeVisible();
-  await nora.click();
+  const noraOption = page.locator('[data-testid="org-agent-picker"] option').filter({ hasText: 'Nora Analyst' });
+  await page.getByTestId('org-agent-picker').selectOption({ value: await noraOption.getAttribute('value') as string });
   await page.getByTestId('agent-delete').click();
   const deleted = page.waitForResponse((res) => res.request().method() === 'DELETE' && res.ok());
   await page.getByTestId('agent-delete-confirm').click();

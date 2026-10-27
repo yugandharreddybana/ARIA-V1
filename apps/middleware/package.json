@@ -5,7 +5,7 @@
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "dev": "pnpm --filter @aria/shared --filter @aria/config --filter @aria/db build && tsx watch src/index.ts",
-    "build": "pnpm --filter @aria/shared --filter @aria/config --filter @aria/db build && tsc -p tsconfig.json",
+    "build": "pnpm --filter @aria/shared --filter @aria/config --filter @aria/db build && tsc -p tsconfig.json && mkdir -p dist/services/agentSkills && cp src/services/agentSkills/catalogue.generated.cjs src/services/agentSkills/catalogue.generated.d.cts dist/services/agentSkills/",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",

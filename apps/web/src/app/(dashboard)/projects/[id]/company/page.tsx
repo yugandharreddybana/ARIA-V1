@@ -72,6 +72,7 @@ const LAYERS = ['fullstack', 'frontend', 'backend'] as const;
 
 const ROLE_KEYS = [
   'ceo', 'cfo', 'cto', 'business', 'product_owner', 'scrum_master',
+  'ui_ux_designer',
   'frontend', 'backend', 'fullstack', 'junior', 'aiml', 'qa', 'devops',
   'cybersecurity', 'red_team', 'blue_team', 'research', 'coach',
   'documentation', 'pr_coordinator',
@@ -345,18 +346,40 @@ export default function CompanyPage() {
       )}
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div data-testid="org-chart" className="h-[32rem] rounded-lg border bg-card">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            fitView
-            nodesDraggable={false}
-            onNodeClick={(_event, node) => { setSelected(node.id); setConfirmDelete(false); }}
-          >
-            <Background />
-            <Controls showInteractive={false} />
-          </ReactFlow>
+        <div className="space-y-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="org-agent-picker">People</Label>
+            <select
+              id="org-agent-picker"
+              data-testid="org-agent-picker"
+              className="field"
+              value={selected ?? ''}
+              onChange={(event) => {
+                setSelected(event.target.value || null);
+                setConfirmDelete(false);
+              }}
+            >
+              <option value="">Select a person…</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id} data-testid={`org-agent-option-${agent.slug}`}>
+                  {agent.realName} — {agent.roleTitle}{agent.enabled ? '' : ' (OFF)'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div data-testid="org-chart" className="h-[32rem] rounded-lg border bg-card">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              fitView
+              nodesDraggable={false}
+              onNodeClick={(_event, node) => { setSelected(node.id); setConfirmDelete(false); }}
+            >
+              <Background />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          </div>
         </div>
 
         <aside className="space-y-4 rounded-lg border bg-card p-4" aria-label="Person details">

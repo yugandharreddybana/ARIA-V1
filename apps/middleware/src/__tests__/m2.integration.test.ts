@@ -201,7 +201,7 @@ describe('planner output, pull watcher, budget, and claim race', () => {
          FROM skills s WHERE s.project_id = $1 AND s.slug = 'ceo'`,
       [projectId],
     );
-    expect(instructions.rows[0].instructions).toContain('Do not merge');
+    expect(instructions.rows[0].instructions.toLowerCase()).toMatch(/do not merge|never merge/);
     expect(instructions.rows[0].enabled).toBe(3);
 
     const project2 = await request(app).post('/api/setup/project').set(owner.auth).send({ name: 'Generated Co' });
