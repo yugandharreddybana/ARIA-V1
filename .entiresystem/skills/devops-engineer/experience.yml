@@ -21,3 +21,6 @@ failure_stories:
     resolution: "Replace with `.aria/` (daemon-private runtime) gitignored; `.entiresystem/` committed. Added `.entiresystem/.gitignore` for narrow runtime artefacts only."
     veracity: human-authored
     captured_at: "2026-05-16T00:00:00Z"
+  - text: "docs(m3): Milestone 3 plan rev 3 — review fixes + ownership (#12) (sha 90d24e0)"
+    veracity: ai-only
+    captured_at: "2026-10-27T08:55:53.373Z"
