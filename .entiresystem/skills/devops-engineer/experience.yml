@@ -21,3 +21,6 @@ failure_stories:
     resolution: "Replace with `.aria/` (daemon-private runtime) gitignored; `.entiresystem/` committed. Added `.entiresystem/.gitignore` for narrow runtime artefacts only."
     veracity: human-authored
     captured_at: "2026-05-16T00:00:00Z"
+  - text: "docs(verify): regenerate M1 report after rename/archive asserts (sha ff9f489)"
+    veracity: ai-only
+    captured_at: "2026-10-27T09:16:47.571Z"
