@@ -5,7 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { AppError } from '../middleware/error.middleware';
 import type { CreateTicketRequest, IssueType, UpdateTicketRequest } from '@aria/shared';
 import { hasAcceptanceCriteria } from '@aria/shared';
-import { ceilFib, estimatePoints, splitSuggested } from './tickets/schedule';
+import { daysToPoints, estimatePoints, splitSuggested } from './tickets/schedule';
 import { appendTicketEvent } from './tickets/ticketEvents';
 import { applyTransition, approveTicket, assertHumanStatus, workCalendar } from './tickets/ticketActions';
 import { dueAt } from './tickets/schedule';
@@ -27,7 +27,7 @@ function asPaths(value: unknown): string[] {
 
 function resolvePoints(data: { storyPoints?: number; estimatedDays?: number; title: string; description: string }) {
   if (data.storyPoints != null) return { points: data.storyPoints, source: 'owner' as const };
-  if (data.estimatedDays != null) return { points: ceilFib(data.estimatedDays), source: 'ceilFib' as const };
+  if (data.estimatedDays != null) return { points: daysToPoints(data.estimatedDays), source: 'ceilFib' as const };
   return { points: estimatePoints(data.title, data.description), source: 'heuristic' as const };
 }
 
@@ -442,7 +442,7 @@ export async function updateTicket(
   if (data.description !== undefined) patch.description = sanitise(data.description, 5000);
 
   let nextPoints = data.storyPoints;
-  if (nextPoints == null && data.estimatedDays != null) nextPoints = ceilFib(data.estimatedDays);
+  if (nextPoints == null && data.estimatedDays != null) nextPoints = daysToPoints(data.estimatedDays);
   if (nextPoints !== undefined) {
     patch.storyPoints = nextPoints;
     patch.splitSuggested = splitSuggested(nextPoints);

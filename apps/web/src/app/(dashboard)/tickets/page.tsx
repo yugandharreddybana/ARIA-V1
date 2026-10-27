@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ticketFromSocket, safeHref, type Sprint, type Ticket, type TicketType, type TicketStatus } from '@aria/shared';
+import { hasAcceptanceCriteria, ticketFromSocket, safeHref, type Sprint, type Ticket, type TicketType, type TicketStatus } from '@aria/shared';
 import { PageErrorBoundary } from '@/components/ui/error-boundary';
 import { stageLabel, scheduleTone } from '@/lib/ticket-stage';
 import { rememberProject, rememberedProject } from '@/lib/project-selection';
@@ -68,6 +68,9 @@ function CreateTicketModal({ projectId, flows, onCreated, onClose }: CreateTicke
   const [flowId, setFlowId]     = useState('');
   const [layer, setLayer]       = useState('');
   const [points, setPoints]     = useState('');
+  const [given, setGiven]       = useState('');
+  const [when, setWhen]         = useState('');
+  const [then, setThen]         = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
 
@@ -76,6 +79,11 @@ function CreateTicketModal({ projectId, flows, onCreated, onClose }: CreateTicke
     setError('');
     if (!title.trim())       { setError('Title is required');       return; }
     if (!description.trim()) { setError('Description is required'); return; }
+    const acceptanceCriteria = [{ given: given.trim(), when: when.trim(), then: then.trim() }];
+    if (!hasAcceptanceCriteria(acceptanceCriteria)) {
+      setError('Given / When / Then acceptance criteria are required');
+      return;
+    }
     setLoading(true);
     try {
       const data = await api<{ ticket: Ticket }>('/tickets', {
@@ -85,6 +93,7 @@ function CreateTicketModal({ projectId, flows, onCreated, onClose }: CreateTicke
           title:       title.trim(),
           description: description.trim(),
           type,
+          acceptanceCriteria,
           ...(flowId ? { flowId } : {}),
           ...(layer ? { layer } : {}),
           ...(points ? { storyPoints: Number(points) } : {}),
@@ -165,6 +174,21 @@ function CreateTicketModal({ projectId, flows, onCreated, onClose }: CreateTicke
                 </select>
               </div>
             </div>
+            <fieldset className="space-y-2 rounded-md border p-3" data-testid="create-ac-fields">
+              <legend className="px-1 text-sm font-medium">Acceptance criteria</legend>
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-ac-given">Given</Label>
+                <Input id="ticket-ac-given" data-testid="create-ac-given" value={given} onChange={(e) => setGiven(e.target.value)} placeholder="a signed-in shopper" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-ac-when">When</Label>
+                <Input id="ticket-ac-when" data-testid="create-ac-when" value={when} onChange={(e) => setWhen(e.target.value)} placeholder="they click checkout" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-ac-then">Then</Label>
+                <Input id="ticket-ac-then" data-testid="create-ac-then" value={then} onChange={(e) => setThen(e.target.value)} placeholder="the order is placed" />
+              </div>
+            </fieldset>
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
                 Cancel
@@ -186,11 +210,12 @@ interface TicketCardProps {
   prNumber: number | null;
   blockedReason: string | null;
   live: boolean;
+  actionError?: string;
   onStatusChange: (id: string, status: TicketStatus) => void;
   onAction: (id: string, action: 'approve' | 'unblock') => void;
 }
 
-function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, onStatusChange, onAction }: TicketCardProps) {
+function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, actionError, onStatusChange, onAction }: TicketCardProps) {
   const typeColor = TYPE_COLORS[ticket.type as TicketType] ?? 'bg-muted text-muted-foreground';
   const next = NEXT_STATUS[ticket.status];
   const isAgentCreated = !!ticket.createdBySkillId;
@@ -224,6 +249,9 @@ function TicketCard({ ticket, agentName, prUrl, prNumber, blockedReason, live, o
       <p className="text-xs text-muted-foreground" data-testid="card-owner">Owner: {agentName}</p>
       {safeHref(prUrl) && <a className="text-xs text-primary" href={safeHref(prUrl) ?? undefined} target="_blank" rel="noreferrer">{prText}</a>}
       {blockedReason && <p className="text-xs">{blockedReason}</p>}
+      {actionError && (
+        <p role="alert" className="text-xs text-destructive" data-testid="ticket-action-error">{actionError}</p>
+      )}
       {ticket.description && (
         <p className="text-xs text-muted-foreground line-clamp-2">{ticket.description}</p>
       )}
@@ -264,6 +292,7 @@ function TicketsPage() {
   const [tickets,  setTickets]       = useState<Ticket[]>([]);
   const [loading,  setLoading]       = useState(false);
   const [error,    setError]         = useState('');
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const [showCreate, setShowCreate]  = useState(false);
   const [flows, setFlows]            = useState<FlowOption[]>([]);
   const [agents, setAgents]          = useState<AgentOption[]>([]);
@@ -421,6 +450,18 @@ function TicketsPage() {
 
   const handleAction = async (id: string, action: 'approve' | 'unblock') => {
     setError('');
+    setActionErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    const ticket = tickets.find((row) => row.id === id);
+    if (action === 'approve' && ticket && ticket.issueType !== 'epic' && !hasAcceptanceCriteria(ticket.acceptanceCriteria)) {
+      const message = 'Add Given/When/Then acceptance criteria before approving';
+      setActionErrors((prev) => ({ ...prev, [id]: message }));
+      setError(message);
+      return;
+    }
     try {
       const d = await api<{ ticket: Ticket }>(`/tickets/${encodeURIComponent(id)}`, {
         method: 'PATCH',
@@ -428,7 +469,9 @@ function TicketsPage() {
       });
       setTickets(prev => prev.map(t => t.id === id ? d.ticket : t));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'The ticket could not be updated.');
+      const message = err instanceof ApiError ? err.message : 'The ticket could not be updated.';
+      setActionErrors((prev) => ({ ...prev, [id]: message }));
+      setError(message);
     }
   };
 
@@ -527,6 +570,7 @@ function TicketsPage() {
                 prNumber={signal?.prNumber ?? null}
                 blockedReason={ticket.status === 'blocked' ? (signal?.blockedReason ?? ticket.statusReason ?? null) : null}
                 live={Boolean(signal?.live)}
+                actionError={actionErrors[ticket.id]}
                 onStatusChange={handleStatusChange}
                 onAction={handleAction}
               />
@@ -566,6 +610,7 @@ function TicketsPage() {
                         prNumber={signal?.prNumber ?? null}
                         blockedReason={t.status === 'blocked' ? (signal?.blockedReason ?? t.statusReason ?? null) : null}
                         live={Boolean(signal?.live)}
+                        actionError={actionErrors[t.id]}
                         onStatusChange={handleStatusChange}
                         onAction={handleAction}
                       />

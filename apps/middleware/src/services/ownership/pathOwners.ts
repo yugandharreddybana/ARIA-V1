@@ -221,6 +221,10 @@ export async function resolveTicketOwner(input: {
     pathOwnerId: null, handedOff: false, handoffReason: null,
   };
 
+  const pathOwners = input.predictedPaths.length || input.assigneeAgentId
+    ? await listPathOwners(input.projectId)
+    : [];
+
   if (input.assigneeAgentId) {
     const elig = await agentEligible(input.assigneeAgentId);
     if (elig.ok || input.ticketId === null) {
@@ -234,11 +238,67 @@ export async function resolveTicketOwner(input: {
         handoffReason: null,
       };
     }
+    // Explicit assignee OFF or over WIP → path/flow backup + handoff (Decision 12).
+    const reason: HandoffReason = elig.reason === 'off' ? 'owner_off' : 'wip_exceeded';
+    if (elig.reason === 'off' || (elig.reason === 'wip_exceeded' && allowBackupOnWip)) {
+      const pathHitForAssignee = mostSpecificOwner(pathOwners, input.predictedPaths)
+        ?? pathOwners.find((row) => row.owner_agent_id === input.assigneeAgentId)
+        ?? null;
+      let backupId: string | null = pathHitForAssignee?.backup_agent_id ?? null;
+      let pathOwnerId: string | null = pathHitForAssignee?.id ?? null;
+      let source: ResolveOwnerResult['ownershipSource'] = pathHitForAssignee ? 'path' : 'assignee';
+      let pathGlob: string | null = pathHitForAssignee?.path_glob ?? null;
+      if (!backupId && input.flowId) {
+        const flow = await getPgPool().query<{ agent_id: string; role: string; layer: string }>(
+          `SELECT agent_id, role, layer FROM flow_owners WHERE flow_id = $1::uuid`,
+          [input.flowId],
+        );
+        const wanted = input.layer ?? 'fullstack';
+        const same = flow.rows.filter((row) => row.layer === wanted);
+        const backup = same.find((row) => row.role === 'backup')
+          ?? flow.rows.find((row) => row.role === 'backup');
+        if (backup) {
+          backupId = backup.agent_id;
+          source = 'flow';
+          pathOwnerId = null;
+          pathGlob = null;
+        }
+      }
+      if (backupId && backupId !== input.assigneeAgentId) {
+        const backupElig = await agentEligible(backupId);
+        if (backupElig.ok) {
+          if (input.ticketId) {
+            await recordHandoff({
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              ticketId: input.ticketId,
+              pathOwnerId,
+              flowId: source === 'flow' ? input.flowId : null,
+              fromAgentId: input.assigneeAgentId,
+              toAgentId: backupId,
+              reason,
+              handoverMd: handoverDoc({
+                from: input.assigneeAgentId,
+                to: backupId,
+                reason,
+                paths: input.predictedPaths,
+                pathGlob,
+              }),
+            });
+          }
+          return {
+            agentId: backupId,
+            backupAgentId: backupId,
+            ownershipSource: source,
+            pathOwnerId,
+            handedOff: true,
+            handoffReason: reason,
+          };
+        }
+      }
+    }
   }
 
-  const pathOwners = input.predictedPaths.length
-    ? await listPathOwners(input.projectId)
-    : [];
   const pathHit = mostSpecificOwner(pathOwners, input.predictedPaths);
   if (pathHit) {
     const primary = await agentEligible(pathHit.owner_agent_id);

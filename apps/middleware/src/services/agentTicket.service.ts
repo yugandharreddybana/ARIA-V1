@@ -3,7 +3,7 @@ import { tickets, projects, skills } from '@aria/db';
 import { eq, and } from 'drizzle-orm';
 import { AppError } from '../middleware/error.middleware';
 import type { AcceptanceCriterion, IssueType, TicketType, TicketStatus } from '@aria/shared';
-import { ceilFib, estimatePoints, splitSuggested } from './tickets/schedule';
+import { daysToPoints, estimatePoints, splitSuggested } from './tickets/schedule';
 import { appendTicketEvent } from './tickets/ticketEvents';
 import { getPgPool } from './db.client';
 
@@ -72,7 +72,7 @@ export async function agentCreateTicket(params: AgentCreateTicketParams) {
   }
 
   const points = params.storyPoints
-    ?? (params.estimatedDays != null ? ceilFib(params.estimatedDays) : estimatePoints(params.title, params.description));
+    ?? (params.estimatedDays != null ? daysToPoints(params.estimatedDays) : estimatePoints(params.title, params.description));
 
   const [ticket] = await db
     .insert(tickets)

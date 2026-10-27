@@ -68,6 +68,9 @@ test('backlog, sprint, and story detail show AC, sub-tasks, and owner', async ({
   await page.fill('#ticket-title', 'Pay with card');
   await page.fill('#ticket-desc', 'Shopper pays with a saved card on checkout.');
   await page.getByTestId('ticket-points').selectOption('5');
+  await page.getByTestId('create-ac-given').fill('a signed-in shopper');
+  await page.getByTestId('create-ac-when').fill('they submit a card');
+  await page.getByTestId('create-ac-then').fill('the order is paid');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   const card = page.getByTestId('ticket-card').filter({ hasText: 'Pay with card' });
   await expect(card).toBeVisible({ timeout: 15_000 });

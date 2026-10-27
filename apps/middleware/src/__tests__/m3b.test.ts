@@ -3,6 +3,7 @@ import { acceptanceCriteriaZ, hasAcceptanceCriteria } from '@aria/shared';
 import {
   addWorkingDays,
   ceilFib,
+  daysToPoints,
   dueAt,
   isStoryPoint,
   sprintEndsOn,
@@ -26,20 +27,21 @@ const cal: WorkCalendar = {
   endMinutes: 18 * 60,
 };
 
-describe('ceilFib and sprint working days', () => {
-  it('ceils day estimates to Fibonacci points', () => {
-    expect(ceilFib(0.5)).toBe(1);
-    expect(ceilFib(1)).toBe(1);
-    expect(ceilFib(1.1)).toBe(2);
-    expect(ceilFib(4)).toBe(5);
-    expect(ceilFib(8)).toBe(8);
-    expect(ceilFib(9)).toBe(13);
-    expect(ceilFib(20)).toBe(13);
-    expect(isStoryPoint(ceilFib(3))).toBe(true);
+describe('daysToPoints and sprint working days', () => {
+  it('maps day estimates through the single daysToPoints function', () => {
+    expect(daysToPoints(0.5)).toBe(1);
+    expect(daysToPoints(1)).toBe(1);
+    expect(daysToPoints(1.1)).toBe(2);
+    expect(daysToPoints(4)).toBe(5);
+    expect(daysToPoints(8)).toBe(8);
+    expect(daysToPoints(9)).toBe(13);
+    expect(daysToPoints(20)).toBe(13);
+    expect(isStoryPoint(daysToPoints(3))).toBe(true);
+    expect(ceilFib(4)).toBe(daysToPoints(4));
   });
 
-  it('keeps due dates as 1 point = 1 working day after ceilFib', () => {
-    const points = ceilFib(4); // 5
+  it('keeps due dates as 1 point = 1 working day after daysToPoints', () => {
+    const points = daysToPoints(4); // 5
     expect(points).toBe(5);
     const monday = new Date('2026-10-05T09:00:00Z');
     const due = dueAt(monday, points, cal);

@@ -28,15 +28,20 @@ export function splitSuggested(points: number): boolean {
 }
 
 /**
- * Ceil a day estimate to the next Fibonacci story point.
- * Only for day→points conversion; stored points stay 1 pt = 1 working day.
+ * Single day→points mapping. Change this body when the owner confirms a different rule.
+ * Stored points stay 1 pt = 1 working day for schedule math.
  */
-export function ceilFib(days: number): StoryPoint {
+export function daysToPoints(days: number): StoryPoint {
   if (!Number.isFinite(days) || days <= 0) return 1;
   for (const point of STORY_POINTS) {
     if (days <= point) return point;
   }
   return 13;
+}
+
+/** @deprecated Prefer `daysToPoints` — kept as the ceilFib alias from M3_PLAN. */
+export function ceilFib(days: number): StoryPoint {
+  return daysToPoints(days);
 }
 
 /** Add N working days (Sat/Sun off by default via cal.workdays). Returns YYYY-MM-DD in cal timezone. */

@@ -248,6 +248,67 @@ describe('m3b jira hierarchy and ownership', () => {
     expect(verifyChain(await listTicketEvents(ticket.body.ticket.id, {})).ok).toBe(true);
   });
 
+  it('hands off to backup when owner is over WIP and logs ownership_handoff', async () => {
+    const owner = await signup(`m3b-wip-backup-${Date.now()}@aria.dev`);
+    const { projectId, agents } = await seedProject(owner.auth);
+    const fe = agents.find((row) => row.role_key === 'frontend') ?? agents[0]!;
+    const backup = agents.find((row) => row.id !== fe.id)!;
+
+    const holding = await request(app).post('/api/tickets').set(owner.auth).send({
+      projectId,
+      title: 'Holds WIP',
+      description: 'active slot',
+      type: 'feature',
+      storyPoints: 2,
+      assigneeAgentId: fe.id,
+      acceptanceCriteria: [{ given: 'g', when: 'w', then: 't' }],
+    });
+    await getPgPool().query(
+      `UPDATE tickets SET status = 'in_progress', human_approved = true WHERE id = $1::uuid`,
+      [holding.body.ticket.id],
+    );
+
+    await upsertPathOwnersFromMerge({
+      projectId,
+      agentId: fe.id,
+      ticketId: holding.body.ticket.id,
+      prNumber: 11,
+      paths: ['apps/web/src/pages/Cart.tsx'],
+      backupAgentId: backup.id,
+    });
+
+    const elig = await agentEligible(fe.id);
+    expect(elig.ok).toBe(false);
+    expect(elig.reason).toBe('wip_exceeded');
+
+    const ticket = await request(app).post('/api/tickets').set(owner.auth).send({
+      projectId,
+      title: 'Needs WIP backup',
+      description: 'Owner is over WIP',
+      type: 'feature',
+      storyPoints: 1,
+      assigneeAgentId: fe.id,
+      predictedPaths: ['apps/web/src/pages/Cart.tsx'],
+      acceptanceCriteria: [{ given: 'g', when: 'w', then: 't' }],
+    });
+    const resolved = await resolveTicketOwner({
+      workspaceId: owner.workspaceId,
+      projectId,
+      ticketId: ticket.body.ticket.id,
+      assigneeAgentId: fe.id,
+      flowId: null,
+      layer: 'frontend',
+      predictedPaths: ['apps/web/src/pages/Cart.tsx'],
+      allowBackupOnWip: true,
+    });
+    expect(resolved.agentId).toBe(backup.id);
+    expect(resolved.handedOff).toBe(true);
+    expect(resolved.handoffReason).toBe('wip_exceeded');
+    const events = await listTicketEvents(ticket.body.ticket.id, { eventType: 'ownership_handoff' });
+    expect(events.length).toBeGreaterThan(0);
+    expect(verifyChain(await listTicketEvents(ticket.body.ticket.id, {})).ok).toBe(true);
+  });
+
   it('enforces WIP=1 and logs user reassign handoff', async () => {
     const owner = await signup(`m3b-wip-${Date.now()}@aria.dev`);
     const { projectId, agents } = await seedProject(owner.auth);
