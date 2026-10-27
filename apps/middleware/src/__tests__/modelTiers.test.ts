@@ -6,6 +6,7 @@ import {
   CURSOR_AUTO_MODEL,
   CURSOR_TOP_MODEL,
   TASK_TYPES,
+  catalogModelIds,
   cursorWireSelection,
   defaultTierModels,
   resolveModelRoute,
@@ -14,6 +15,16 @@ import {
 } from '../services/modelTiers';
 
 describe('model tiers', () => {
+  it('reads string ids and object catalogs, including aliases', () => {
+    expect(catalogModelIds(['claude-opus-5', ' auto '])).toEqual(['claude-opus-5', 'auto']);
+    expect(catalogModelIds([{ id: 'claude-opus-5' }, { id: 'auto', aliases: ['auto-smart'] }])).toEqual([
+      'claude-opus-5',
+      'auto',
+      'auto-smart',
+    ]);
+    expect(catalogModelIds(null)).toEqual([]);
+  });
+
   it('sends planning to the top model and development to Auto', () => {
     for (const taskType of TASK_TYPES) {
       const route = resolveModelRoute({ provider: 'cursor', taskType });
