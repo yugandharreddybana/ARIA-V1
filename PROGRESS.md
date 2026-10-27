@@ -4,22 +4,18 @@
 > Pair with `MEMORY.md` (file index + decisions + anti-patterns) and `IMPLEMENTATION.md` (full 17-phase build plan).
 > Where this file or `v27_9.md` / `IMPLEMENTATION.md` disagree with `docs/PRODUCT_SPEC.md`, the product spec wins.
 
-## Verification of main @ 1b6e555 (2026-10-25)
+## Verification of main @ 2f5046a (2026-10-27)
 
-Branch `cursor/m1-e2e-verification-24f5`. Report: `docs/verification/M1_VERIFICATION.md` and `docs/verification/M1_VERIFICATION.pdf`. Base is `main` after the simplified UI (#8), the M2 plan (#7), and the M2 backend (#9).
+Branch `cursor/m1-e2e-verification-24f5`. Report: `docs/verification/M1_VERIFICATION.md` and a compressed `docs/verification/M1_VERIFICATION.pdf` (full-size screenshots are the CI artifact `m1-verification-screenshots`). Base is `main` after the simplified UI (#8), M2 plan (#7), M2 backend (#9), and M2 frontend (#11).
 
-Harness against the local stack (Compose Postgres 16 + pgvector and Redis; Java, middleware, and web on the host; `scripts/provider-stub.mjs` for live-mode providers): **133 pass, 6 fixed, 4 deferred, 0 fail**.
+Harness (local, before #11): **133 pass, 6 fixed, 4 deferred, 0 fail**. Project rename/archive shipped in #11; harness deferred rows are outdated relative to current main and were not re-run for this merge.
 
-Still applied, because `main` does not have them:
-- Signup and other API callers show the Zod field message from `details` (`messageFromApiBody`).
-- The web client refreshes an expired access token from the HttpOnly cookie (logout-safe, no redundant second refresh).
-- Middleware already treats `ANTHROPIC_ENABLED=false` as off; the unused `@aria/config` package was not changed.
+Still applied on top of main:
+- Signup/API callers use `messageFromApiBody` (details first).
+- Refresh-on-401 is logout-safe (`abandonSession` epoch), skips a redundant second refresh when the token already changed, matches `SKIP_REFRESH` on pathname, and is shared by `authorizedFetch` so `downloadApi` gets the same behavior.
+- `catalogModelIds` (single copy in `modelTiers.ts`) reads string and `{ id, aliases }` catalogs.
 
-Fixed on this merge: model-tier checks read a catalog stored as `{ id, aliases }` objects. After an agent run rewrote the catalog, an unknown id was saved. It is rejected again (HTTP 422), including on the 375px company page.
-
-Deferred on purpose: no project rename route, and the projects page has no edit or archive control. Left to the frontend PR. API archive works. Gemini and Groq success, a real Cursor key, Cursor chat completions, and real GitHub OAuth were not verifiable here.
-
-Suite after the merge: Vitest 25 files / 138 passed; Java 44 tests, 0 failures, 1 skipped; middleware, web, and config `tsc` passed; middleware and web lint passed; schema drift passed. Playwright whole tree, 3 viewports: **516 passed, 0 failed**, 6.7m.
+Suite after merging #11: Vitest middleware 29 files / 148 passed; web api tests 8 passed; Java 44/0/1 skipped; `tsc` middleware+web passed. Playwright `m1-validation-message` + `m1-session-refresh` × 3 viewports: 6 passed.
 
 ---
 
