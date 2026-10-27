@@ -77,8 +77,12 @@ async function signupApi(label) {
 async function apiSuite() {
   const health = await call('/api/health');
   record('Stack', 'middleware health', health.status === 200 && health.json?.status === 'healthy' ? 'pass' : 'fail', '', `HTTP ${health.status}`);
-  const java = await fetch('http://127.0.0.1:8080/api/health').then(async (res) => ({ status: res.status, json: await res.json() })).catch((err) => ({ status: 0, json: { error: String(err) } }));
-  record('Stack', 'Java backend health', java.status === 200 && java.json?.status === 'healthy' ? 'pass' : 'fail', '', `HTTP ${java.status}`);
+  if (process.env.M1_SKIP_JAVA === '1') {
+    record('Stack', 'Java backend health', 'deferred', '', 'M1_SKIP_JAVA=1 (e2e job has no Java process)');
+  } else {
+    const java = await fetch('http://127.0.0.1:8080/api/health').then(async (res) => ({ status: res.status, json: await res.json() })).catch((err) => ({ status: 0, json: { error: String(err) } }));
+    record('Stack', 'Java backend health', java.status === 200 && java.json?.status === 'healthy' ? 'pass' : 'fail', '', `HTTP ${java.status}`);
+  }
   const pg = await fetch('http://127.0.0.1:4010/v1/me').then((res) => res.status).catch(() => 0);
   record('Stack', 'provider stub /v1/me', pg === 200 ? 'pass' : 'fail', '', `HTTP ${pg}`);
 
